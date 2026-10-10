@@ -3,7 +3,36 @@
 Thank you for wanting to improve Ansari. Contributions of all kinds are welcome —
 bug reports, fixes, tests, documentation, and translations.
 
+## Filing an issue
+
+You don't need to write code to help — a clear report is a real contribution.
+[Open an issue](https://github.com/iaser-ai/ansari/issues/new/choose) and pick the
+form that fits:
+
+- **Bug report** — what happened, what you expected, the steps to reproduce it,
+  where you saw it (askansari.ai, the mobile app, the API, or a self-hosted
+  instance), and roughly when, with your timezone, so we can find the matching logs.
+- **Feature request** — start with the problem you are trying to solve and who it
+  affects, then any alternatives you considered. A proposed solution is welcome
+  but optional.
+
+If neither form fits, a blank issue is fine. For general questions, email
+`info@iaser.ai`.
+
+**Answer-accuracy issues should cite sources.** Ansari is an Islamic Q&A
+assistant, so accuracy and sourcing are the heart of the project. If an answer is
+wrong or misleading, include the exact question you asked and the evidence for
+what it should have said — the Qur'an ayah, hadith reference, or scholarly work.
+
+**Security vulnerabilities never go in a public issue** — see
+[Reporting security issues](#reporting-security-issues) below.
+
 ## Development setup
+
+You need **Node 22** (22.18 or newer; `.nvmrc` pins the major for `nvm use`).
+[`docs/self-hosting.md`](docs/self-hosting.md) covers prerequisites and the full
+environment contract, and [`apps/api/README.md`](apps/api/README.md) covers the
+backend in more depth.
 
 This is a **pnpm workspace** (`apps/api/` + `apps/frontend/`) driven by
 **[Turborepo](https://turborepo.com)**: install once at the repo root, then run
@@ -67,6 +96,15 @@ You can still target one package directly — `pnpm api lint`, `pnpm frontend we
 
 ## Pull requests
 
+- **Branch from `develop` and target `develop`** — not `main`. `main` is
+  production and is only ever fast-forwarded to `develop` during a release (see
+  [RELEASE.md](RELEASE.md)), so PRs against it can't be merged.
+- CI must be green before a PR can merge. `develop` requires the
+  `api (lint, typecheck, test, build)` and `gitleaks (secret scan)` checks; the
+  `auth` and `frontend` jobs run as well. The [Checks](#checks) above are the
+  same tasks, so passing them locally is a good predictor.
+- Stage files explicitly (`git add path/to/file`). Please don't use `git add -A`
+  or `git add .` — that is how stray files and secrets end up in commits.
 - Keep PRs focused: one change per PR.
 - Add or update tests for any behavior change. The Vitest suite
   (`tests/*.test.ts`) is the regression net.
@@ -78,4 +116,7 @@ You can still target one package directly — `pnpm api lint`, `pnpm frontend we
 
 ## Reporting security issues
 
-Do not open a public issue — see [SECURITY.md](SECURITY.md).
+**Please never report a vulnerability in a public issue, PR, or comment.** Use
+GitHub's [private vulnerability reporting](https://github.com/iaser-ai/ansari/security/advisories/new)
+("Report a vulnerability" under the repository's Security tab) so it can be fixed
+before it is disclosed. [SECURITY.md](SECURITY.md) has the full policy.

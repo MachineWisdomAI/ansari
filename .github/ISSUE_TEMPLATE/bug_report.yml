@@ -1,0 +1,75 @@
+name: Bug report
+description: Report something that isn't working as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to report this — it genuinely helps.
+
+        **Found a security vulnerability?** Please don't file it here. Use
+        [private vulnerability reporting](https://github.com/iaser-ai/ansari/security/advisories/new) instead.
+
+        Please don't paste secrets, tokens, or personal data into this form.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the problem. Screenshots and error messages are welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: >-
+        The smallest set of steps that triggers the problem. If it involved a question you asked
+        Ansari, include the exact question.
+      placeholder: |
+        1. Go to …
+        2. Ask …
+        3. See …
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where did you see it?
+      options:
+        - askansari.ai (web)
+        - Mobile app
+        - API
+        - Self-hosted
+    validations:
+      required: true
+  - type: input
+    id: when
+    attributes:
+      label: Approximately when did it happen?
+      description: Date, time, and timezone — this lets us find the matching logs.
+      placeholder: 2026-10-10 around 14:30 UTC+3
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Browser or OS
+      description: Where relevant — for self-hosted, the Node version and commit help too.
+      placeholder: Safari 18 on iOS 18, Chrome 130 on Windows 11, …
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else?
+      description: >-
+        Logs or other context. If the problem is an inaccurate answer, please cite the sources
+        (Qur'an ayah, hadith reference, scholarly work) that show what the answer should have been.
+    validations:
+      required: false

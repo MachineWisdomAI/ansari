@@ -1,0 +1,9 @@
+# Blank issues stay enabled on purpose: the forms are a guide, not a gate.
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/iaser-ai/ansari/security/advisories/new
+    about: Please report vulnerabilities privately here — never as a public issue.
+  - name: General question
+    url: mailto:info@iaser.ai
+    about: Questions about using or self-hosting Ansari are welcome by email.
