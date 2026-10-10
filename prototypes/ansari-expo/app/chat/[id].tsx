@@ -29,7 +29,10 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useColors } from '@/hooks/useColors';
 import { useDesktop } from '@/hooks/useDesktop';
-import { useKeyboardProgress } from '@/hooks/useKeyboard';
+import { onShellResize, useKeyboardProgress } from '@/hooks/useKeyboard';
+import { keepFootInView } from '@/lib/keyboard';
+import { createThreadFollow } from '@/lib/thread-follow';
+import { useRevealedText } from '@/hooks/useRevealedText';
 import { useSidebarInset } from '@/hooks/useSidebarCollapsed';
 import { openSidebarDrawer } from '@/hooks/useSidebarDrawer';
 import {
@@ -70,7 +73,7 @@ import {
 import { GlassCircleButton } from '@/components/GlassCircleButton';
 import { KeyboardAvoidingViewCompat } from '@/components/KeyboardAvoidingViewCompat';
 import { PressableScale } from '@/components/PressableScale';
-import { ThinkingLine } from '@/components/ThinkingLine';
+import { GeneratingMark, ThinkingLine } from '@/components/ThinkingLine';
 import {
   getGetConversationQueryKey,
   getListConversationsQueryKey,
@@ -79,7 +82,9 @@ import {
   type Message,
 } from '@/lib/api';
 import { reconcileThread } from '@/lib/chat-reconcile';
+import { answerWait } from '@/lib/chat-wait';
 import { traceReducer, type TraceEntry } from '@/lib/chat-trace';
+import { stripStreamingCitations } from '@/lib/citations';
 import { RADIUS, rounded } from '@/constants/radius';
 
 // Key held by the question carried in from the home screen, and then
@@ -92,6 +97,13 @@ const ECHO_ID = '__asked-question';
 // so the row updates in place instead of re-animating; the turn suffix keeps
 // successive answers from colliding. (Same identity trick as ECHO_ID.)
 const STREAM_KEY_PREFIX = '__streaming-answer-';
+
+// Per-turn list key for a follow-up typed into the thread (as opposed to the
+// carried-in `q`, which keeps ECHO_ID). Same identity trick, same reason: the
+// synthetic question row and the persisted copy it hands off to share one
+// key, so it renders the instant it's sent instead of waiting for the
+// post-`done` refetch, and never remounts when the refetch lands.
+const FOLLOWUP_KEY_PREFIX = '__followup-question-';
 
 /**
  * The measures the first lines of an answer are held open at while a
@@ -186,20 +198,64 @@ export default function ChatScreen() {
   // (no baseline) is deliberately distinct from `0` (a loaded, empty thread);
   // see lib/chat-reconcile.ts.
   const [streamingText, setStreamingText] = useState('');
+  // The answer exactly as the model has written it so far. What is shown
+  // (`streamingText`) is cleaned of unbacked citation text, and that cleaning
+  // is always redone over the whole raw text — never over the already-cleaned
+  // text, which has lost the context a "Citations:" heading cut depends on.
+  // Reset wherever `streamingText` is.
+  const rawStreamText = useRef('');
+  // A follow-up typed into the thread this turn, held here until the
+  // reconciler can hand it off to the server's persisted copy (see
+  // `landedFollowUp` / FOLLOWUP_KEY_PREFIX). The carried-in `q` never sets
+  // this — it already has ECHO_ID.
+  const [pendingFollowUp, setPendingFollowUp] = useState('');
+  const followUpKey = useRef('');
   const [trace, setTrace] = useState<TraceEntry[]>([]);
   const [keyOverrides, setKeyOverrides] = useState<Record<string, string>>({});
   const turnSeq = useRef(0);
   const streamKey = useRef('');
   const sentAtCount = useRef<number | null>(null);
   const listRef = useRef<FlatList<Message>>(null);
-  // A scroll to the foot of the thread, asked for before the content
-  // that justifies it has been laid out, and spent once it has.
-  const scrollPending = useRef(false);
-  // Whether the reader is reading the newest turn. Starts false so that
-  // opening an existing conversation lands at its beginning rather than
-  // jumping to the end of the last answer.
-  const atBottom = useRef(false);
+  // Whether the reader is on the newest turn, and whether the thread is
+  // following it down as it grows (see lib/thread-follow.ts). Its offset
+  // is the one last reported, for native, where the list cannot be asked
+  // for it; the web reads it off the element instead.
+  const [follow] = useState(createThreadFollow);
   const listHeight = useRef(0);
+
+  // A shorter list keeps its offset, so a reader on the newest turn
+  // would find its last lines slid under the composer: hand back
+  // exactly the height it lost (see `keepFootInView`).
+  const holdFoot = (height: number, offset: number) => {
+    const next = keepFootInView({
+      previousHeight: listHeight.current,
+      height,
+      offset,
+      atBottom: follow.atBottom,
+    });
+    listHeight.current = height;
+    if (next !== null) {
+      listRef.current?.scrollToOffset({ offset: next, animated: false });
+    }
+  };
+  const scroller = () =>
+    listRef.current?.getScrollableNode() as HTMLElement | undefined;
+
+  // On the web the keyboard shortens the shell in one step, and the
+  // list's own `onLayout` hears of it only a frame later — one frame of
+  // the newest lines cut off, then a snap. The shim says so inside the
+  // reshape itself, so the thread moves in the same frame as the shell.
+  // Latest-render closure through a ref: the subscription is made once.
+  const holdFootRef = useRef(holdFoot);
+  holdFootRef.current = holdFoot;
+  useEffect(
+    () =>
+      onShellResize(() => {
+        const node = scroller();
+        if (node) holdFootRef.current(node.clientHeight, node.scrollTop);
+      }),
+    [],
+  );
 
   const desktop = useDesktop();
   // The rail eats the left edge of the window; the thread insets by
@@ -279,13 +335,22 @@ export default function ChatScreen() {
     onEvent: (event) => {
       if (event.type === 'text') {
         if (typeof event.content === 'string') {
-          setStreamingText((prev) => prev + event.content);
+          // The streaming bubble has no citations to back its markers, so it
+          // is shown the way its persisted answer will be (lib/api/mappers).
+          rawStreamText.current += event.content;
+          setStreamingText(stripStreamingCitations(rawStreamText.current));
         }
       } else if (event.type === 'tool_call' || event.type === 'tool_result') {
         setTrace((prev) => traceReducer(prev, event));
       }
     },
   });
+
+  // What the synthetic bubble actually shows: `streamingText` written out
+  // at a steady pace rather than in whatever chunks the network delivered
+  // (lib/reveal.ts). Once the request has finished there is nothing left
+  // to pace against, so the remainder is hurried out.
+  const revealedText = useRevealedText(streamingText, !sendMessage.isPending);
 
   // A follow-up asked from the foot of a long thread must not be
   // answered off-screen, so sending one brings the waiting line into
@@ -307,13 +372,20 @@ export default function ChatScreen() {
     setFailedQuestion(null);
     turnSeq.current += 1;
     streamKey.current = `${STREAM_KEY_PREFIX}${turnSeq.current}`;
+    followUpKey.current = `${FOLLOWUP_KEY_PREFIX}${turnSeq.current}`;
     sentAtCount.current = conversationQuery.data.messages.length;
+    rawStreamText.current = '';
     setStreamingText('');
     setTrace([]);
+    // The carried-in question already renders under ECHO_ID; only a
+    // thread-typed follow-up needs the synthetic echo.
+    setPendingFollowUp(opening ? '' : content);
     sendMessage.mutate({ conversationId, data: { content } });
     // Scrolling now would race the waiting line's own layout. The
-    // request is parked and spent when the list reports its new size.
-    if (!opening) scrollPending.current = true;
+    // thread follows instead: each size the list reports from here —
+    // the question, the waiting line, every chunk of the answer — is
+    // answered with a scroll to its foot, until the reader scrolls away.
+    if (!opening) follow.follow();
   };
 
   // Auto-send the question passed from the home screen, exactly once,
@@ -338,20 +410,30 @@ export default function ChatScreen() {
   // bubble while text streams, and the landed-answer detection that drives
   // the `done` hand-off.
   const serverMessages = conversationQuery.data?.messages;
-  const { messages, landedAnswer } = useMemo(
+  const { messages, landedAnswer, landedFollowUp } = useMemo(
     () =>
       reconcileThread({
         serverMessages,
         q,
         conversationId,
         streamingText,
+        revealedText,
         streamKey: streamKey.current,
         sentAtCount: sentAtCount.current,
+        pendingFollowUp,
+        followUpKey: followUpKey.current,
       }),
-    // streamKey / sentAtCount are refs, current at each recompute; the
-    // reactive inputs are the ones listed.
+    // streamKey / followUpKey / sentAtCount are refs, current at each
+    // recompute; the reactive inputs are the ones listed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [serverMessages, q, conversationId, streamingText],
+    [
+      serverMessages,
+      q,
+      conversationId,
+      streamingText,
+      revealedText,
+      pendingFollowUp,
+    ],
   );
 
   // The row's stable list identity. On the `done` hand-off the landed
@@ -394,28 +476,52 @@ export default function ChatScreen() {
   // streaming state in the same commit — no duplicate, no gap. The landed
   // message also inherits the bubble's "already drawn" status, so the
   // in-place swap is not mistaken for new content and re-animated.
+  //
+  // The same commit gives a thread-typed follow-up's persisted copy the
+  // exact same durable treatment: without it, clearing `pendingFollowUp`
+  // here would make the row revert to its raw server id and re-animate as
+  // if it had just appeared.
+  //
+  // It waits for the reveal to catch up: swapping in the persisted answer
+  // while the bubble is still writing would drop the unwritten rest onto
+  // the page at once — the very jump the reveal exists to avoid. The
+  // wait is short, since the reveal hurries once the request is done.
   useEffect(() => {
-    if (streamingText && landedAnswer) {
+    if (streamingText && landedAnswer && revealedText === streamingText) {
       const key = streamKey.current;
       const id = landedAnswer.id;
-      setKeyOverrides((prev) =>
-        prev[id] === key ? prev : { ...prev, [id]: key },
-      );
+      setKeyOverrides((prev) => {
+        const next = prev[id] === key ? prev : { ...prev, [id]: key };
+        if (!landedFollowUp) return next;
+        const followUpId = landedFollowUp.id;
+        return next[followUpId] === followUpKey.current
+          ? next
+          : { ...next, [followUpId]: followUpKey.current };
+      });
       drawn.current?.add(key);
+      if (landedFollowUp) drawn.current?.add(followUpKey.current);
+      rawStreamText.current = '';
       setStreamingText('');
       setTrace([]);
+      setPendingFollowUp('');
     }
-  }, [streamingText, landedAnswer]);
+  }, [streamingText, revealedText, landedAnswer, landedFollowUp]);
 
-  // The thread is waiting on an answer while a follow-up is in flight,
-  // or while the question we arrived with has yet to be answered.
+  // The thread is waiting on an answer while a send is in flight, or
+  // while the question we arrived with is about to be sent. A thread that
+  // already ends on an unanswered question is offered a retry instead —
+  // it is never auto-sent, so a waiting line there would wait forever.
   const lastMessage = messages[messages.length - 1];
-  const awaitingAnswer =
-    sendMessage.isPending ||
-    (!!q &&
-      !sendMessage.isError &&
-      !conversationQuery.isError &&
-      lastMessage?.role === 'user');
+  const { awaitingAnswer, unansweredQuestion } = answerWait({
+    q,
+    serverMessages,
+    lastRole: lastMessage?.role,
+    sentThisSession: sentAtCount.current !== null,
+    sendPending: sendMessage.isPending,
+    sendFailed: sendMessage.isError,
+    threadFailed: conversationQuery.isError,
+  });
+  const retryQuestion = failedQuestion ?? unansweredQuestion;
 
   // Said out loud, because nothing else says it.
   //
@@ -468,6 +574,7 @@ export default function ChatScreen() {
   // desktop, the frosted bar on a phone, the browser tab on both.
   const threadTitle = conversationQuery.data?.title || q || '';
   const jumpToLatest = () => {
+    follow.follow();
     listRef.current?.scrollToEnd({ animated: true });
     setShowJumpToLatest(false);
   };
@@ -541,7 +648,7 @@ export default function ChatScreen() {
       <Animated.View style={[styles.flex, backSlide]}>
         {Platform.OS === 'web' && (
           <Head>
-            <title>{threadTitle ? `${threadTitle} — Ansari` : 'Ansari'}</title>
+            <title>{threadTitle ? `${threadTitle} · Ansari` : 'Ansari'}</title>
           </Head>
         )}
         {/* The inset is animated, so it sits on a wrapper of its own: the
@@ -653,8 +760,17 @@ export default function ChatScreen() {
                   // never loads trapped beneath it.
                   { paddingTop: threadContentTop(desktop, insets.top) },
                 ]}
+                // Not 'on-drag' on the web: react-native-web cannot tell a
+                // drag from any other scroll, and dismisses on every one —
+                // including the list keeping its foot in view as the
+                // keyboard makes room, which took focus straight back off
+                // the composer the reader had just tapped (#202).
                 keyboardDismissMode={
-                  Platform.OS === 'ios' ? 'interactive' : 'on-drag'
+                  Platform.OS === 'ios'
+                    ? 'interactive'
+                    : Platform.OS === 'web'
+                      ? 'none'
+                      : 'on-drag'
                 }
                 keyboardShouldPersistTaps="handled"
                 // Indicators are hidden by design, so none can ride under
@@ -663,18 +779,38 @@ export default function ChatScreen() {
                 onScroll={(event) => {
                   const { contentOffset, contentSize, layoutMeasurement } =
                     event.nativeEvent;
-                  const fromBottom =
-                    contentSize.height -
-                    layoutMeasurement.height -
-                    contentOffset.y;
-                  atBottom.current = fromBottom <= 160;
-                  setShowJumpToLatest(!atBottom.current);
+                  setShowJumpToLatest(
+                    follow.scrolled({
+                      offset: contentOffset.y,
+                      contentHeight: contentSize.height,
+                      viewportHeight: layoutMeasurement.height,
+                    }),
+                  );
                 }}
                 scrollEventThrottle={100}
-                onContentSizeChange={() => {
-                  if (!scrollPending.current) return;
-                  scrollPending.current = false;
-                  listRef.current?.scrollToEnd({ animated: true });
+                // Growth moves the foot without any scroll event saying so,
+                // so it is where the thread follows a turn being written —
+                // and where a reader not following learns they have been
+                // left behind.
+                onContentSizeChange={(_width, height) => {
+                  const node = Platform.OS === 'web' ? scroller() : undefined;
+                  const { scrollToEnd, showJump } = follow.grew(
+                    node
+                      ? {
+                          offset: node.scrollTop,
+                          contentHeight: node.scrollHeight,
+                          viewportHeight: node.clientHeight,
+                        }
+                      : {
+                          offset: follow.offset,
+                          contentHeight: height,
+                          viewportHeight: listHeight.current,
+                        },
+                  );
+                  if (scrollToEnd) {
+                    listRef.current?.scrollToEnd({ animated: true });
+                  }
+                  setShowJumpToLatest(showJump);
                 }}
                 onLayout={(event) => {
                   // The keyboard opening (and a window resize, and rotation)
@@ -682,26 +818,35 @@ export default function ChatScreen() {
                   // the newest turn would be left looking at the middle of
                   // it, with a "Latest" button offering to undo something
                   // they never did.
-                  const { height } = event.nativeEvent.layout;
-                  const shortened =
-                    listHeight.current > 0 && height < listHeight.current;
-                  listHeight.current = height;
-                  if (shortened && atBottom.current) {
-                    listRef.current?.scrollToEnd({ animated: false });
-                  }
+                  // On the web the keyboard's own reshape has usually been
+                  // answered already (`onShellResize`); this is what is
+                  // left — a window resize, a rotation, the eased
+                  // correction once the first keyboard is measured. The
+                  // element is read rather than the event, so both paths
+                  // measure the same box.
+                  const node = Platform.OS === 'web' ? scroller() : undefined;
+                  if (node) holdFoot(node.clientHeight, node.scrollTop);
+                  else holdFoot(event.nativeEvent.layout.height, follow.offset);
                 }}
                 // The waiting line sits beneath the question that prompted
                 // it, at the foot of the thread. It carries the live
                 // retrieval trace while the model searches; once the answer
                 // itself begins streaming, the trace is done its job and the
-                // line steps aside for the in-progress answer bubble.
+                // line steps aside for the in-progress answer bubble — with
+                // the mark alone beneath it for as long as the answer is
+                // still being written. The mark goes in the hand-off commit
+                // that clears `streamingText`, the same one that gives the
+                // answer back its Copy and Share, so the foot of the thread
+                // changes once rather than twice. A failure takes its place.
                 ListFooterComponent={
-                  awaitingAnswer && !streamingText ? (
+                  awaitingAnswer && !revealedText ? (
                     <ThinkingLine animate={!carriedInWait} trace={trace} />
-                  ) : failedQuestion ? (
+                  ) : revealedText && !failedQuestion ? (
+                    <GeneratingMark />
+                  ) : retryQuestion ? (
                     <SendFailure
-                      question={failedQuestion}
-                      onRetry={() => send(failedQuestion)}
+                      question={retryQuestion}
+                      onRetry={() => send(retryQuestion)}
                     />
                   ) : null
                 }
@@ -722,6 +867,9 @@ export default function ChatScreen() {
                       <AnswerMessage
                         message={item}
                         onSourcesOpen={openSources}
+                        generating={
+                          !!streamingText && item.id === streamKey.current
+                        }
                       />
                     )}
                   </Animated.View>

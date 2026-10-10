@@ -9,7 +9,7 @@ vi.mock('expo-secure-store', () => ({
   deleteItemAsync: vi.fn(),
 }));
 
-import { saveSession, type StoredSession } from '@/lib/auth/store';
+import { loadSession, saveSession, type StoredSession } from '@/lib/auth/store';
 
 const session: StoredSession = {
   accessToken: 'access-token',
@@ -65,5 +65,67 @@ describe('saveSession — web storage failures are loud', () => {
     await expect(saveSession(session)).resolves.toBeUndefined();
     expect(backing.get('ansari.accessToken')).toBe('access-token');
     expect(backing.get('ansari.refreshToken')).toBe('refresh-token');
+  });
+});
+
+/**
+ * Issue #208: a name blob persisted before `isGuest` existed has no such key.
+ * Defaulting it to `false` rendered a guest as a real account ("Welcome Guest"
+ * with a "Log out" button), so the guest registration name decides instead.
+ */
+describe('loadSession — isGuest inference from the stored blob', () => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+
+  afterEach(() => {
+    if (descriptor) {
+      Object.defineProperty(globalThis, 'localStorage', descriptor);
+    } else {
+      delete (globalThis as { localStorage?: unknown }).localStorage;
+    }
+  });
+
+  function storeNameBlob(nameBlob: Record<string, unknown>): void {
+    const backing = new Map<string, string>([
+      ['ansari.accessToken', 'access-token'],
+      ['ansari.refreshToken', 'refresh-token'],
+      ['ansari.userName', JSON.stringify(nameBlob)],
+    ]);
+    (globalThis as { localStorage?: unknown }).localStorage = {
+      setItem: (key: string, value: string) => backing.set(key, value),
+      getItem: (key: string) => backing.get(key) ?? null,
+      removeItem: (key: string) => backing.delete(key),
+    };
+  }
+
+  it('infers a guest from the guest registration name', async () => {
+    storeNameBlob({ firstName: 'Welcome', lastName: 'Guest' });
+    expect((await loadSession())?.isGuest).toBe(true);
+  });
+
+  it('keeps a real account when the name differs', async () => {
+    storeNameBlob({ firstName: 'Test', lastName: 'User' });
+    expect((await loadSession())?.isGuest).toBe(false);
+  });
+
+  it('needs both halves of the guest name', async () => {
+    storeNameBlob({ firstName: 'Welcome', lastName: 'User' });
+    expect((await loadSession())?.isGuest).toBe(false);
+  });
+
+  it('an explicit isGuest: true wins over a non-guest name', async () => {
+    storeNameBlob({ firstName: 'Test', lastName: 'User', isGuest: true });
+    expect((await loadSession())?.isGuest).toBe(true);
+  });
+
+  it('an explicit isGuest: false on a non-guest name stays a real account', async () => {
+    storeNameBlob({ firstName: 'Test', lastName: 'User', isGuest: false });
+    expect((await loadSession())?.isGuest).toBe(false);
+  });
+
+  // Issue #253: a stale blob with a LITERAL `isGuest: false` and the guest
+  // registration name must still load as a guest — `??` kept the `false`.
+  it('rescues a stale literal isGuest: false on the guest name', async () => {
+    storeNameBlob({ firstName: 'Welcome', lastName: 'Guest', isGuest: false });
+    expect((await loadSession())?.isGuest).toBe(true);
   });
 });

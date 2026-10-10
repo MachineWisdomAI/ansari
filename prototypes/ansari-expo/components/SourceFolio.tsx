@@ -7,12 +7,8 @@ import { openExternalLink } from '@/lib/link';
 import { PressableScale } from '@/components/PressableScale';
 import { toSuperscript } from '@/components/CitationChip';
 import type { Citation } from '@/lib/api';
-
-const SOURCE_LABEL: Record<string, string> = {
-  quran: "Qur'an",
-  hadith: 'Hadith',
-  scholarly: 'Scholarly work',
-};
+import { titleWithoutGrades } from '@/lib/document-citations';
+import { sourceKindLabel } from '@/lib/footnote-groups';
 
 /**
  * One source, set as a page from the book it came from — the app's
@@ -46,7 +42,7 @@ export function SourceFolio({ citation }: { citation: Citation }) {
             put a second hue in the folio, where the brass is meant to
             be the only one. */}
         <Text style={[styles.kind, { color: colors.mutedForeground }]}>
-          {SOURCE_LABEL[citation.sourceType] ?? citation.sourceType}
+          {sourceKindLabel(citation.sourceType)}
         </Text>
         <Text style={[styles.reference, { color: colors.strongForeground }]}>
           <Text style={[styles.marker, { color: colors.accent }]}>
@@ -55,9 +51,29 @@ export function SourceFolio({ citation }: { citation: Citation }) {
           </Text>
           {citation.reference}
         </Text>
-        <Text style={[styles.sourceTitle, { color: colors.mutedForeground }]}>
-          {citation.sourceTitle}
-        </Text>
+        {/* A hadith graded several times lists every verdict below, so
+            its title drops the one-line summary the pill shows. */}
+        {titleWithoutGrades(citation) !== '' && (
+          <Text style={[styles.sourceTitle, { color: colors.mutedForeground }]}>
+            {titleWithoutGrades(citation)}
+          </Text>
+        )}
+        {citation.grades && (
+          <View style={styles.grades} testID={`source-grades-${citation.marker}`}>
+            <Text style={[styles.gradesLabel, { color: colors.mutedForeground }]}>
+              Grades
+            </Text>
+            {citation.grades.map((grade, index) => (
+              <Text
+                key={index}
+                style={[styles.grade, { color: colors.mutedForeground }]}
+              >
+                {index + 1}.{'\u2002'}
+                {grade}
+              </Text>
+            ))}
+          </View>
+        )}
       </View>
 
       {citation.arabicText && (
@@ -175,6 +191,23 @@ const styles = StyleSheet.create({
   },
   // The work itself, in the italic a bibliography sets a title in.
   sourceTitle: {
+    fontSize: 13.5,
+    lineHeight: 19,
+    fontFamily: fonts.proseItalic,
+  },
+  // Every verdict, one to a line and packed as tight as the title above
+  // them: a list to scan, not a paragraph to read.
+  grades: {
+    marginTop: 6,
+  },
+  gradesLabel: {
+    fontSize: 10.5,
+    fontFamily: fonts.displayMedium,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 2,
+  },
+  grade: {
     fontSize: 13.5,
     lineHeight: 19,
     fontFamily: fonts.proseItalic,

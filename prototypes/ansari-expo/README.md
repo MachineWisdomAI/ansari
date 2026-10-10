@@ -27,8 +27,11 @@ End to end against `apps/api` (staging by default — see `lib/api/config.ts`):
   the vendored `@workspace/api-client-react`: same hook names, same schema
   types). `app/_layout.tsx` resolves the base URL from
   `resolveBaseUrl()` (`EXPO_PUBLIC_API_URL`, defaulting to staging).
-- `app/login.tsx` / `app/register.tsx` are back, rebuilt in the dark-mode
-  token language (`components/AuthForm.tsx`). `AuthProvider` is mounted in
+- Signing in is a sheet over the current screen (`components/AuthSheet.tsx`,
+  raised through `lib/authSheet.ts`): a bottom sheet on a phone, a centred
+  dialog on desktop, with Apple/Google buttons that are UI only for now.
+  `/login` and `/register` still work as links; they land on `/` with the
+  sheet open. `AuthProvider` is mounted in
   `_layout.tsx` and registers the bearer-token + 401-refresh bridges for
   both `custom-fetch` and the SSE path.
 - **Accountless by default, via an auto-provisioned guest.** `apps/api` has
@@ -37,7 +40,7 @@ End to end against `apps/api` (staging by default — see `lib/api/config.ts`):
   guest account and caches its credentials; after logging out of a real
   account it drops straight back to that guest. The reader never sees an auth
   screen unless they choose to: "Log in" in the sidebar / the desktop account
-  corner opens it as an optional upgrade, and a real account's name + "Log
+  corner raises the sign-in sheet as an optional upgrade, and a real account's name + "Log
   out" then shows in the rail colophon. (Every fresh browser/device mints one
   persistent staging account — acceptable for a throwaway prototype; see
   `lib/auth/guest.ts`.)
@@ -51,16 +54,6 @@ question → the answer streams in → open a past thread from the sidebar →
 register from "Log in" → the guest's questions are replaced by the new
 account's → log out → back to the guest → log back in → the account's thread
 is there.
-
-## Known gaps from the port
-
-- **Web fonts.** Native builds load the real Amiri/Inter/Literata faces via
-  `useAppFonts.ts` (`useFonts`). On web, `useAppFonts.web.ts` returns `true`
-  unconditionally — in the Replit source this was safe because
-  `public/index.html` preloaded real `@font-face` declarations for all three
-  families. That `public/` directory wasn't ported (it's Replit's own
-  hosting layer), so **the web build currently falls back to a system font**
-  until a repo-appropriate font-loading strategy is added.
 
 ## Quick start
 
@@ -131,7 +124,7 @@ still pass — they don't depend on anything this port changed.
 `lib/auth/` (secure token store, session context with refresh-on-401, guest
 login) is mounted by `app/_layout.tsx`'s `<AuthProvider>`. On startup with no
 stored session it auto-provisions a guest (see "Current state" above); the
-login / register screens (`components/AuthForm.tsx`) are an optional upgrade
+sign-in sheet (`components/AuthSheet.tsx`) is an optional upgrade
 to a real account. Tokens are held in `expo-secure-store` on native and
 `localStorage` on web; a 401 mid-request triggers one single-flight refresh,
 and a failed refresh drops back to the device's guest identity. The guest's
@@ -171,7 +164,7 @@ prototypes/ansari-expo/
   app/                       Expo Router screens (index, chat/[id], about,
                               login, register, _layout)
   components/                UI components (StyleSheet.create): sidebar, source
-                              panel, chat, chrome, auth form, shared primitives
+                              panel, chat, chrome, sign-in sheet, shared primitives
   constants/                 colors (incl. dark mode), motion, radius, layout tokens
   hooks/                     fonts, keyboard, color scheme, sidebar/source-panel state
   lib/                       design helpers (ambientNight, hijri, haptics, toast, ...)
@@ -179,7 +172,8 @@ prototypes/ansari-expo/
   lib/auth/                  token store, session context, auth API, guest login
   lib/chat-reconcile.ts,     the PIR #65 streaming reconciler, wired into
   lib/chat-trace.ts          app/chat/[id].tsx
-  lib/sample-citations.ts    sample citation data (consumed by lib/api/mappers.ts)
+  lib/document-citations.ts  apps/api /threads/{id}/documents (spec 168) → Citation[], resolving the model's [N] markers
+  lib/sample-citations.ts    khushu' fallback demo citations (consumed by lib/api/mappers.ts)
   lib/suggested-topics.ts    static suggested-questions list (consumed by lib/api/hooks.ts)
   assets/                    fonts, redrawn icons, ambient-shadow video
   vendor/api-client-react/   the imported orval client's runtime (custom-fetch.ts is reused)

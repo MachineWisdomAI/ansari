@@ -29,10 +29,12 @@ import {
 } from '@/hooks/useSidebarCollapsed';
 import { withAlpha } from '@/lib/color';
 import { tapHaptic } from '@/lib/haptics';
-import { confirmDestructive, showNotice } from '@/lib/notice';
+import { confirmDestructive } from '@/lib/notice';
 import { isHovered } from '@/lib/web';
 import { landmark } from '@/lib/semantics';
+import { railSectionLabel } from '@/lib/rail-search';
 import { useAuth } from '@/lib/auth/context';
+import { openAuthSheet } from '@/lib/authSheet';
 import { SearchField } from '@/components/SearchField';
 import { Placeholder, PlaceholderLine } from '@/components/Placeholder';
 import { AnsariMarkBrass } from '@/components/AnsariMarkBrass';
@@ -51,6 +53,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { RADIUS, rounded } from '@/constants/radius';
+import { ANSARI_MARK_EMBLEM_HEIGHT } from '@/constants/ansariMark';
 
 /**
  * The rail's gutter, the same in both states. Nothing inside it may
@@ -91,7 +94,7 @@ const ICON_COLUMN = SIDEBAR_COLLAPSED_WIDTH - RAIL_PAD * 2;
 const CONTENT_WIDTH = SIDEBAR_WIDTH - RAIL_PAD * 2;
 
 const RAIL_TOP = 22;
-const MARK_HEIGHT = 32;
+const MARK_HEIGHT = ANSARI_MARK_EMBLEM_HEIGHT;
 
 /**
  * The toggle's box, centred on the mark's own centre line so the two
@@ -271,24 +274,17 @@ export function Sidebar({
     );
   };
 
-  // Said plainly, and only what is true today: Ansari generates its
-  // answers, so the terms are about what that does and does not make
-  // them, not about a licence nobody reads.
-  const showTerms = () =>
-    showNotice(
-      'Terms of use',
-      'Ansari is a study aid, not a mufti. Its answers are generated and can be incomplete or mistaken, so treat each one as a pointer to the sources it cites: read the original text, and take anything consequential to a qualified scholar. The service is offered as it stands, and may change or pause while it is being built.',
-    );
-
-  const showPrivacy = () =>
-    showNotice(
-      'Privacy',
-      'Your question is sent to Ansari\u2019s answering service so it can be answered, and your conversations are kept so this list can show them. Until you sign in they sit on an automatic guest account for this device; sign in and they move to your account and follow you across devices. None of it is sold or used for advertising. Deleting a conversation removes it.',
-    );
-
+  // The sign-in sheet rises over the page rather than replacing it. On
+  // a phone the rail is itself an overlay on its way out, and a modal
+  // raised under one still leaving is two overlays fighting for the
+  // screen — so the sheet waits for the drawer to finish going.
   const goToLogin = () => {
-    onNavigate?.();
-    router.push('/login');
+    if (onNavigate) {
+      onNavigate();
+      setTimeout(() => openAuthSheet('login'), DURATION.exit);
+    } else {
+      openAuthSheet('login');
+    }
   };
 
   const signOut = async () => {
@@ -700,6 +696,7 @@ export function Sidebar({
                 onChangeText={setQuery}
                 placeholder="Search"
                 accessibilityLabel="Search questions"
+                onClear={() => setQuery('')}
                 style={styles.searchFieldReset}
               />
             </Animated.View>
@@ -718,7 +715,7 @@ export function Sidebar({
             <Text
               style={[styles.sectionLabel, { color: colors.mutedForeground }]}
             >
-              Questions
+              {railSectionLabel(query)}
             </Text>
 
             {conversationsQuery.isLoading ? (
@@ -754,8 +751,11 @@ export function Sidebar({
                 // search to read — in which case the keyboard should
                 // get out of the way — or opening a conversation, which
                 // must work on the first tap rather than being spent
-                // dismissing the keyboard.
-                keyboardDismissMode="on-drag"
+                // dismissing the keyboard. Not on the web, where
+                // react-native-web dismisses on every scroll, not only a
+                // drag — the list clamping its offset as a search filters
+                // it shorter would blur the search mid-word (#202).
+                keyboardDismissMode={Platform.OS === 'web' ? 'none' : 'on-drag'}
                 keyboardShouldPersistTaps="handled"
                 renderItem={({ item }: { item: Conversation }) => {
                   // A finger cannot hover, so a drawer's rows carry
@@ -1047,9 +1047,17 @@ export function Sidebar({
                     'about-button',
                   )}
                   {separator}
-                  {footerLink('Terms', showTerms, 'terms-button')}
+                  {footerLink(
+                    'Terms',
+                    () => router.push('/terms'),
+                    'terms-button',
+                  )}
                   {separator}
-                  {footerLink('Privacy', showPrivacy, 'privacy-button')}
+                  {footerLink(
+                    'Privacy',
+                    () => router.push('/privacy'),
+                    'privacy-button',
+                  )}
                 </View>
                 {/* The imprint is the quietest thing the rail says: half the
                     muted ink, so it sits under the links beside it rather

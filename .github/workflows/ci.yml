@@ -22,7 +22,7 @@ jobs:
 
       # No version input: pnpm/action-setup reads the exact version from the
       # root package.json "packageManager" field.
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -77,7 +77,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -119,7 +119,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -172,7 +172,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0   # scan full history
+          # Full history, so the push scan covers every commit on the branch. This
+          # also fetches every OTHER branch; gitleaks-scan.sh scopes the scan so
+          # an unmerged branch's finding can't fail unrelated PRs (#175).
+          fetch-depth: 0
 
       # Plain binary instead of gitleaks-action: the action requires a license
       # key for organization repos; the binary is free for all use. The tarball
@@ -188,5 +191,12 @@ jobs:
           tar -xzf gitleaks.tar.gz gitleaks
           sudo mv gitleaks /usr/local/bin/
 
+      # PR: only the PR's own commits (origin/<base>..HEAD). Push to main/develop:
+      # the full history of the pushed branch.
       - name: Scan
-        run: gitleaks detect --redact -v -c .gitleaks.toml
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: .github/scripts/gitleaks-scan.sh
+
+      - name: Regression test scan scoping (#175)
+        run: .github/scripts/gitleaks-scan.test.sh

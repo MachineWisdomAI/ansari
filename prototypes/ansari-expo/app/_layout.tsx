@@ -15,6 +15,7 @@ import { AccountChrome } from '@/components/AccountChrome';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { AmbientVideo } from '@/components/AmbientVideo';
 import { MessageActionSheet } from '@/components/MessageActionSheet';
+import { AuthSheet } from '@/components/AuthSheet';
 import { PaperBackground } from '@/components/PaperBackground';
 import { Sidebar } from '@/components/Sidebar';
 import { SidebarDrawer } from '@/components/SidebarDrawer';
@@ -207,22 +208,19 @@ function AppFrame({ children }: { children: React.ReactNode }) {
   // is already wearing the thread's surface and the cut changes only
   // what is written on it.
   const leaving = useAskExit();
-  // Login and register draw a centred form onto the shared paper — no
-  // rail, no account cluster, and no grain competing with the fields.
-  const authRoute =
-    path.startsWith('/login') || path.startsWith('/register');
   const reading =
     leaving ||
-    authRoute ||
     path.startsWith('/chat') ||
-    path.startsWith('/about');
+    path.startsWith('/about') ||
+    path.startsWith('/terms') ||
+    path.startsWith('/privacy');
 
   return (
     <PaperBackground
       // Grain is a texture for an empty page; under a full column of
-      // body text — an answer or the About page — it competes with the
-      // letterforms. The paper fades between the two rather than
-      // cutting — see `PaperBackground`.
+      // body text — an answer, About, Terms or Privacy — it competes
+      // with the letterforms. The paper fades between the two rather
+      // than cutting — see `PaperBackground`.
       grain={!reading}
     >
       {/* The palm shadow is cast *on* the paper, so it hangs here with
@@ -241,8 +239,8 @@ function AppFrame({ children }: { children: React.ReactNode }) {
       {/* One rail, two ways of standing. A desktop keeps it beside the
           page; a phone has no width to give it, so the same component
           arrives over the page and leaves again. */}
-      {!authRoute && (desktop ? <Sidebar /> : <SidebarDrawer />)}
-      {!authRoute && desktop && <AccountChrome />}
+      {desktop ? <Sidebar /> : <SidebarDrawer />}
+      {desktop && <AccountChrome />}
     </PaperBackground>
   );
 }
@@ -292,6 +290,8 @@ function RootLayoutNav() {
         <Stack.Screen name="index" />
         <Stack.Screen name="chat/[id]" />
         <Stack.Screen name="about" />
+        <Stack.Screen name="terms" />
+        <Stack.Screen name="privacy" />
         <Stack.Screen name="login" />
         <Stack.Screen name="register" />
       </Stack>
@@ -343,6 +343,10 @@ export default function RootLayout() {
                     sheet per message would be a modal in every row for
                     the sake of the one being held. */}
                 <MessageActionSheet />
+                {/* And signing in: a sheet over whatever the reader was
+                    looking at, raised from the account corner, the
+                    rail, or a `/login` / `/register` link. */}
+                <AuthSheet />
               </KeyboardProvider>
             </GestureHandlerRootView>
           </AuthProvider>
