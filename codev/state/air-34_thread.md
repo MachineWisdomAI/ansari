@@ -32,3 +32,11 @@ Several premises in #34 no longer hold. I followed the repo, not the issue text:
   `api (...)`. Stale since 046428f.
 - `.github/PULL_REQUEST_TEMPLATE.md` says to run checks from `apps/api/`; CONTRIBUTING says
   repo root.
+
+## PR
+PR #257 opened against `develop`; `pr` gate requested, architect notified. CMAP skipped
+(docs/config only). The branch base was ~120 commits behind `develop` and the PR came up
+CONFLICTING on `pnpm-lock.yaml`; merged `develop`, took its lockfile, re-added the 3-line
+`yaml` importer entry, re-verified frozen install + lint + typecheck + full test run.
+Unverified until merge: how the forms render in GitHub's chooser (forms only render from the
+default branch).
