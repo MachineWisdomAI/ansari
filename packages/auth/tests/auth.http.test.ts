@@ -80,6 +80,22 @@ describe('trusted origins carry the frontend Expo scheme', () => {
     expect(origins).not.toContain('askansari://');
   });
 
+  // Cross-config guard: whatever scheme apps/frontend/app.json declares must be
+  // trusted here, so changing the app's scheme without this package fails CI.
+  // Read by path (not imported) so tsconfig stays package-local; the manifest is
+  // a declared input of this package's turbo `test` task (packages/auth/turbo.json),
+  // or a warm cache would replay this test when only the manifest changes.
+  it("trusts apps/frontend/app.json's expo.scheme", () => {
+    const manifest = JSON.parse(
+      readFileSync(
+        fileURLToPath(new URL('../../../apps/frontend/app.json', import.meta.url)),
+        'utf8'
+      )
+    ) as { expo: { scheme: string } };
+    const origins = auth.options.trustedOrigins as string[];
+    expect(origins).toContain(`${manifest.expo.scheme}://`);
+  });
+
   it('accepts a sign-in bearing the ansarichat:// origin over HTTP', async () => {
     const res = await auth.handler(signInReq(BASE, 'ansarichat://'));
     expect(res.status).toBe(200);
