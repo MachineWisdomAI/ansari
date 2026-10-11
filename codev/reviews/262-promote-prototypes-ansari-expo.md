@@ -38,6 +38,7 @@ The prototype was imported as reference-only (#57) and kept there by the 2026-09
 - **Vendored Replit client** (owner request at dev-approval): the unused half is deleted (`generated/api.ts`, the barrel, the `@workspace/api-client-react` alias). `custom-fetch.ts` and `generated/api.schemas.ts` are still live, for #264.
 - **Scripts** (owner request): `ios` / `android` run `expo run:ios|android`; `ios:device` / `android:device` added.
 - **Docs**: the ported README is rewritten for the workspace, and the arch/lessons "prototype" sections are renamed "frontend".
+- **Native release path** (architect, from the #269 review): the README's EAS section no longer presents local `eas build` as the way to build. It points to RELEASE.md "Native builds and updates" (GitHub Actions → EAS, added by PR #269), keeps local `eas build` / `eas submit` labelled debugging-only, and keeps the warning that the production channel and `eas submit` reach real users. **The link resolves once #269 merges.**
 
 ## Shared surfaces for main
 

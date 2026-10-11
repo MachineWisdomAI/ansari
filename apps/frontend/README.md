@@ -171,17 +171,25 @@ The app builds on [EAS](https://expo.dev/eas) as `@ansari-project/ansari-chat`,
 with the legacy store app's identity (`legacy/frontend-app/app.json`): name
 "Ansari", bundle id / package `chat.ansari.app`, scheme `ansarichat`
 (`packages/auth`'s Better Auth `trustedOrigins` must carry the same scheme).
-Profiles in `eas.json`:
 
-| Profile | Use |
-|---|---|
-| `development` | Dev-client builds for simulators/devices (internal) |
-| `preview` | Internal preview builds |
-| `production-internal` | Production config, internal distribution |
-| `production` | Store builds (auto-incremented, remote credentials) |
+**Native builds and over-the-air updates go through GitHub Actions.** The
+workflows dispatch EAS Build / EAS Update for the profiles and channels in
+`eas.json`; see [RELEASE.md, "Native builds and updates"](../../RELEASE.md#native-builds-and-updates)
+(added by #268 / PR #269) for the profiles, the environments and who approves
+production.
 
-> ⚠️ `eas update --channel production` and `eas submit` reach real users.
-> Day-to-day work uses the `development` / `preview` profiles.
+> ⚠️ The `production` channel (`eas update --channel production`) and
+> `eas submit` reach real users. Day-to-day work uses `development` /
+> `preview`.
+
+**Debugging only — local EAS commands.** When you need to reproduce a build
+problem on your own machine, the CLI still works directly. It is not the
+supported release path:
+
+```bash
+eas build --profile development --platform ios   # local dispatch, debugging only
+eas submit --platform android --profile production   # reaches real users — don't, outside a release
+```
 
 `eas submit` (Play Store) needs `google-service-account/service-account.json`
 locally — gitignored, never committed.
