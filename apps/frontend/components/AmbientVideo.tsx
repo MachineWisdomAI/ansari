@@ -14,6 +14,7 @@ import { useScheme } from '@/hooks/useScheme';
 import { useDesktop } from '@/hooks/useDesktop';
 import { AMBIENT, EASE_IN_OUT_CSS, EASE_OUT_CSS } from '@/constants/motion';
 import { ambientTreatment, videoSurfaceType } from '@/lib/ambientNight';
+import { desktopClip, portraitClip } from '@/components/ambient-sources';
 
 // Two encodings of the same clip, because no single one plays
 // everywhere. H.264 MP4 is the universal choice — every phone decodes
@@ -24,10 +25,9 @@ import { ambientTreatment, videoSurfaceType } from '@/lib/ambientNight';
 //
 // Which of the two a browser is handed is decided by `webPrefersMp4`
 // below, and the order it asks in is the whole of the reasoning — see
-// the note there before changing it.
-const webmSource = require('@/assets/video/ambient-shadow.webm');
-const mp4Source = require('@/assets/video/ambient-shadow.mp4');
-const posterSource = require('@/assets/video/ambient-shadow-poster.jpg');
+// the note there before changing it. The clips themselves live in
+// `ambient-sources`, split by platform so a native build never bundles
+// a WebM (#273).
 
 // `Platform.OS` narrowed to the three targets the compositing rules in
 // `lib/ambientNight.ts` are written against; every other RN platform
@@ -36,15 +36,6 @@ const PLATFORM =
   Platform.OS === 'ios' || Platform.OS === 'android' ? Platform.OS : 'web';
 const API_LEVEL =
   Platform.OS === 'android' ? Number(Platform.Version) : undefined;
-
-// Desktop-width web gets a landscape twin so the shadow fills a wide
-// window without the hard cropping the portrait clip suffers. Web-only
-// (native is phone-only), and carried in both encodings for the same
-// reason the portrait clip is — desktop Safari is no more willing to
-// decode VP9 than the phone is.
-const desktopWebmSource = require('@/assets/video/ambient-shadow-desktop.webm');
-const desktopMp4Source = require('@/assets/video/ambient-shadow-desktop.mp4');
-const desktopPosterSource = require('@/assets/video/ambient-shadow-desktop-poster.jpg');
 
 /**
  * Which of the two web encodings this browser can actually play.
@@ -90,9 +81,9 @@ const webPrefersMp4 = (() => {
 
 /** The clip for this platform and width, in an encoding it can decode. */
 function ambientSource(desktop: boolean): number {
-  if (Platform.OS !== 'web') return mp4Source;
-  if (desktop) return webPrefersMp4 ? desktopMp4Source : desktopWebmSource;
-  return webPrefersMp4 ? mp4Source : webmSource;
+  if (Platform.OS !== 'web') return portraitClip.mp4;
+  const clip = desktop ? desktopClip : portraitClip;
+  return webPrefersMp4 || clip.webm === undefined ? clip.mp4 : clip.webm;
 }
 
 /**
@@ -356,7 +347,7 @@ export function AmbientVideo({ dismissed }: { dismissed: boolean }) {
 
   // Desktop-width web drifts the landscape twin; everything else keeps
   // the portrait clip. The poster stands in for whichever will mount.
-  const poster = desktop ? desktopPosterSource : posterSource;
+  const poster = (desktop ? desktopClip : portraitClip).poster;
   const source = ambientSource(desktop);
 
   // Day lays the clip straight onto the paper: the wall is close enough
