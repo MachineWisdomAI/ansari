@@ -140,6 +140,13 @@ jobs:
       - name: Typecheck
         run: pnpm exec turbo run typecheck --filter ansari-frontend...
 
+      # The app's vitest suite (lib/ components/ hooks/ constants/, jsdom +
+      # testing-library). It never ran in CI while the app lived outside the
+      # workspace in prototypes/ansari-expo (#262). The job name above stays
+      # frozen, so the required check now covers tests without a rename.
+      - name: Test
+        run: pnpm exec turbo run test --filter ansari-frontend...
+
       # This step exists for @ansari/types specifically — the one package under
       # packages/ with NO consumer, so it sits outside every app's dependency closure
       # and no `--filter <app>...` can reach it. `./packages/*` now puts four packages
