@@ -1,0 +1,14 @@
+id: '271'
+title: apps-frontend-remove-heroui-na
+protocol: air
+phase: implement
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-10-11T08:19:29.536Z'
+updated_at: '2026-10-11T08:19:29.537Z'
