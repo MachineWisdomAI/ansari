@@ -315,7 +315,7 @@ function matchEntry(entry: string, docs: ParsedDocument[]): number | null {
 const INLINE_MARKER = /( ?)\[(\d{1,4})\](?!\()/g;
 
 function numbered(
-  entries: Array<{ fields: CitationFields; index: number }>,
+  entries: { fields: CitationFields; index: number }[],
   messageId: string,
 ): Citation[] {
   return entries.map(({ fields, index }, i) => ({

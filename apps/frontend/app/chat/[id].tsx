@@ -425,7 +425,6 @@ export default function ChatScreen() {
       }),
     // streamKey / followUpKey / sentAtCount are refs, current at each
     // recompute; the reactive inputs are the ones listed.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       serverMessages,
       q,
@@ -714,7 +713,7 @@ export default function ChatScreen() {
                 <Text
                   style={[styles.errorText, { color: colors.mutedForeground }]}
                 >
-                  This conversation didn't load. Check your connection.
+                  This conversation didn&apos;t load. Check your connection.
                 </Text>
                 <PressableScale
                   onPress={() => conversationQuery.refetch()}

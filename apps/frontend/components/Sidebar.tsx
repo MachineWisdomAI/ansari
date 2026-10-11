@@ -5,7 +5,6 @@ import {
   StyleSheet,
   Text,
   View,
-  type StyleProp,
   type ViewProps,
   type ViewStyle,
 } from 'react-native';

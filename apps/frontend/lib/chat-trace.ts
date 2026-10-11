@@ -99,7 +99,7 @@ export interface SourceProgress {
  * (`TOOL_LABELS`, apps/api/lib/tools/resilience.ts); the Mawsuah is the
  * encyclopedia of fiqh.
  */
-export const SOURCE_CATALOGUE: ReadonlyArray<{ key: string; label: string }> = [
+export const SOURCE_CATALOGUE: readonly { key: string; label: string }[] = [
   { key: 'quran', label: "Qur'an" },
   { key: 'hadith', label: 'Hadith' },
   { key: 'mawsuah', label: 'Fiqh' },

@@ -19,7 +19,7 @@ import {
 
 /** Flatten a tree back to the characters a reader would see. */
 function textOf(nodes: Span[] | Block[]): string {
-  return (nodes as Array<Span | Block>)
+  return (nodes as (Span | Block)[])
     .map((node): string => {
       switch (node.type) {
         case 'text':
@@ -136,7 +136,7 @@ describe('headings', () => {
 });
 
 describe('emphasis', () => {
-  const cases: Array<[string, string, string]> = [
+  const cases: [string, string, string][] = [
     ['**bold**', 'bold', 'bold'],
     ['__bold__', 'bold', 'bold'],
     ['*italic*', 'italic', 'italic'],

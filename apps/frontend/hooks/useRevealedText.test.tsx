@@ -12,7 +12,7 @@ import { useRevealedText } from '@/hooks/useRevealedText';
 // A hand-driven frame clock: each `frames(n)` fires the pending callbacks
 // n times, 16ms apart.
 let now = 0;
-let queue: Array<{ id: number; cb: FrameRequestCallback }> = [];
+let queue: { id: number; cb: FrameRequestCallback }[] = [];
 let nextId = 1;
 
 beforeEach(() => {
@@ -47,7 +47,7 @@ function frames(n: number) {
 
 // Every render's (target, shown) pair — including the ones an effect
 // replaces before an assertion could look at `result.current`.
-let renders: Array<[string, string]> = [];
+let renders: [string, string][] = [];
 
 function setup(target: string, settled = false) {
   renders = [];

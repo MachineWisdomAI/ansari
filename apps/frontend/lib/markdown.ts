@@ -115,7 +115,6 @@ export function safeHref(href: string): string | null {
   // scheme past a naive prefix test (`java\nscript:`). Matching control
   // characters is the whole point of this test, so the usual warning about
   // them appearing in a pattern by accident does not apply.
-  // eslint-disable-next-line no-control-regex
   if (!trimmed || /[\s\u0000-\u001F\u007F]/.test(trimmed)) return null;
   return /^https?:\/\/[^/?#]/i.test(trimmed) ? trimmed : null;
 }

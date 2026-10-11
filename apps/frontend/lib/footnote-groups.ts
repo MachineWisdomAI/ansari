@@ -16,7 +16,7 @@ export interface FootnoteGroup {
   citations: Citation[];
 }
 
-const GROUPS: Array<{ kind: CitationSourceType; label: string }> = [
+const GROUPS: { kind: CitationSourceType; label: string }[] = [
   { kind: 'quran', label: "Qur'an" },
   { kind: 'hadith', label: 'Hadith' },
   { kind: 'scholarly', label: 'Scholarly works' },

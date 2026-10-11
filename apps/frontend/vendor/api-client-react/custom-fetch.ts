@@ -78,7 +78,7 @@ function resolveUrl(input: RequestInfo | URL): string {
   return input.url;
 }
 
-function mergeHeaders(...sources: Array<HeadersInit | undefined>): Headers {
+function mergeHeaders(...sources: (HeadersInit | undefined)[]): Headers {
   const headers = new Headers();
 
   for (const source of sources) {
