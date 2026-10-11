@@ -1,0 +1,41 @@
+# Over-the-air update on EAS. Dispatched by .github/workflows/eas-update.yml
+# (see RELEASE.md, "Native builds and updates"); can also be run by hand with
+# `eas workflow:run .eas/workflows/update.yml -F platform=all -F channel=preview`.
+#
+# `runtimeVersion: fingerprint` (app.json) decides which binaries an update
+# reaches: only builds whose native fingerprint matches this commit's.
+name: Update
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        type: choice
+        description: Platform to update
+        required: true
+        default: all
+        options:
+          - all
+          - ios
+          - android
+      channel:
+        type: choice
+        description: Update channel (matches the channels in eas.json)
+        required: true
+        default: preview
+        options:
+          - development
+          - preview
+          - production
+
+jobs:
+  update:
+    name: Publish update
+    type: update
+    environment: ${{ inputs.channel }}
+    params:
+      channel: ${{ inputs.channel }}
+      platform: ${{ inputs.platform }}
+      # Once Sentry exists on the frontend (it does not today), enable:
+      #   upload_sentry_sourcemaps: true
+      # so a failed sourcemap upload fails this job instead of being swallowed.

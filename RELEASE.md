@@ -224,3 +224,70 @@ SQL is applied while the previous deployment is still serving traffic.
   must be backward-compatible, so the previous code runs fine on the new
   schema. If a migration itself is bad, ship a corrective forward migration —
   never `db:push`.
+
+## Native builds and updates
+
+Native binaries and over-the-air updates for `apps/frontend` are produced on
+EAS, dispatched from GitHub Actions. No laptop is involved, and this is the
+only supported path. Each GitHub workflow is a thin dispatcher: it installs the
+workspace at the repo root (the EAS CLI evaluates the app config on the
+runner) and runs `eas workflow:run` on an EAS Workflow in
+`apps/frontend/.eas/workflows/`. Follow the run from the EAS URL printed in
+the dispatcher's last step. **EAS Build** goes green once EAS accepts the
+run, not once the build finishes. **EAS Update** runs with `--wait`, so
+it goes green only when the publish finishes, and fails if the publish fails.
+
+**Build:** Actions tab → **EAS Build** (`.github/workflows/eas-build.yml`) →
+*Run workflow* → pick `platform` (all | ios | android) and `profile`:
+
+| Profile | Produces | Update channel | GitHub Environment |
+|---|---|---|---|
+| `development` | dev-client build, internal distribution | `development` | `development` |
+| `preview` | release build, internal distribution | `preview` | `preview` |
+| `production-internal` | production build, internal distribution | `production` | `production` |
+| `production` | store build; build number auto-increments | `production` | `production` |
+
+**Update:** Actions tab → **EAS Update** (`.github/workflows/eas-update.yml`) →
+pick `platform` and `channel` (development | preview | production). The
+channel also names the EAS environment and the GitHub Environment.
+
+- **Build numbers are managed by EAS.** `eas.json` sets
+  `appVersionSource: remote`, so the iOS build number and Android version code
+  live on EAS, not in `app.json`. Only `production` auto-increments them.
+- **`runtimeVersion: fingerprint` decides which binaries an update reaches.**
+  An update is delivered only to builds on its channel whose native fingerprint
+  matches the commit it was published from. After any native change (a
+  dependency with native code, a config plugin, `app.json` native fields), ship
+  a new build first; an update alone reaches no one. The fingerprint contract
+  is tracked in #267.
+- **Concurrent dispatches queue, they never cancel** (`queue: max`, so every
+  pending run is kept). **Build** serializes the *dispatch* per
+  profile/platform pair, not the EAS build. The dispatcher does not wait, so
+  two builds of one pair can still run on EAS at the same time. **Update**
+  serializes per channel (all platforms) and waits for each EAS run, so
+  updates to a channel publish in dispatch order.
+
+**Token and Environments (prerequisite, not yet done).** No `EXPO_TOKEN`
+exists yet, and neither do the three Environments (the repo's existing
+Environments are Railway's). Do these steps **in this order**:
+
+1. **Create the GitHub Environments** `development`, `preview` and
+   `production`. Each gets a **deployment branch policy that allows only
+   `develop`**. `production` also gets **required reviewers**, so every
+   production build or update waits for a human approval.
+2. **Only then add the token.** Create an Expo **robot** access token with
+   access to the `ansari-project` / `ansari-chat` EAS project, and store it as
+   the `EXPO_TOKEN` secret in each of the three Environments.
+3. **Only then dispatch.** A dispatch that names an Environment which does not
+   exist yet auto-creates it **unprotected**, with no branch policy and no
+   reviewer. Dispatching before step 1 would therefore create exactly the
+   hole this setup closes.
+
+The branch policy is what makes the reviewer meaningful. A `workflow_dispatch`
+runs the *selected branch's own copy* of the workflow. Without a branch
+restriction, anyone who can push a branch can edit the dispatcher there,
+dispatch it against the `development` environment (no reviewer), and send the
+same token to `eas` with a production profile or channel. The production
+reviewer would never be asked. Restricting every Environment to `develop`
+means only reviewed workflow code ever receives the token. The dispatchers are
+the only place the token is used.
