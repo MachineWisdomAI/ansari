@@ -1,7 +1,7 @@
 id: '271'
 title: apps-frontend-remove-heroui-na
 protocol: air
-phase: pr
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -13,7 +13,7 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-10-11T08:19:29.536Z'
-updated_at: '2026-10-11T08:27:42.861Z'
+updated_at: '2026-10-11T08:27:44.680Z'
 pr_history:
   - phase: pr
     pr_number: 272
