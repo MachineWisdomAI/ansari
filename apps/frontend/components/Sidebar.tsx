@@ -46,7 +46,7 @@ import {
   useListConversations,
   type Conversation,
 } from '@/lib/api';
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, type ComponentProps } from 'react';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -184,7 +184,7 @@ export function Sidebar({
    * nothing behind it to frost, so the drawer arrives as a pane of
    * tinted cling film with the page legible straight through it.
    */
-  style?: StyleProp<ViewStyle>;
+  style?: ComponentProps<typeof Animated.View>['style'];
   /**
    * The reader has gone somewhere. A rail standing beside the page has
    * nothing to do here; a drawer over it has to get out of the way, or

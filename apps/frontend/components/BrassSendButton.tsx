@@ -275,7 +275,7 @@ const styles = StyleSheet.create({
     ...rounded(SIZE / 2),
   },
   disc: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     ...rounded(SIZE / 2),
     overflow: 'hidden',
     alignItems: 'center',
@@ -290,7 +290,7 @@ const styles = StyleSheet.create({
     width: 18,
   },
   rim: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     ...rounded(SIZE / 2),
   },
   glyph: {
@@ -298,7 +298,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   glyphLayer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
   },

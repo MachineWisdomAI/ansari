@@ -104,11 +104,11 @@ export function GlassCircleButton({
           <BlurView
             intensity={36}
             tint={scheme === 'dark' ? 'dark' : 'light'}
-            style={StyleSheet.absoluteFillObject}
+            style={StyleSheet.absoluteFill}
           />
           <View
             style={[
-              StyleSheet.absoluteFillObject,
+              StyleSheet.absoluteFill,
               styles.center,
               { backgroundColor: colors.glassButtonFill },
             ]}
@@ -118,7 +118,7 @@ export function GlassCircleButton({
           <View
             pointerEvents="none"
             style={[
-              StyleSheet.absoluteFillObject,
+              StyleSheet.absoluteFill,
               { backgroundColor: stateWash(state) },
             ]}
           />
@@ -141,7 +141,7 @@ export function GlassCircleButton({
         <View
           pointerEvents="none"
           style={[
-            StyleSheet.absoluteFillObject,
+            StyleSheet.absoluteFill,
             { backgroundColor: stateWash(state) },
           ]}
         />

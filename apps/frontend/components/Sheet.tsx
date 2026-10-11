@@ -439,13 +439,13 @@ const styles = StyleSheet.create({
   // Tinted per mode: a warm wash over paper by day, a deeper one over
   // charcoal at night, so a sheet never opens onto a black rectangle.
   backdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   backdropPress: {
     flex: 1,
   },
   sheetContainer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     justifyContent: 'flex-end',
   },
   // Desktop: the card centers with a scrim on every side.

@@ -103,7 +103,7 @@ export function SidebarDrawer() {
 
 const styles = StyleSheet.create({
   scrim: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     // Over the page, under the rail — which carries its own layer at
     // 30 — and under the toasts, which sit far above both: a notice
     // raised from inside the drawer still has to be readable.

@@ -75,11 +75,11 @@ export function PaperBackground({
 
   return (
     <View style={[styles.fill, { backgroundColor: colors.background }, style]}>
-      <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
+      <View style={StyleSheet.absoluteFill} pointerEvents="none">
         {Platform.OS === 'web' ? (
           <Animated.View
             style={[
-              StyleSheet.absoluteFillObject,
+              StyleSheet.absoluteFill,
               {
                 backgroundImage: `url(${grainUri})`,
                 backgroundRepeat: 'repeat',
@@ -99,7 +99,7 @@ export function PaperBackground({
             // by recolouring the speckle itself: the tile's alpha is
             // kept, its ink is replaced with the page's own light.
             tintColor={dark ? night.bright : undefined}
-            style={[StyleSheet.absoluteFillObject, grainFade]}
+            style={[StyleSheet.absoluteFill, grainFade]}
             fadeDuration={0}
           />
         )}

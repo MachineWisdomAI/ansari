@@ -457,7 +457,7 @@ export function AmbientVideo({ dismissed }: { dismissed: boolean }) {
   return (
     <Animated.View
       style={[
-        StyleSheet.absoluteFillObject,
+        StyleSheet.absoluteFill,
         ambientStyle,
         // Outside the drifting wrapper below, so the fade stays put
         // against the glass while the picture moves under it.
@@ -471,13 +471,13 @@ export function AmbientVideo({ dismissed }: { dismissed: boolean }) {
           clip rather than sliding against it. */}
       <Animated.View
         style={[
-          StyleSheet.absoluteFillObject,
+          StyleSheet.absoluteFill,
           reducedMotion ? null : maskDrift,
         ]}
       >
         <Image
           source={poster}
-          style={StyleSheet.absoluteFillObject}
+          style={StyleSheet.absoluteFill}
           contentFit="cover"
           transition={0}
         />
@@ -805,7 +805,7 @@ function AmbientVideoPlayer({
   return (
     <Animated.View
       ref={hostRef}
-      style={[StyleSheet.absoluteFillObject, videoStyle]}
+      style={[StyleSheet.absoluteFill, videoStyle]}
     >
       <VideoView
         player={player}
@@ -815,7 +815,7 @@ function AmbientVideoPlayer({
         // small over the filling poster. Explicit 100% sizing makes the
         // element itself fill so `contentFit: cover` can crop to the box.
         style={[
-          StyleSheet.absoluteFillObject,
+          StyleSheet.absoluteFill,
           { width: '100%', height: '100%' },
         ]}
         contentFit="cover"

@@ -225,11 +225,11 @@ function ComposerSurface({
           <BlurView
             intensity={30}
             tint={scheme === 'dark' ? 'dark' : 'light'}
-            style={StyleSheet.absoluteFillObject}
+            style={StyleSheet.absoluteFill}
           />
           <View
             style={[
-              StyleSheet.absoluteFillObject,
+              StyleSheet.absoluteFill,
               {
                 // The wash carries the whole value step on the web,
                 // where a nested blur has no backdrop to work on — so it

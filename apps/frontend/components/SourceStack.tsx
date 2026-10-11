@@ -325,12 +325,12 @@ const styles = StyleSheet.create({
   // the leaf's own mask used to fall — inside the rim, on the curve the
   // rim encloses.
   clip: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     ...rounded(RADIUS.lg - StyleSheet.hairlineWidth),
     overflow: 'hidden',
   },
   mark: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     borderLeftWidth: 2,
   },
 });

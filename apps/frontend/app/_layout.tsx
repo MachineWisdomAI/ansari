@@ -1,12 +1,6 @@
 import React, { useEffect } from 'react';
 import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
 import { ZodError } from 'zod';
-import {
-  DarkTheme,
-  DefaultTheme,
-  ThemeProvider,
-  type Theme,
-} from '@react-navigation/native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
@@ -26,10 +20,17 @@ import { useDesktop } from '@/hooks/useDesktop';
 import { useScheme } from '@/hooks/useScheme';
 import { SCREEN_FADE_MS } from '@/constants/motion';
 import { useAskExit } from '@/lib/askExit';
-import { Stack, usePathname } from 'expo-router';
+import {
+  DarkTheme,
+  DefaultTheme,
+  Stack,
+  ThemeProvider,
+  usePathname,
+  type Theme,
+} from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import * as SystemUI from 'expo-system-ui';
-import * as NavigationBar from 'expo-navigation-bar';
+import { NavigationBar } from 'expo-navigation-bar';
 import { StatusBar } from 'expo-status-bar';
 import { ApiError, setBaseUrl } from '@/lib/api';
 import { resolveBaseUrl } from '@/lib/api/config';
@@ -170,9 +171,9 @@ function NativeChrome() {
     if (Platform.OS === 'android') {
       // Edge-to-edge draws the page under a transparent bar, so only the
       // gesture pill / button icons need to be flipped for the mode.
-      NavigationBar.setButtonStyleAsync(
-        scheme === 'dark' ? 'light' : 'dark',
-      ).catch(() => {});
+      // expo-navigation-bar 57 replaced setButtonStyleAsync with the
+      // synchronous static setStyle; same mapping (style = button colour).
+      NavigationBar.setStyle(scheme === 'dark' ? 'light' : 'dark');
     }
   }, [colors.background, scheme]);
 
