@@ -1,0 +1,14 @@
+id: bugfix-273
+title: apps-frontend-android-eas-buil
+protocol: bugfix
+phase: investigate
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-10-11T09:19:44.400Z'
+updated_at: '2026-10-11T09:19:44.401Z'
