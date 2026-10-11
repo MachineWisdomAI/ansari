@@ -18,3 +18,21 @@
 - Owner confirmed version 4.0.0.
 - Architect correction: packages/auth trustedOrigins hard-codes askansari:// (+ tests) — added to phase 2; grep now repo-wide.
 - main agreed auth hunk ships here; conditions added: also reject askansari:// in tests; PR body 'Shared surfaces for main' heading.
+
+## 2026-10-11 — implement phase
+
+- Plan approved (owner, 07:06). Commits: move (430db88) → workspace join + app config (a5c090e)
+  → 4 upgrade fixes (e51a7f6) → lint (fc78165) → auth scheme (0f33a14) → Dockerfile/CI (b679a56)
+  → docs (39bc873).
+- Identity per owner: legacy/frontend-app (name Ansari, scheme ansarichat), version 4.0.0.
+  packages/auth trustedOrigins follows the scheme; main reviewed 0f33a14, no changes.
+- Found while doing the auth hunk: the "accepts <scheme>:// over HTTP" test is vacuous under vitest
+  (Better Auth skipOriginCheck = isTest()). Filed by main as #266; left as is here.
+- Verified: expo install --check clean; turbo lint (0 err / 49 warn), typecheck, test (44 files,
+  606 tests), build; expo config resolves legacy identity + 4 plugins; headless CDP walk of dist/
+  and of the Docker image (/, /about, /terms, /privacy, /chat/:id, not-found) with no error
+  boundary; ask flow streams from api-staging, 24 footnote markers — same count as staging (SDK 54).
+- Not verifiable by me: native device behaviour (reanimated motion, keyboard-controller, glass/blur,
+  Android nav bar) — dev-approval UX pass.
+- Carried verbatim, worth noting: lib/auth/store.ts comment says guest credentials are stored the
+  "throwaway prototype" way (plaintext guest password); now product code — candidate for #264.
