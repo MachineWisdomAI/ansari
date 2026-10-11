@@ -18,7 +18,7 @@ The prototype was imported as reference-only (#57) and kept there by the 2026-09
 
 ### The move and workspace join
 - `git mv` of `app/ components/ constants/ hooks/ lib/ vendor/ public/ scripts/`, assets, and configs into `apps/frontend/`. The scaffold's two placeholder screens are deleted.
-- `package.json`: the scaffold manifest is untouched at the d676e30 versions. The prototype's packages are added at the versions `npx expo install` picks for SDK 57 (`--check` clean; keyboard-controller lands at 1.21.9, Expo's pick). Runtime deps go in `dependencies`. Dropped: the `@expo/cli` pin, `@expo/ngrok`, `@babel/core`, `@react-navigation/native`. Package name `ansari-frontend` unchanged.
+- `package.json`: the scaffold manifest is untouched at the d676e30 versions. The prototype's packages are added at the versions `npx expo install` picks for SDK 57 (`--check` clean; keyboard-controller lands at 1.21.9, Expo's pick). Runtime deps go in `dependencies`. Dropped: the `@expo/cli` pin, `@expo/ngrok`, `@babel/core`, `@react-navigation/native`, and (integration review) `expo-image-picker` and `expo-location`, which have zero imports. Package name `ansari-frontend` unchanged.
 - `tsconfig.json`: scaffold `extends` + prototype `paths`; **no `baseUrl`**, because TS 6 rejects it (TS5101). `metro.config.js` keeps `withUniwindConfig`. `babel.config.js` drops `unstable_transformImportMeta`, which babel-preset-expo 57 no longer reads; the transform is on by default.
 - `expo-env.d.ts` is untracked (both `.gitignore`s ignore it; the committed `types.d.ts` carries the reference).
 - Root `prototype` script removed; root `pnpm-lock.yaml` is the only workspace lockfile; `pnpm -r list` still shows 7 packages.
@@ -31,23 +31,24 @@ The prototype was imported as reference-only (#57) and kept there by the 2026-09
 5. **`composerBottomPad` marked `'worklet'`** (`constants/layout.ts`). Both screens call it inside `useAnimatedStyle`. On native: "[Worklets] Tried to synchronously call a Remote Function". This one was **pre-existing since #121**: the #245 lessons record native aborting at launch on SDK 54 with a UI-thread worklet throw, and worklets 0.10 now names it. An AST scan of every worklet body found no other unmarked calls.
 
 ### Identity decision (owner, at the plan gate)
-`app.json` takes the **legacy store app's identity** from `legacy/frontend-app/app.json`: name **"Ansari"**, owner `ansari-project`, slug `ansari-chat`, **scheme `ansarichat`**, `chat.ansari.app`, EAS project `e2f465a7-…`, updates URL, fingerprint runtime policy, `extra.router.origin: false`. **Version `4.0.0`** (confirmed by the owner). Functional config comes from the prototype: `newArchEnabled`, light/dark splash, two-layer adaptive icon, `web.output: single`, plugins exactly `expo-router`, `expo-font`, `expo-web-browser`, `expo-video`, `experiments`. `eas.json` unchanged. This overrides the issue's "f396356 verbatim" for `name` and `scheme`. Because Better Auth validates the native `expo-origin`, `packages/auth`'s `trustedOrigins` moves from `askansari://` to `ansarichat://`.
+`app.json` takes the **legacy store app's identity** from `legacy/frontend-app/app.json`: name **"Ansari"**, owner `ansari-project`, slug `ansari-chat`, **scheme `ansarichat`**, `chat.ansari.app`, EAS project `e2f465a7-…`, updates URL, fingerprint runtime policy, `extra.router.origin: false`. **Version `4.0.0`** (confirmed by the owner). Functional config comes from the prototype: `newArchEnabled`, light/dark splash, two-layer adaptive icon, `web.output: single`, plugins `expo-router`, `expo-font`, `expo-web-browser`, `expo-video` **plus `expo-secure-store`**, `experiments`. **This overrides the issue's "exactly four plugins":** the integration review requires the `expo-secure-store` config plugin for its Android backup-exclusion rules, so tokens and the guest password are not restored into another install from a device backup. `eas.json` unchanged. This overrides the issue's "f396356 verbatim" for `name` and `scheme`. Because Better Auth validates the native `expo-origin`, `packages/auth`'s `trustedOrigins` moves from `askansari://` to `ansarichat://`.
 
 ### Also
 - **Lint**: `@ansari/eslint-config` + `eslint-config-expo` 57. 161 errors → 0 (49 warnings). 128 of those errors were a duplicated `export *` pair in the vendored barrel. Scoped override: the four react-hooks v7 React Compiler rules (`set-state-in-effect` 12, `refs` 9, `immutability` 3, `globals` 2) are set to `warn` with a comment pointing at #264.
 - **Vendored Replit client** (owner request at dev-approval): the unused half is deleted (`generated/api.ts`, the barrel, the `@workspace/api-client-react` alias). `custom-fetch.ts` and `generated/api.schemas.ts` are still live, for #264.
 - **Scripts** (owner request): `ios` / `android` run `expo run:ios|android`; `ios:device` / `android:device` added.
-- **Docs**: the ported README is rewritten for the workspace, and the arch/lessons "prototype" sections are renamed "frontend".
+- **Docs**: the ported README is rewritten for the workspace (its fixes table lists all five fixes), and the arch/lessons "prototype" sections are renamed "frontend".
 - **Native release path** (architect, from the #269 review): the README's EAS section no longer presents local `eas build` as the way to build. It points to RELEASE.md "Native builds and updates" (GitHub Actions → EAS, added by PR #269), keeps local `eas build` / `eas submit` labelled debugging-only, and keeps the warning that the production channel and `eas submit` reach real users. **The link resolves once #269 merges.**
 
 ## Shared surfaces for main
 
 | Surface | Change |
 |---|---|
-| `packages/auth/src/index.ts`, `packages/auth/tests/auth.http.test.ts` | `trustedOrigins` `askansari://` → `ansarichat://` + comment; tests trust `ansarichat://` and reject both `ansari://` and `askansari://`. Reviewed by main at 0f33a14. The vacuous HTTP origin test is #266 (main's), left as is. |
+| `packages/auth/src/index.ts`, `packages/auth/tests/auth.http.test.ts` | `trustedOrigins` `askansari://` → `ansarichat://` + comment; tests trust `ansarichat://` and reject both `ansari://` and `askansari://` (reviewed by main at 0f33a14). **New cross-config test:** reads `apps/frontend/app.json` by path and asserts `trustedOrigins` contains `${expo.scheme}://`. The vacuous HTTP origin test is #266 (main's), left as is. |
+| `packages/auth/turbo.json` (new) | `extends: ["//"]`; `tasks.test.inputs` = `$TURBO_DEFAULT$`, `.env.ci`, `$TURBO_ROOT$/apps/frontend/app.json`, so a manifest-only change busts the auth test's cache. Cache evidence below. |
 | `turbo.json` | **Not touched.** `test`, `gen:types` and its edges, `EXPO_PUBLIC_*` in `globalEnv` already fit. |
 | `pnpm-lock.yaml` | Regenerated: +1294 / −77 (the prototype's dependency tree). The #265 expo-router 58 peer duplicate is left alone. |
-| `.github/workflows/ci.yml` | Frontend job gains `Test` (`turbo run test --filter ansari-frontend...`) between Typecheck and Build; job name `frontend (lint, typecheck)` unchanged. |
+| `.github/workflows/ci.yml` | Frontend job gains `Test` (`turbo run test --filter ansari-frontend...`) between Typecheck and Build; job name `frontend (lint, typecheck)` unchanged. The job comment is corrected: this check **is** required on `develop` (branch protection lists it), so a rename must change the job name and branch protection together. |
 | `apps/frontend/Dockerfile.web` | The eleven legacy `EXPO_PUBLIC_*` ARGs are replaced by `EXPO_PUBLIC_API_URL`. `build:web` keeps its `gen:types &&` chain. |
 | root `package.json` | `prototype` script removed. |
 | `codev/resources/*` | arch.md: section renamed + new "frontend app" paragraph (identity, scheme ↔ auth coupling, env surface, Uniwind wired-unused). arch-critical: map line renamed. lessons-learned: "— prototype" sections renamed "— frontend" + a new #262 section. lessons-critical: map lines renamed; the spec 48 line also covers #262. |
@@ -120,7 +121,18 @@ The prototype was imported as reference-only (#57) and kept there by the 2026-09
 - `turbo run typecheck --filter ansari-frontend...`: ✓ (`gen:types` runs under the graph)
 - `turbo run test --filter ansari-frontend...`: ✓ 45 files / 611 tests (the prototype's 44 files, now in CI, plus `lib/worklets.test.ts`)
 - `turbo run build --filter ansari-frontend...`: ✓; `turbo run lint typecheck --filter './packages/*'`: ✓
-- `turbo run test --filter @ansari/auth`: ✓ 8/8. Negative-tested: with the source back on `askansari://` it fails 1/8.
+- `turbo run test --filter @ansari/auth`: ✓ 9/9. Negative-tested: with the source back on `askansari://` it fails 1/8 (before the cross-config test), and with `app.json` `expo.scheme` set to `ansaritest` the cross-config test fails: `expected [ 'http://localhost:3100', …(3) ] to include 'ansaritest://'`, 1 failed / 8 passed.
+- **Turbo cache negative test for `packages/auth/turbo.json`** (`turbo run test --filter @ansari/auth`, local worktree cache):
+
+  | Step | Result |
+  |---|---|
+  | 1. baseline | cache hit `dc66d273d053813a` |
+  | 2. rerun | cache hit `dc66d273d053813a` |
+  | 3. `app.json` `expo.scheme` → `ansaritest` | **cache miss** `abf8f185b588f3d8`; the test runs and fails (above) |
+  | 4. reverted | cache hit `dc66d273d053813a` |
+  | 5. counterfactual: `packages/auth/turbo.json` removed, baseline | cache miss `3f642741b201ff3c` |
+  | 6. counterfactual: scheme → `ansaritest` | **cache hit** `3f642741b201ff3c`; the guard is replayed, not run (the hole the input closes) |
+  | 7. restored (turbo.json + app.json) | cache hit `dc66d273d053813a` |
 - `npx expo config --type public`: name Ansari, slug `ansari-chat`, scheme `ansarichat`, version 4.0.0, `chat.ansari.app`, project `e2f465a7-…`, the four plugins.
 - `docker build -f apps/frontend/Dockerfile.web .` (repo root): ✓. The image serves an `index.html` byte-identical to the local export, and `/terms`, `/chat/abc`, `/no-such-page` fall through Caddy to the SPA.
 - Live-tree grep for `prototypes/ansari-expo` (excluding `codev/{specs,plans,reviews,state,projects}`): **0** hits; on the pre-move tree 7f71806: **6** hits in 5 files (`package.json`, `arch.md`, `arch-critical.md`, the prototype README ×2, `retime-ambient.sh`).
@@ -159,7 +171,7 @@ The prototype was imported as reference-only (#57) and kept there by the 2026-09
 - **Fix 2 (Android) is type-checked, not exercised.** No Android run was done.
 - **`app/chat/[id].tsx:717`**: `didn't` → `didn&apos;t` for `react/no-unescaped-entities`; the rendered text is identical.
 - **React Compiler rules at `warn`** (`eslint.config.mjs`): 26 sites. These mark components the compiler skips, not runtime errors; restoring them to errors is #264.
-- **Carried verbatim, now product code**: `lib/auth/store.ts:12` says guest credentials are stored the "throwaway prototype" way (plaintext guest password in storage). Not changed here; worth an issue.
+- **`lib/auth/store.ts` comment rewritten** (integration review): it no longer calls this throwaway prototype code. Web stores tokens and the guest password in `localStorage` (script-reachable); that is a known gap tracked in #264. Behaviour unchanged.
 - **`legacy/*` lockfiles** (`legacy/frontend-app/package-lock.json`, `legacy/frontend-web/{package-lock.json,yarn.lock}`) predate this PR and sit outside the workspace; "only lockfile" holds for the workspace.
 - **Comments inside moved code** still say "prototype" in a few places (`lib/api/config.ts`, `lib/auth/guest.ts`, …). They were left verbatim; #264 territory.
 
