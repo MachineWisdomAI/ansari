@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -66,6 +66,11 @@ describe('bundled assets per platform (#273)', () => {
 
   it('bundles no WebM into Android', () => {
     expect(requiredAssets('android').filter((a) => a.endsWith('.webm'))).toEqual([]);
+  });
+
+  it('requires only assets that exist, on either platform', () => {
+    const assets = new Set([...requiredAssets('android'), ...requiredAssets('web')]);
+    expect([...assets].filter((a) => !existsSync(path.join(appRoot, a)))).toEqual([]);
   });
 
   it('still gives the web both encodings of both clips', () => {
