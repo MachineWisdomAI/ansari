@@ -36,11 +36,15 @@ on:
           - production-internal
           - production
 
-# Queue, never cancel: a cancelled dispatcher can leave an EAS run half-started
-# (and `production` consumes an auto-incremented build number).
+# Queue every dispatch, never cancel one: a cancelled dispatcher can leave an
+# EAS run half-started (and `production` consumes an auto-incremented build
+# number). `queue: max` keeps all pending runs; GitHub's default keeps one and
+# cancels the earlier pending run. This serializes the DISPATCH only: the job
+# does not wait, so EAS builds for one profile/platform can still overlap.
 concurrency:
   group: ${{ github.workflow }}-${{ inputs.profile }}-${{ inputs.platform }}
   cancel-in-progress: false
+  queue: max
 
 permissions:
   contents: read

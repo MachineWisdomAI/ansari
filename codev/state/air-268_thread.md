@@ -14,3 +14,13 @@
 - Choices: dispatchers do not `--wait` (green = EAS accepted the run); eas-cli pinned to
   24.12.1 rather than `latest`. Legacy `legacy/frontend-web/package.json` still has
   `eas build` scripts — legacy code, left alone.
+- Review round (architect + main): added `queue: max` to both dispatchers; update now
+  groups by channel only, `--wait`s, timeout 60; build comment/doc says it serializes the
+  dispatch, not the EAS build. RELEASE.md prerequisite now ordered: create Environments
+  (develop-only branch policy on all three, reviewers on production) → add token →
+  dispatch (a missing Environment is auto-created UNPROTECTED); explains the branch-policy
+  reason (dispatch runs the selected branch's own workflow).
+- actionlint 1.7.12 (latest, 2026-03) predates `concurrency.queue` and flags it; ran it with
+  only that message ignored (clean otherwise). Validated both dispatchers with
+  check-jsonschema against SchemaStore's current github-workflow schema (has `queue`
+  single|max): ok; negative `queue: maximum` rejected.

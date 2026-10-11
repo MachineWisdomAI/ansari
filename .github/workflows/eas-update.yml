@@ -3,7 +3,8 @@ name: EAS Update
 # Dispatches the EAS Workflow apps/frontend/.eas/workflows/update.yml. The update
 # itself runs on EAS; this job only installs the workspace (the EAS CLI
 # evaluates the app config on this runner) and hands the run off. Follow it
-# from the EAS run URL printed in the last step. See RELEASE.md, "Native
+# from the EAS run URL printed in the last step; the job waits for the EAS
+# run and fails if it fails. See RELEASE.md, "Native
 # builds and updates".
 #
 # The expo-github-action `token:` input is the ONLY place EXPO_TOKEN is used.
@@ -34,10 +35,15 @@ on:
           - preview
           - production
 
-# Queue, never cancel: two updates to one channel must land in dispatch order.
+# Queue every dispatch, never cancel one: updates to one channel must land in
+# dispatch order. Grouped by channel alone (any platform), with `queue: max` so
+# GitHub keeps every pending run instead of cancelling the earlier one, and the
+# job `--wait`s for the EAS run, so the next update starts only after this one
+# has finished publishing.
 concurrency:
-  group: ${{ github.workflow }}-${{ inputs.channel }}-${{ inputs.platform }}
+  group: ${{ github.workflow }}-${{ inputs.channel }}
   cancel-in-progress: false
+  queue: max
 
 permissions:
   contents: read
@@ -49,7 +55,8 @@ jobs:
     name: dispatch EAS update (${{ inputs.platform }}, ${{ inputs.channel }})
     runs-on: ubuntu-latest
     environment: ${{ inputs.channel }}
-    timeout-minutes: 15
+    # Covers install plus the waited-on EAS update run, including EAS queue time.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -77,5 +84,5 @@ jobs:
           PLATFORM: ${{ inputs.platform }}
           CHANNEL: ${{ inputs.channel }}
         run: >-
-          eas workflow:run .eas/workflows/update.yml --non-interactive
+          eas workflow:run .eas/workflows/update.yml --non-interactive --wait
           -F "platform=$PLATFORM" -F "channel=$CHANNEL"
