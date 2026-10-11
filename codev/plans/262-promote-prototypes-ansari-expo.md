@@ -132,8 +132,8 @@ One PR, phases as commits (`[PIR #262][Phase: implement] …`).
   on all of these except `name` ("Ask Ansari") and `scheme` (`askansari`). Legacy wins on both,
   so existing `ansarichat://` links keep reaching the successor app.
   **`version`** is a store marketing number, not an identifier. Legacy ships 3.5.0; I keep
-  f396356's `4.0.0`, its successor version (build numbers are remote, per `eas.json`).
-  Tell me if it should be 3.5.0. From the scaffold I also keep
+  f396356's `4.0.0`, its successor version (build numbers are remote, per `eas.json`),
+  confirmed by the owner at the plan gate. From the scaffold I also keep
   `android.predictiveBackGestureEnabled: false`. Legacy-only plugins (Sentry,
   expo-localization, expo-screen-orientation, expo-build-properties) and `extra.criticalIndex`
   / `supportsRTL` are runtime features of the old app, not identity, and are not carried. Functional config from
