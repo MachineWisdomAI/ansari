@@ -1,7 +1,7 @@
 id: '262'
 title: promote-prototypes-ansari-expo
 protocol: pir
-phase: review
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -21,7 +21,7 @@ iteration: 1
 build_complete: true
 history: []
 started_at: '2026-10-11T06:53:06.748Z'
-updated_at: '2026-10-11T08:14:08.378Z'
+updated_at: '2026-10-11T08:14:10.174Z'
 pr_history:
   - phase: review
     pr_number: 270
