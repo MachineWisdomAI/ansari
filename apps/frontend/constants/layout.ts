@@ -225,8 +225,16 @@ export function threadContentTop(
     : safeAreaTop + CHROME_TOP + CHROME_BUTTON + CHROME_CLEARANCE;
 }
 
-/** Padding below the composer, on both screens, with the keyboard away. */
+/**
+ * Padding below the composer, on both screens, with the keyboard away.
+ *
+ * A worklet because both screens call it inside `useAnimatedStyle`, which
+ * runs on the UI thread: an unmarked function there throws on native
+ * ("Tried to synchronously call a Remote Function"), which web never shows.
+ * Still callable from plain JS.
+ */
 export function composerBottomPad(safeAreaBottom: number): number {
+  'worklet';
   return safeAreaBottom + 10;
 }
 
