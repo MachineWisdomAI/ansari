@@ -82,15 +82,15 @@ sidebar → sidebar collapses/expands (desktop) or opens as a drawer (narrow
 width) → open the source panel from a citation → "Log in" (rail or account
 corner) → About page.
 
-### Uniwind / HeroUI: installed, wired, unused
+### Uniwind: installed, wired, unused
 
-`heroui-native`, `uniwind` and Tailwind are dependencies, `metro.config.js`
-wraps the config in `withUniwindConfig` (CSS entry `src/global.css`), and the
-`gen:types` task generates `uniwind-types.d.ts` (gitignored; `types.d.ts`
-and `uniwind-env.d.ts` are committed). The UI itself is `StyleSheet`-only,
-and `app/_layout.tsx` deliberately does **not** import `src/global.css`:
-Tailwind's preflight reset would restyle it on the web. Adopting them is
-issue #264.
+`uniwind` and Tailwind are dependencies, `metro.config.js` wraps the config
+in `withUniwindConfig` (CSS entry `src/global.css`), and the `gen:types` task
+generates `uniwind-types.d.ts` (gitignored; `types.d.ts` and
+`uniwind-env.d.ts` are committed). The UI itself is `StyleSheet`-only, and
+`app/_layout.tsx` deliberately does **not** import `src/global.css`:
+Tailwind's preflight reset would restyle it on the web. Adopting Uniwind
+for new UI is a separate product decision.
 
 ## What is left of the vendored Replit client
 
