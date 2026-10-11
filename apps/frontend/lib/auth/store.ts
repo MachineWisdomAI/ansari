@@ -4,13 +4,15 @@ import * as SecureStore from 'expo-secure-store';
 import { GUEST_FIRST_NAME, GUEST_LAST_NAME } from '@/lib/auth/guest';
 
 /**
- * Persistent storage for the session's REAL staging credentials.
+ * Persistent storage for the session's credentials (tokens, and the device's
+ * guest email + password).
  *
  * - Native (iOS/Android): `expo-secure-store` (Keychain / Keystore).
- * - Web: `localStorage`. SecureStore is unavailable on web; localStorage is
- *   XSS-reachable in principle. That is acceptable HERE only because these are
- *   staging credentials in a throwaway prototype — do NOT carry this pattern
- *   into the real app (see README).
+ * - Web: `localStorage`. SecureStore is unavailable on web, and localStorage is
+ *   reachable by any script that runs on the page (XSS). This was written for
+ *   the prototype; it is product code since #262 and the web storage of
+ *   tokens and the guest password is a KNOWN GAP, tracked in #264. Do not
+ *   extend the pattern to new secrets.
  *
  * Tokens are never logged. Access and refresh tokens are stored under separate
  * keys (a single JSON blob of both can exceed SecureStore's per-item size cap on

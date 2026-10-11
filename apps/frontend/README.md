@@ -151,7 +151,7 @@ guest account rather than minting a new staging user each time. See
 ## The SDK 54 → 57 port (issue #262)
 
 Pages and components moved verbatim from the SDK 54 prototype, except
-for four changes the upgrade forced:
+for five changes the upgrade forced or exposed:
 
 | Change | Why |
 |---|---|
@@ -159,6 +159,7 @@ for four changes the upgrade forced:
 | `NavigationBar.setButtonStyleAsync` → `NavigationBar.setStyle` | removed in expo-navigation-bar 57; it would throw on Android launch |
 | `ThemeProvider`, themes and `useIsFocused` imported from `expo-router` | expo-router 57 vendors react-navigation; the separate `@react-navigation/native` package is a different context (error boundary on web) |
 | `Sidebar`'s `style` prop typed as `Animated.View`'s | reanimated 4.5 typing |
+| `composerBottomPad` (`constants/layout.ts`) marked `'worklet'` | both screens call it inside `useAnimatedStyle`, which runs on the UI thread on native; unmarked, it threw "Tried to synchronously call a Remote Function". Pre-existing since #121; `lib/worklets.test.ts` now scans every worklet body for unmarked calls |
 
 The React Compiler lint rules from eslint-config-expo 57 are warnings for
 now (see `eslint.config.mjs`); fixing them is part of #264.
