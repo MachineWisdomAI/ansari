@@ -26,3 +26,14 @@ needs and the other does not belongs in that app.
 // an app that already extends a framework base — order matters, later wins
 { "extends": ["expo/tsconfig.base", "@ansari/tsconfig/base.json"] }
 ```
+
+## Exports
+
+`package.json` declares an `exports` map, the same way `@ansari/eslint-config` does,
+so the two shared config packages resolve by one rule. The key is `./base.json`
+**with** the extension: TypeScript resolves `extends` through the map, and a key
+that does not match the specifier exactly breaks every consumer's `extends` chain
+(`TS6053: File '@ansari/tsconfig/base.json' not found`).
+
+A second config file therefore needs its own `exports` entry before anything can
+extend it.
