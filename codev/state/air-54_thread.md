@@ -27,3 +27,9 @@ So the map is live (TypeScript does resolve through it) and a wrong key is loud.
 Full run: typecheck 6/6, lint 5/5 (7 pre-existing api warnings, 0 errors), api tests
 763 passed / 3 skipped, builds for api / auth / frontend all green (run sequentially
 with the `.env.ci` dummy env, as CI does).
+
+## 2026-10-10 — pr
+
+PR #258 opened against `develop`; review is in the PR body. CMAP skipped (config-only
+change). Porch `build` check needs `apps/api/.env.ci` loaded in the calling shell —
+same worktree env gap air-57 and air-87 recorded. Waiting at the `pr` gate.
