@@ -36,3 +36,4 @@
   Android nav bar) — dev-approval UX pass.
 - Carried verbatim, worth noting: lib/auth/store.ts comment says guest credentials are stored the
   "throwaway prototype" way (plaintext guest password); now product code — candidate for #264.
+- Owner at dev-approval: deleted the unused half of the vendored Replit client (ca965ea): generated/api.ts, the barrel, and the @workspace/api-client-react alias. custom-fetch.ts and api.schemas.ts are still live, so they go to #264. Correction to my earlier evidence: footnote-marker counts vary per model answer. The valid check is that the source section renders once the stream completes ('Ansari has answered'), which it does.
