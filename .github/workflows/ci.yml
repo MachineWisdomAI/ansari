@@ -108,11 +108,12 @@ jobs:
 
   frontend:
     # Emitted name deliberately unchanged (human decision, spec 48), even though
-    # this job now also runs `build`. Check names are matched by branch
-    # protection; this one is not currently required on `develop`, but it is
-    # frozen alongside the api job's so that any future rename is done as ONE
-    # coordinated admin change rather than piecemeal. The label lagging its
-    # contents is the accepted cost.
+    # this job now also runs `test` and `build`. Check names are matched by
+    # branch protection, and this one IS a required check on `develop`
+    # (verified 2026-10-11, #262): renaming the job would leave the required
+    # check pending forever and block every PR. Any rename must be ONE
+    # coordinated admin change (job name + branch protection together, see
+    # RELEASE.md). The label lagging its contents is the accepted cost.
     name: frontend (lint, typecheck)
     runs-on: ubuntu-latest
     timeout-minutes: 10
