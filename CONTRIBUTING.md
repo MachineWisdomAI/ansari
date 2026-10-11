@@ -99,10 +99,11 @@ You can still target one package directly — `pnpm api lint`, `pnpm frontend we
 - **Branch from `develop` and target `develop`** — not `main`. `main` is
   production and is only ever fast-forwarded to `develop` during a release (see
   [RELEASE.md](RELEASE.md)), so PRs against it can't be merged.
-- CI must be green before a PR can merge. `develop` requires the
-  `api (lint, typecheck, test, build)` and `gitleaks (secret scan)` checks; the
-  `auth` and `frontend` jobs run as well. The [Checks](#checks) above are the
-  same tasks, so passing them locally is a good predictor.
+- CI must be green before a PR can merge. `develop` requires all four checks:
+  `api (lint, typecheck, test, build)`, `auth (lint, typecheck, test, build)`,
+  `frontend (lint, typecheck)`, and `gitleaks (secret scan)`. The
+  [Checks](#checks) above are the same tasks, so passing them locally is a good
+  predictor. If the secret scan fails, see [Secret scanning](#secret-scanning).
 - Stage files explicitly (`git add path/to/file`). Please don't use `git add -A`
   or `git add .` — that is how stray files and secrets end up in commits.
 - Keep PRs focused: one change per PR.
@@ -113,6 +114,26 @@ You can still target one package directly — `pnpm api lint`, `pnpm frontend we
 - Islamic-content changes (prompts, citations, source handling) get extra
   scrutiny: accuracy and proper sourcing are the core of this project. Cite the
   basis for any change to `lib/ai/prompts/`.
+
+## Secret scanning
+
+Every PR is scanned for credentials by [gitleaks](https://github.com/gitleaks/gitleaks).
+On a PR the scan covers **only the PR's own commits** (`origin/develop..HEAD`), so
+a hit is in a commit on your branch. (Pushes to `develop` and `main` scan the
+branch's full history.) If it flags something:
+
+- **A real credential** — rotate it immediately, then remove it from your
+  branch's history by rewriting the commit. An allowlist entry is not a fix: the
+  secret is already exposed.
+- **A test fixture** (a fake key or token in a test) — prefer changing the
+  fixture to a value that doesn't trip the scanner. If that is genuinely
+  impossible, add an allowlist entry with a written justification beside it:
+  either a `.gitleaksignore` fingerprint (`commit:file:rule:line`, which pins one
+  adjudicated finding) or a `.gitleaks.toml` regex (wider, so it needs a stronger
+  reason).
+
+Changes to `.gitleaksignore` and `.gitleaks.toml` always get extra scrutiny — a
+maintainer reviews the entry itself, not just the PR around it.
 
 ## Reporting security issues
 

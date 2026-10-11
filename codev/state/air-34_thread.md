@@ -40,3 +40,17 @@ CONFLICTING on `pnpm-lock.yaml`; merged `develop`, took its lockfile, re-added t
 `yaml` importer entry, re-verified frozen install + lint + typecheck + full test run.
 Unverified until merge: how the forms render in GitHub's chooser (forms only render from the
 default branch).
+
+## Review round 1 (amrmelsayed, CHANGES_REQUESTED) — addressed
+My first merge attempt was (rightly) blocked: a review landed while CI was pending.
+1. Required checks: `develop` requires ALL FOUR (api, auth, frontend, gitleaks) — reviewer read
+   branch protection, which I could not. CONTRIBUTING lists all four; the test now asserts the
+   doc names every job `ci.yml` emits (and that there are exactly four), so a new/renamed job
+   fails it. `ci.yml`'s "frontend not currently required" comment and RELEASE.md remain stale —
+   reviewer flagged them to maintainers; still out of scope here.
+2. New "Secret scanning" section (follow-up to #178). Each claim checked against
+   `.github/scripts/gitleaks-scan.sh`, `.gitleaksignore`, `.gitleaks.toml` before writing.
+3. `yaml` `^2.9.0` → `^2.9.1` to dedupe with vite's copy (non-blocking suggestion, taken).
+One local `pnpm test` run failed in `@ansari/auth` `tests/auth.integration.test.ts` immediately
+after a `pnpm install`; two runs either side of it passed (8/8). Not reproduced, untouched by
+this PR — possible flake, noted for the PR.

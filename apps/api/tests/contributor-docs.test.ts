@@ -91,10 +91,23 @@ describe('CONTRIBUTING.md', () => {
   it('names required CI checks that the workflow actually emits', () => {
     const ci = parse(readFileSync(resolve(repoRoot, '.github/workflows/ci.yml'), 'utf8'));
     const emitted = Object.values(ci.jobs as Record<string, { name: string }>).map((j) => j.name);
-    for (const check of ['api (lint, typecheck, test, build)', 'gitleaks (secret scan)']) {
+    // All four jobs are required on `develop`, so the doc must name each one
+    // exactly as the workflow emits it — and notice when a job is added or renamed.
+    expect(emitted.length).toBe(4);
+    for (const check of emitted) {
       expect(doc).toContain(`\`${check}\``);
-      expect(emitted).toContain(check);
     }
+  });
+
+  it('only names secret-scan files that exist', () => {
+    for (const file of ['.gitleaksignore', '.gitleaks.toml', '.github/scripts/gitleaks-scan.sh']) {
+      expect(existsSync(resolve(repoRoot, file)), `missing: ${file}`).toBe(true);
+    }
+    expect(doc).toContain('`.gitleaksignore`');
+    expect(doc).toContain('`.gitleaks.toml`');
+    // The documented PR scan range must match what the scan script actually builds.
+    expect(doc).toContain('`origin/develop..HEAD`');
+    expect(readFileSync(resolve(repoRoot, '.github/scripts/gitleaks-scan.sh'), 'utf8')).toContain('range="${base}..HEAD"');
   });
 
   it('targets develop and mentions git add -A only to discourage it', () => {
