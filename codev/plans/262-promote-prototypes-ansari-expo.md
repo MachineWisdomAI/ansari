@@ -144,6 +144,26 @@ One PR, phases as commits (`[PIR #262][Phase: implement] …`).
   `expo-secure-store` plugins in the spike. I revert that to the prototype's list as the issue
   specifies, and note it for the EAS follow-up. The scaffold's `expo-splash-screen` and
   `expo-status-bar` plugin entries are replaced by the prototype's top-level `splash`.
+- **Scheme coupling in `packages/auth` (shared surface, `main` reviews this hunk).** Better
+  Auth validates a native request's `expo-origin` against `trustedOrigins`, and
+  `packages/auth/src/index.ts:43` hard-codes `'askansari://'`. Its comment (`:38-42`) states
+  that the scheme MUST match `apps/frontend/app.json`. Leaving it would break native sign-in
+  later with an origin mismatch, with nothing failing in this PR. Changes:
+  - `packages/auth/src/index.ts:39-43`: the trustedOrigins entry becomes `'ansarichat://'`,
+    and the comment names `"scheme": "ansarichat"` / `expo-origin: ansarichat://…`.
+  - `packages/auth/tests/auth.http.test.ts:73-80`: both assertions (`toContain` and the HTTP
+    sign-in origin) move to `ansarichat://`, keeping the `not.toContain('ansari://')` guard,
+    with the test title updated.
+  - Run the `@ansari/auth` suite (`pnpm exec turbo run test --filter @ansari/auth`), and
+    negative-test it: with app.json/auth out of step on purpose, the suite must fail.
+  - Repo-wide check, run against `apps/ packages/ codev/resources/ docs/ RELEASE.md README.md`,
+    not only the moved tree:
+    `grep -rnE "askansari(://|\b[^.-])" … | grep -v askansari.ai` must return 0 hits after the
+    change. Today it finds `apps/frontend/app.json:7`, `packages/auth/src/index.ts:39,40,43` and
+    `packages/auth/tests/auth.http.test.ts:73,75,79,80`.
+  - Deliberately unchanged: `apps/api/lib/attribution.ts:32` `KNOWN_CLIENTS =
+    ['askansari-web','askansari-android']`. These are `X-Client` attribution labels, "for
+    readability only — NOT enforced", not URL schemes, and the prototype sends no client id.
   `eas.json` is unchanged. It matches legacy's except the CLI floor (`>= 21.0.0` vs
   `>= 15.0.12`), and the newer floor stays.
 - **`.gitignore`**: the scaffold's file, plus the prototype's `.env` line. The prototype's
@@ -221,8 +241,8 @@ One PR, phases as commits (`[PIR #262][Phase: implement] …`).
    from `legacy/frontend-app/app.json`** (phase 2). The #238 assertion in
    `lib/page-metadata.test.ts` passes unchanged. Consequence for the issue's acceptance line:
    `expo config` resolves scheme **`ansarichat`**, not `askansari`.
-   No code hard-codes a URL scheme (grep for `://` schemes, `Linking.createURL` and
-   `makeRedirectUri` finds none), so the change is confined to `app.json`.
+   The prototype tree hard-codes no scheme, but **`packages/auth` does**, so the change is NOT
+   confined to `app.json` (see "Scheme coupling" under phase 2).
 2. **Global CSS import.** I keep Uniwind wired (metro, `src/global.css`, `gen:types`, types,
    deps) but do **not** import `src/global.css` or mount `HeroUINativeProvider` in the ported
    `app/_layout.tsx`. On web, `@import "tailwindcss"` brings Tailwind's preflight reset, which
@@ -241,6 +261,7 @@ One PR, phases as commits (`[PIR #262][Phase: implement] …`).
 - `apps/frontend/app/_layout.tsx` (fixes 2, 3), `hooks/useScreenLandmark.ts` (fix 3),
   `components/Sidebar.tsx` (fix 4), 10 components (fix 1), plus mechanical lint fixes
 - `pnpm-lock.yaml`, root `package.json` (`prototype` script removed), `.github/workflows/ci.yml`
+- `packages/auth/src/index.ts:39-43`, `packages/auth/tests/auth.http.test.ts:73-80` (scheme → `ansarichat://`)
 - `codev/resources/{arch.md,arch-critical.md,lessons-learned.md,lessons-critical.md}`
 - `codev/state/pir-262_thread.md`
 - Unchanged: `eas.json`, `Caddyfile`, `railway.toml`, `turbo.json`, `pnpm-workspace.yaml`, `src/global.css`
@@ -287,6 +308,9 @@ One PR, phases as commits (`[PIR #262][Phase: implement] …`).
   tree, which has hits in `package.json`, `arch.md`, `arch-critical.md`, the prototype
   README and `retime-ambient.sh`. `prototypes/` does not exist. No `.env*` (other than
   `.env.local.example`) in `git diff --name-only`.
+- `@ansari/auth` suite green with `ansarichat://`. The repo-wide `askansari` scheme grep
+  returns 0 hits; the only `askansari` hits left are the `askansari.ai` domain and the
+  attribution labels.
 - CI green, including the new Test step and gitleaks.
 - **Dev-approval UX pass** (`app` architect, side by side with staging SDK 54): desktop web;
   mobile web on the iOS Simulator (composer tap, keyboard shim, sign-in sheet `fitToShell`);
