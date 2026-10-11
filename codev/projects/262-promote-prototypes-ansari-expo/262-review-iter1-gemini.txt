@@ -1,0 +1,32 @@
+## Implementation Review: Issue #262 — Promote prototypes/ansari-expo to apps/frontend (Expo SDK 57)
+
+### 1. Plan Adherence
+- **Tree Migration**: The prototype source (`app/`, `components/`, `constants/`, `hooks/`, `lib/`, `vendor/`, `public/`, `scripts/`, assets) has moved to `apps/frontend/` with git history intact, and `prototypes/` has been removed.
+- **Workspace & Graph Integration**: `apps/frontend` joins the Turborepo graph and pnpm workspace with clean dependencies (`npx expo install --check` is clean). Root `pnpm-lock.yaml` is updated, and the root `prototype` script is removed.
+- **Config & Identity**: `apps/frontend/app.json` takes the legacy app identity (`name`: `"Ansari"`, `scheme`: `"ansarichat"`, `slug`: `"ansari-chat"`, bundle ID / package: `chat.ansari.app`, version `4.0.0`, and the 4 target plugins). `packages/auth/src/index.ts` couples its `trustedOrigins` to `'ansarichat://'`, and auth test assertions verify both inclusion of `'ansarichat://'` and rejection of `'askansari://'` and `'ansari://'`.
+- **Docker & CI**: `apps/frontend/Dockerfile.web` consolidates build args to `EXPO_PUBLIC_API_URL`, and `.github/workflows/ci.yml` wires `turbo run test --filter ansari-frontend...` into the frontend job without modifying the frozen check name.
+- **Scoped Adjustments**: The vendored Replit client's unused barrel and generated client were pruned cleanly without breaking `custom-fetch.ts` or schemas needed for follow-up #264.
+
+### 2. Code Quality & Upgrade Fixes
+- **StyleSheet.absoluteFillObject Removal**: Replaced with `StyleSheet.absoluteFill` across all 8 native-layout files, preventing silent layout breakage on native platforms.
+- **expo-navigation-bar 57**: Replaced deprecated/removed `setButtonStyleAsync` with `NavigationBar.setStyle` in [app/_layout.tsx](file:///Users/amrmohamed/repos/iaser/ansari/.builders/pir-262/apps/frontend/app/_layout.tsx#L176).
+- **Navigation Context Unification**: Theme and focus hooks ([useScreenLandmark.ts](file:///Users/amrmohamed/repos/iaser/ansari/.builders/pir-262/apps/frontend/hooks/useScreenLandmark.ts#L1), [app/_layout.tsx](file:///Users/amrmohamed/repos/iaser/ansari/.builders/pir-262/apps/frontend/app/_layout.tsx#L30)) imported directly from `expo-router` to avoid context mismatch with vendored react-navigation.
+- **Reanimated & Worklet Safety**: [components/Sidebar.tsx](file:///Users/amrmohamed/repos/iaser/ansari/.builders/pir-262/apps/frontend/components/Sidebar.tsx#L186) prop typing widened cleanly. [constants/layout.ts](file:///Users/amrmohamed/repos/iaser/ansari/.builders/pir-262/apps/frontend/constants/layout.ts#L237) marks `composerBottomPad` with `'worklet'` to resolve native UI-thread invocation crashes.
+- **ESLint & Compiler Rules**: [eslint.config.mjs](file:///Users/amrmohamed/repos/iaser/ansari/.builders/pir-262/apps/frontend/eslint.config.mjs#L27-L40) cleanly scopes React Compiler rules to `warn` for the verbatim move, documenting the deferral to #264.
+
+### 3. Test Coverage & Verification
+- All 44 test files / 606 vitest tests are active and green under Turborepo.
+- Negative tests verified for `@ansari/auth` scheme validation and worklet scans.
+- Static export and Docker image builds verified via headless CDP walk across core routes (`/`, `/about`, `/terms`, `/privacy`, `/chat/:id`, SPA not-found fallbacks).
+
+### 4. Review Document Quality
+- [codev/reviews/262-promote-prototypes-ansari-expo.md](file:///Users/amrmohamed/repos/iaser/ansari/.builders/pir-262/codev/reviews/262-promote-prototypes-ansari-expo.md) thoroughly explains the changes, testing results, shared surfaces, and transparently notes untested aspects (Android device runs, EAS build, physical device smoothness).
+
+---
+VERDICT: APPROVE
+SUMMARY: Clean, disciplined promotion of the prototype to apps/frontend at Expo SDK 57 adhering strictly to the plan and verification requirements.
+CONFIDENCE: HIGH
+---
+
+KEY_ISSUES:
+- None
