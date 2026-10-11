@@ -118,13 +118,13 @@ The prototype was imported as reference-only (#57) and kept there by the 2026-09
 - `npx expo install --check`: ✓ "Dependencies are up to date"
 - `turbo run lint --filter ansari-frontend...`: ✓ 0 errors, 49 warnings (counts above)
 - `turbo run typecheck --filter ansari-frontend...`: ✓ (`gen:types` runs under the graph)
-- `turbo run test --filter ansari-frontend...`: ✓ 44 files / 606 tests (the prototype's 44 files, now in CI)
+- `turbo run test --filter ansari-frontend...`: ✓ 45 files / 611 tests (the prototype's 44 files, now in CI, plus `lib/worklets.test.ts`)
 - `turbo run build --filter ansari-frontend...`: ✓; `turbo run lint typecheck --filter './packages/*'`: ✓
 - `turbo run test --filter @ansari/auth`: ✓ 8/8. Negative-tested: with the source back on `askansari://` it fails 1/8.
 - `npx expo config --type public`: name Ansari, slug `ansari-chat`, scheme `ansarichat`, version 4.0.0, `chat.ansari.app`, project `e2f465a7-…`, the four plugins.
 - `docker build -f apps/frontend/Dockerfile.web .` (repo root): ✓. The image serves an `index.html` byte-identical to the local export, and `/terms`, `/chat/abc`, `/no-such-page` fall through Caddy to the SPA.
 - Live-tree grep for `prototypes/ansari-expo` (excluding `codev/{specs,plans,reviews,state,projects}`): **0** hits; on the pre-move tree 7f71806: **6** hits in 5 files (`package.json`, `arch.md`, `arch-critical.md`, the prototype README ×2, `retime-ambient.sh`).
-- Worklet AST scan (every `useAnimatedStyle`/`useDerivedValue`/… body and `'worklet'` function): 2 real hits (`composerBottomPad`) → 0 after fix 5. The 4 remaining hits are `at()`, a closure inside a worklet (false positive).
+- Worklet AST scan, committed as `lib/worklets.test.ts`: 2 real hits (`composerBottomPad`) → 0 after fix 5. In-worklet closures (the `composer-shadow` `at()` helper) are recognised, so there are no false positives.
 - Headless Chrome over CDP, the exported `dist/` and the Docker image: `/`, `/about`, `/terms`, `/privacy`, `/chat/:id`, an unknown route all render without the error boundary. Auto-guest registers; a question streams from `api-staging` and, once complete ("Ansari has answered"), renders its source section (numbered footnotes, hadith grades, scholarly works, Copy/Share), structurally the same as staging (SDK 54) for the same question.
 
 ### Manual verification (app architect, dev-approval)
@@ -154,6 +154,7 @@ The prototype was imported as reference-only (#57) and kept there by the 2026-09
 
 ## Things to Look At During PR Review
 
+- **3-way consultation (single pass): Codex REQUEST_CHANGES, fixed.** The finding: fix 5 (`composerBottomPad` `'worklet'`) had no committed regression test, so all 606 tests still passed with the directive removed, and the AST scan lived in a scratchpad. **Fix:** `apps/frontend/lib/worklets.test.ts`, the worklet scan as a committed test. It parses every non-test source in `app/ components/ hooks/ lib/ constants/` with the TypeScript AST and asserts that every call inside a worklet body (`useAnimatedStyle`/`useDerivedValue`/… callbacks and `'worklet'` functions) targets a worklet-marked function, an in-worklet closure, or a known-safe built-in. A second test pins `composerBottomPad` as a worklet. **Negative-tested:** with the directive removed, 2 tests fail and name `app/chat/[id].tsx:300` and `app/index.tsx:208`; restored, they pass. Fixtures prove the scan flags a same-file and a cross-file plain call and passes a marked helper, an in-worklet closure and `Math.*`. Gemini: APPROVE (HIGH, no key issues). PIR is single-pass, so this fix was **not** re-reviewed by a model; please check it at the `pr` gate.
 - **Fix 3 is the one that green checks missed.** If anyone re-adds `@react-navigation/native` imports, the web app breaks at runtime with all checks green. Theme and focus APIs must come from `expo-router`.
 - **Fix 2 (Android) is type-checked, not exercised.** No Android run was done.
 - **`app/chat/[id].tsx:717`**: `didn't` → `didn&apos;t` for `react/no-unescaped-entities`; the rendered text is identical.
