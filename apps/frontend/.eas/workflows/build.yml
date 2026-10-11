@@ -1,0 +1,47 @@
+# Native build on EAS. Dispatched by .github/workflows/eas-build.yml (see
+# RELEASE.md, "Native builds and updates"); can also be run by hand with
+# `eas workflow:run .eas/workflows/build.yml -F platform=ios -F profile=development`.
+#
+# Profiles are the four in eas.json. Build numbers come from EAS
+# (`appVersionSource: remote`); only `production` auto-increments.
+name: Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        type: choice
+        description: Platform to build
+        required: true
+        default: all
+        options:
+          - all
+          - ios
+          - android
+      profile:
+        type: choice
+        description: eas.json build profile
+        required: true
+        default: development
+        options:
+          - development
+          - preview
+          - production-internal
+          - production
+
+jobs:
+  build_ios:
+    name: Build iOS
+    if: ${{ inputs.platform == 'all' || inputs.platform == 'ios' }}
+    type: build
+    params:
+      platform: ios
+      profile: ${{ inputs.profile }}
+
+  build_android:
+    name: Build Android
+    if: ${{ inputs.platform == 'all' || inputs.platform == 'android' }}
+    type: build
+    params:
+      platform: android
+      profile: ${{ inputs.profile }}

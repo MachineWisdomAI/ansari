@@ -224,3 +224,48 @@ SQL is applied while the previous deployment is still serving traffic.
   must be backward-compatible, so the previous code runs fine on the new
   schema. If a migration itself is bad, ship a corrective forward migration —
   never `db:push`.
+
+## Native builds and updates
+
+Native binaries and over-the-air updates for `apps/frontend` are produced on
+EAS, dispatched from GitHub Actions. No laptop is involved, and this is the
+only supported path. Each GitHub workflow is a thin dispatcher: it installs the
+workspace at the repo root (the EAS CLI evaluates the app config on the
+runner) and runs `eas workflow:run` on an EAS Workflow in
+`apps/frontend/.eas/workflows/`. Follow the run from the EAS URL printed in
+the dispatcher's last step. The dispatcher goes green once EAS accepts the
+run, not once the build finishes.
+
+**Build:** Actions tab → **EAS Build** (`.github/workflows/eas-build.yml`) →
+*Run workflow* → pick `platform` (all | ios | android) and `profile`:
+
+| Profile | Produces | Update channel | GitHub Environment |
+|---|---|---|---|
+| `development` | dev-client build, internal distribution | `development` | `development` |
+| `preview` | release build, internal distribution | `preview` | `preview` |
+| `production-internal` | production build, internal distribution | `production` | `production` |
+| `production` | store build; build number auto-increments | `production` | `production` |
+
+**Update:** Actions tab → **EAS Update** (`.github/workflows/eas-update.yml`) →
+pick `platform` and `channel` (development | preview | production). The
+channel also names the EAS environment and the GitHub Environment.
+
+- **Build numbers are managed by EAS.** `eas.json` sets
+  `appVersionSource: remote`, so the iOS build number and Android version code
+  live on EAS, not in `app.json`. Only `production` auto-increments them.
+- **`runtimeVersion: fingerprint` decides which binaries an update reaches.**
+  An update is delivered only to builds on its channel whose native fingerprint
+  matches the commit it was published from. After any native change (a
+  dependency with native code, a config plugin, `app.json` native fields), ship
+  a new build first; an update alone reaches no one. The fingerprint contract
+  is tracked in #267.
+- **Concurrent dispatches queue, they never cancel.** Each profile/platform
+  (build) or channel/platform (update) pair runs one at a time.
+
+**Token (prerequisite, not yet done).** No `EXPO_TOKEN` exists yet. Before the
+first run, the owner creates an Expo **robot** access token with access to the
+`ansari-project` / `ansari-chat` EAS project, then stores it as the
+`EXPO_TOKEN` secret in each of the GitHub Environments `development`,
+`preview` and `production`. Give `production` a required reviewer, so every
+production build or update waits for a human approval. The dispatchers are the
+only place the token is used.
