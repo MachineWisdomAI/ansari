@@ -17,3 +17,4 @@
 - Gate feedback (owner): app name "Ansari"; identity from legacy/frontend-app/app.json → scheme ansarichat (not askansari). Version kept 4.0.0 pending confirmation.
 - Owner confirmed version 4.0.0.
 - Architect correction: packages/auth trustedOrigins hard-codes askansari:// (+ tests) — added to phase 2; grep now repo-wide.
+- main agreed auth hunk ships here; conditions added: also reject askansari:// in tests; PR body 'Shared surfaces for main' heading.

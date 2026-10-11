@@ -152,8 +152,9 @@ One PR, phases as commits (`[PIR #262][Phase: implement] …`).
   - `packages/auth/src/index.ts:39-43`: the trustedOrigins entry becomes `'ansarichat://'`,
     and the comment names `"scheme": "ansarichat"` / `expo-origin: ansarichat://…`.
   - `packages/auth/tests/auth.http.test.ts:73-80`: both assertions (`toContain` and the HTTP
-    sign-in origin) move to `ansarichat://`, keeping the `not.toContain('ansari://')` guard,
-    with the test title updated.
+    sign-in origin) move to `ansarichat://`, with the test title updated. The negative half
+    keeps `not.toContain('ansari://')` and **adds `not.toContain('askansari://')`**, so a
+    revert of the scheme is caught (condition from `main`).
   - Run the `@ansari/auth` suite (`pnpm exec turbo run test --filter @ansari/auth`), and
     negative-test it: with app.json/auth out of step on purpose, the suite must fail.
   - Repo-wide check, run against `apps/ packages/ codev/resources/ docs/ RELEASE.md README.md`,
@@ -206,6 +207,11 @@ One PR, phases as commits (`[PIR #262][Phase: implement] …`).
 - Root `package.json`: delete the `prototype` script.
 
 ### Phase 5: Docs and thread
+
+- **PR body** has a **"Shared surfaces for main"** heading (condition from `main`) listing:
+  the `packages/auth` trustedOrigins hunk and its test, `turbo.json` (expected unchanged; stated
+  either way), `pnpm-lock.yaml`, `.github/workflows/ci.yml`, `apps/frontend/Dockerfile.web`,
+  root `package.json` and `codev/resources/*`.
 
 - `codev/resources/arch.md` §"Prototype chat display (prototypes/ansari-expo)" becomes
   "Frontend chat display (apps/frontend)", with its paths updated. Same for the matching map
