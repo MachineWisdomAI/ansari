@@ -1,0 +1,18 @@
+id: '262'
+title: promote-prototypes-ansari-expo
+protocol: pir
+phase: plan
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: pending
+  dev-approval:
+    status: pending
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-10-11T06:53:06.748Z'
+updated_at: '2026-10-11T06:53:06.748Z'
