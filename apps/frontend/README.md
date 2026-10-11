@@ -24,7 +24,7 @@ truth without re-wiring the backend code; **issue #124 reconnected them**.
 End to end against `apps/api` (staging by default — see `lib/api/config.ts`):
 
 - Every screen imports the `apps/api` adapter from `@/lib/api` (a drop-in for
-  the vendored `@workspace/api-client-react`: same hook names, same schema
+  the Replit client's orval hooks: same hook names, same schema
   types). `app/_layout.tsx` resolves the base URL from
   `resolveBaseUrl()` (`EXPO_PUBLIC_API_URL`, defaulting to staging).
 - Signing in is a sheet over the current screen (`components/AuthSheet.tsx`,
@@ -92,22 +92,23 @@ and `app/_layout.tsx` deliberately does **not** import `src/global.css`:
 Tailwind's preflight reset would restyle it on the web. Adopting them is
 issue #264.
 
-## The `@workspace/api-client-react` alias
+## What is left of the vendored Replit client
 
-The screens import the `apps/api` adapter from `@/lib/api`. `lib/api/`'s
-barrel is a drop-in for the vendored `@workspace/api-client-react` — the same
-hook names (`useCreateConversation`, `useSendMessage`, …) and the same
-generated types (`Citation`, `Message`, `SafetySignal`), which
-`lib/api/types.ts` re-exports straight from
-`vendor/api-client-react/generated/api.schemas.ts`.
+The screens import the `apps/api` adapter from `@/lib/api`, whose hooks keep
+the names of the Replit client's orval hooks (`useCreateConversation`,
+`useSendMessage`, …). Two vendored files are still live:
 
-The bare `@workspace/api-client-react` specifier still resolves — via a
-`tsconfig.json` `paths` entry and a matching Metro `resolver.extraNodeModules`
-entry — but **nothing in `app/` or `components/` imports it any more**.
-`lib/api/` and `lib/auth/` reuse the vendored *runtime* (`custom-fetch.ts`:
-base URL + bearer attach, and the React Native `response.body` workaround)
-under the `@/vendor/...` alias. Removing the bare-specifier alias is a
-separate cleanup.
+- `vendor/api-client-react/custom-fetch.ts` — the fetch runtime (base URL +
+  bearer attach, `ApiError`, and the React Native `response.body`
+  workaround), used by `lib/api/` and `lib/auth/`.
+- `vendor/api-client-react/generated/api.schemas.ts` — types only
+  (`Citation`, `Message`, `SafetySignal`, …), re-exported by
+  `lib/api/types.ts`.
+
+The orval hooks (`generated/api.ts`), the client's barrel and the
+`@workspace/api-client-react` alias were unused and were deleted in #262.
+Moving `custom-fetch.ts` into `lib/api/` and replacing the generated types
+with a shared contract is #264.
 
 ## Test runner
 
@@ -144,8 +145,8 @@ guest account rather than minting a new staging user each time. See
   (`artifacts/ansari/`) and the React API client it depended on
   (`lib/api-client-react/src/` → `vendor/api-client-react/`) were imported.
   The vendored client's runtime (`custom-fetch.ts`: base URL + bearer
-  wiring, and the React Native `response.body` workaround) is reused by both
-  the new design's direct imports and `lib/api/`'s adapter.
+  wiring, and the React Native `response.body` workaround) is reused by
+  `lib/api/` and `lib/auth/`; the client's hooks and barrel were deleted in #262.
 
 ## The SDK 54 → 57 port (issue #262)
 
@@ -216,5 +217,5 @@ apps/frontend/
   assets/                    redrawn icons, ambient-shadow video
   public/                    web shell: index.html, fonts, icons, manifest (scripts/build-icons.mjs)
   src/global.css             Uniwind/Tailwind CSS entry (wired, not imported; see above)
-  vendor/api-client-react/   the imported orval client's runtime (custom-fetch.ts is reused)
+  vendor/api-client-react/   custom-fetch.ts (fetch runtime) + generated/api.schemas.ts (types); see above
 ```

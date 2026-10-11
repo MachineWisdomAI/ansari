@@ -1,6 +1,6 @@
 /**
- * The adapter barrel — a drop-in replacement for `@/vendor/api-client-react`,
- * backed by this repo's `apps/api`. Screens/components import hooks, query-key
+ * The adapter barrel — a drop-in replacement for the Replit client's orval
+ * hooks (deleted in #262), backed by this repo's `apps/api`. Screens/components import hooks, query-key
  * helpers, and types from here; only their import specifier changes.
  *
  * The vendored `custom-fetch.ts` runtime (base URL + bearer attach) is REUSED,

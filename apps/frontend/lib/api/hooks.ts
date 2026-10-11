@@ -30,9 +30,9 @@ import type {
 } from '@/lib/api/types';
 
 /**
- * Drop-in replacements for the vendored orval hooks, backed by this repo's
- * `apps/api`. Same hook names, query-key helpers, and consumed types as
- * `@/vendor/api-client-react`, so the screens only need to change their import
+ * Drop-in replacements for the Replit client's orval hooks (deleted in #262),
+ * backed by this repo's `apps/api`. Same hook names, query-key helpers, and
+ * consumed types, so the screens only needed to change their import
  * specifier. Every response is zod-validated in the fetchers below (see
  * `wire-schemas.ts`); a shape mismatch throws and react-query surfaces `isError`.
  */

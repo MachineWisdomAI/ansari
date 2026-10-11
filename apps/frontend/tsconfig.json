@@ -4,8 +4,7 @@
     // No `baseUrl`: TypeScript 6 rejects it (TS5101), and `paths` resolve
     // relative to this file without it.
     "paths": {
-      "@/*": ["./*"],
-      "@workspace/api-client-react": ["./vendor/api-client-react/index.ts"]
+      "@/*": ["./*"]
     }
   },
   "include": [
