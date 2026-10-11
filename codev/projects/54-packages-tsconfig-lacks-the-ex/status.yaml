@@ -1,7 +1,7 @@
 id: '54'
 title: packages-tsconfig-lacks-the-ex
 protocol: air
-phase: pr
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -13,7 +13,7 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-10-11T00:48:28.882Z'
-updated_at: '2026-10-11T01:08:07.204Z'
+updated_at: '2026-10-11T01:08:14.471Z'
 pr_history:
   - phase: pr
     pr_number: 258
