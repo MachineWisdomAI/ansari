@@ -15,7 +15,7 @@
   24.12.1 rather than `latest`. Legacy `legacy/frontend-web/package.json` still has
   `eas build` scripts — legacy code, left alone.
 - Review round (architect + main): added `queue: max` to both dispatchers; update now
-  groups by channel only, `--wait`s, timeout 60; build comment/doc says it serializes the
+  groups by channel only, `--wait`s, timeout 30 (main); build comment/doc says it serializes the
   dispatch, not the EAS build. RELEASE.md prerequisite now ordered: create Environments
   (develop-only branch policy on all three, reviewers on production) → add token →
   dispatch (a missing Environment is auto-created UNPROTECTED); explains the branch-policy

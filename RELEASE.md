@@ -234,8 +234,8 @@ workspace at the repo root (the EAS CLI evaluates the app config on the
 runner) and runs `eas workflow:run` on an EAS Workflow in
 `apps/frontend/.eas/workflows/`. Follow the run from the EAS URL printed in
 the dispatcher's last step. **EAS Build** goes green once EAS accepts the
-run, not once the build finishes. **EAS Update** waits for the EAS run and
-reflects its result.
+run, not once the build finishes. **EAS Update** runs with `--wait`, so
+it goes green only when the publish finishes, and fails if the publish fails.
 
 **Build:** Actions tab → **EAS Build** (`.github/workflows/eas-build.yml`) →
 *Run workflow* → pick `platform` (all | ios | android) and `profile`:

@@ -55,8 +55,8 @@ jobs:
     name: dispatch EAS update (${{ inputs.platform }}, ${{ inputs.channel }})
     runs-on: ubuntu-latest
     environment: ${{ inputs.channel }}
-    # Covers install plus the waited-on EAS update run, including EAS queue time.
-    timeout-minutes: 60
+    # Covers install plus a full waited-on EAS update publish.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
