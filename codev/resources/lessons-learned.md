@@ -34,7 +34,7 @@ See `codev/reviews/73-persist-tool-use-and-tool-resu.md` for the full context.
 - **Lazy config reads inside error paths need targeted mocks in unit tests.** Two terminal facilitator paths (`isInklingConfigured()`, the degenerate-final `config.gemini.model` summary) read validated config only when reached; in a harness without env they throw *inside the catch*, turning the path under test into a different error. Mock `@/lib/ai/inkling-client` and `@/lib/config` whenever a test drives a terminal error path.
 - **Number migrations after merging, and expect drizzle's prefix to lag.** A concurrent PR took the next journal index mid-project; the fix was merge-then-generate and a manual rename (`0007_*` at idx 6). drizzle-kit names files by index, so every later generate emits a prefix one behind the real sequence and must be renamed by hand (after `0008_model_provenance`, the next is `0009_*`).
 
-## Incremental streaming render — prototype (issue #65)
+## Incremental streaming render — frontend (issue #65)
 
 See `codev/reviews/65-prototypes-ansari-expo-render-.md` for the full context.
 
@@ -73,7 +73,7 @@ See `codev/reviews/168-serve-citable-documents-derive.md` for the full context.
 - **A cold-start test can be load-sensitive without being flaky in logic.** The first pglite-from-migrations build and the first ESLint config load each take ~0.5–0.7 s, but they exceed vitest's 5 s default under CPU load. Fix with a per-test timeout on just that test; do not skip a safety guard (the #165 parity test) to get a green run.
 - **A source scan on a route can catch its own comments.** The "public route never names tool_calls" scan failed on a comment that said "never messages.tool_calls". That is the scan working. Reword the comment rather than loosening the scan.
 
-## Citation mapping — prototype (issue #161)
+## Citation mapping — frontend (issue #161)
 
 See `codev/reviews/161-prototypes-ansari-expo-map-app.md` for the full context.
 
@@ -84,7 +84,7 @@ See `codev/reviews/161-prototypes-ansari-expo-map-app.md` for the full context.
 - **An index into an API array is an index into the RAW array.** Spec 168's `message_index` counts `tool` rows that the prototype drops while mapping. Join before filtering, and cross-check with the id when one is available.
 - **A gate approval covers the code it saw.** The recorded `dev-approval` predated a full redesign. Confirm with the human before advancing on it.
 
-## Paced streaming reveal — prototype (issue #189)
+## Paced streaming reveal — frontend (issue #189)
 
 See `codev/reviews/189-prototypes-ansari-expo-animate.md` for the full context.
 
@@ -95,7 +95,7 @@ See `codev/reviews/189-prototypes-ansari-expo-animate.md` for the full context.
 - **Describe a recomputed-proportional rate as a time constant, not a deadline.** `rate = backlog / window` recomputed each tick decays exponentially, so drain time is logarithmic in the backlog. We shipped docs saying "within ~150 ms" that were 5× off for large backlogs.
 - **`renderHook`'s `rerender` flushes effects inside `act`, so `result.current` never shows the render between a prop change and its effect.** To test a "never, even for one render" invariant, record every render from inside the hook callback and assert over all of them. Our first version of the test passed with the clamp deleted, and a mutation check caught that.
 
-## Hadith grades & source pills — prototype (issue #194)
+## Hadith grades & source pills — frontend (issue #194)
 
 See `codev/reviews/194-prototypes-ansari-expo-hadith-.md` for the full context.
 
@@ -104,7 +104,7 @@ See `codev/reviews/194-prototypes-ansari-expo-hadith-.md` for the full context.
 - **Fold a wrapping layout by measured rows, not item count.** How many pills fit on a row depends on the column width and each label. Measure the offsets, clip at the top of row N+1, keep the hidden items mounted for measurement, and remove them from focus and the accessibility tree while they're out of sight. Before measuring, hold an estimated fold, so a long group doesn't flash open on mount.
 
 
-## Composer tap on mobile web — prototype (issue #202)
+## Composer tap on mobile web — frontend (issue #202)
 
 See `codev/reviews/202-prototypes-ansari-expo-compose.md` for the full context.
 
@@ -115,7 +115,7 @@ See `codev/reviews/202-prototypes-ansari-expo-compose.md` for the full context.
 - **A module that registers listeners at import is testable under jsdom** if you stub `visualViewport` and `matchMedia` before a fresh `vi.resetModules()` import, and track `window.addEventListener` so each test removes what its copy added.
 - **Reading a phase's instructions with `porch next` can advance porch state.** A second `porch next` during implement requested `dev-approval` before any code existed. Run `porch done` after the work so the build and test checks really run.
 
-## Compact retrieval trace — prototype (issue #204)
+## Compact retrieval trace — frontend (issue #204)
 
 See `codev/reviews/204-prototypes-ansari-expo-compact.md` for the full context.
 
@@ -127,7 +127,7 @@ See `codev/reviews/204-prototypes-ansari-expo-compact.md` for the full context.
 - **The `porch next` trap from #202 recurred.** After plan approval a second `porch next` again recorded `dev-approval` as requested before any code was written. It has now hit two builders in a row.
 - **Porch's `build` check fails locally on apps/api env validation** when no `apps/api/.env` exists. Load the committed CI dummy envs (`set -a; . apps/api/.env.ci; . apps/auth/.env.ci`) and force an uncached build to prove the failure is environmental.
 
-## New Ansari logo — prototype (issue #223)
+## New Ansari logo — frontend (issue #223)
 
 See `codev/reviews/223-prototypes-ansari-expo-replace.md` for the full context.
 
@@ -139,7 +139,7 @@ See `codev/reviews/223-prototypes-ansari-expo-replace.md` for the full context.
 - **`npx prettier` without a project config rewrites the house style.** It switched every quote to double and reflowed unrelated lines. Pass `--single-quote` (the prototype's style) and check `git diff --stat` for churn before committing.
 - **The `porch next` trap from #202/#204 hit a third builder.** Reading the implement prompt with `porch next` right after plan approval recorded `dev-approval` as requested before any code existed.
 
-## Ambient shadow strength — prototype (issue #225)
+## Ambient shadow strength — frontend (issue #225)
 
 See `codev/reviews/225-prototypes-ansari-expo-ambient.md` for the full context.
 
@@ -148,7 +148,7 @@ See `codev/reviews/225-prototypes-ansari-expo-ambient.md` for the full context.
 - **Headroom caps what "darker" can mean.** On the near-black night page, the full useful range is ~2.4 L* (page → well), so night got its 15% and nothing more was worth taking.
 - **The #204 dev-server lessons recurred**, even though the hot map pointed to them: a server started with `CI=1` kept serving stale code across edits, and porch's `build` check failed on apps/api env validation until `apps/*/.env.ci` was loaded. When a reviewer says "looks the same", grep the served bundle for the new literal first.
 
-## Ambient shadow jitter — prototype (issue #254)
+## Ambient shadow jitter — frontend (issue #254)
 
 See `codev/reviews/254-prototypes-ansari-expo-jittery.md` for the full context.
 
@@ -159,7 +159,7 @@ See `codev/reviews/254-prototypes-ansari-expo-jittery.md` for the full context.
 - **Single-pass VP9 at low bitrates puts a visible jump at a loop wrap.** It spends far more on the keyframe than on the frames that run into it. Two-pass fixed it (wrap step 1.82 → 0.85, against a 0.83 original). Compare the encoded wrap step against the largest consecutive-frame step, and against a lossless intermediate.
 - **Under a Reanimated mock, react-native-web reads a numeric `transitionDuration` as px.** Pass `'1200ms'` strings. And `act()` only re-renders when it ends, so step fake timers in small increments, or a timer that a re-render registers (the next stage of an arrival) never gets its turn.
 
-## Scripture in answer prose — prototype (issue #228)
+## Scripture in answer prose — frontend (issue #228)
 
 See `codev/reviews/228-prototypes-ansari-expo-disting.md` for the full context.
 
@@ -172,7 +172,7 @@ See `codev/reviews/228-prototypes-ansari-expo-disting.md` for the full context.
 - **The renderer cannot recover structure the model didn't write.** One combined translation of three verses can't be split back into verses. Fix the output format at the prompt (#234) instead of guessing in the renderer.
 - **The `porch next` trap hit a fourth builder.** Reading the implement prompt with `porch next` recorded `dev-approval` as requested before any code existed.
 
-## Legal pages — prototype (issue #241)
+## Legal pages — frontend (issue #241)
 
 See `codev/reviews/241-prototypes-ansari-expo-replace.md` for the full context.
 
@@ -181,7 +181,7 @@ See `codev/reviews/241-prototypes-ansari-expo-replace.md` for the full context.
 - **A source-scan test reads literals, so keep the literal where it scans.** `page-metadata.test.ts` finds `<title>` text in route files. A shared page component with `<title>{headTitle}</title>` would have matched the scan while asserting nothing, so each route owns its `<Head>`.
 - **`porch` resolves the project from the worktree root.** Run from a package subdirectory, `porch next` answers "Project not found", which looks like lost state. `cd` to the worktree root first.
 
-## Sign-in sheet — prototype (issue #245)
+## Sign-in sheet — frontend (issue #245)
 
 See `codev/reviews/245-prototypes-ansari-expo-login-s.md` for the full context.
 

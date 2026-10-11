@@ -10,7 +10,7 @@
 # present every frame for exactly two refreshes. See the note above
 # `PLAYBACK_RATE` in components/AmbientVideo.tsx.
 #
-# Usage (from prototypes/ansari-expo, with ffmpeg on PATH):
+# Usage (from apps/frontend, with ffmpeg on PATH):
 #   scripts/retime-ambient.sh <portrait-master.mp4> <desktop-master.mp4>
 #
 # The masters are the pre-retime 30 fps clips (248 frames, ~8.27 s each);

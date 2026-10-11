@@ -142,7 +142,7 @@ jobs:
 
       # The app's vitest suite (lib/ components/ hooks/ constants/, jsdom +
       # testing-library). It never ran in CI while the app lived outside the
-      # workspace in prototypes/ansari-expo (#262). The job name above stays
+      # workspace as the SDK 54 prototype (#262). The job name above stays
       # frozen, so the required check now covers tests without a rename.
       - name: Test
         run: pnpm exec turbo run test --filter ansari-frontend...
