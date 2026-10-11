@@ -1,0 +1,15 @@
+---
+VERDICT: REQUEST_CHANGES
+SUMMARY: Implementation aligns well with the plan, but the native crash fix lacks a committed regression test.
+CONFIDENCE: HIGH
+---
+KEY_ISSUES:
+- `composerBottomPad` fixes a native worklet crash, yet no test covers its required `'worklet'` directive. The existing 606 tests would still pass if it were removed; the cited AST scan is uncommitted. Add a regression test that fails without the directive.
+
+---
+
+## ⚠️ REPOSITORY MOVED during the codex review (#1649).
+A consultant reviews the commit in front of it; it must never commit, or switch refs.
+  - HEAD: 0543e4d35e6b3618895a3ce24faf9156f3919b54 -> 2a927f0f91b63994841d203f27deb95f50becb2b
+The files on disk may look untouched and still not be the ones this review describes.
+Check `git reflog` and `git status` before trusting this review or shipping the branch.

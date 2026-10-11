@@ -108,11 +108,12 @@ jobs:
 
   frontend:
     # Emitted name deliberately unchanged (human decision, spec 48), even though
-    # this job now also runs `build`. Check names are matched by branch
-    # protection; this one is not currently required on `develop`, but it is
-    # frozen alongside the api job's so that any future rename is done as ONE
-    # coordinated admin change rather than piecemeal. The label lagging its
-    # contents is the accepted cost.
+    # this job now also runs `test` and `build`. Check names are matched by
+    # branch protection, and this one IS a required check on `develop`
+    # (verified 2026-10-11, #262): renaming the job would leave the required
+    # check pending forever and block every PR. Any rename must be ONE
+    # coordinated admin change (job name + branch protection together, see
+    # RELEASE.md). The label lagging its contents is the accepted cost.
     name: frontend (lint, typecheck)
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -139,6 +140,13 @@ jobs:
       # in-script chain: Dockerfile.web has no turbo. See turbo.json.)
       - name: Typecheck
         run: pnpm exec turbo run typecheck --filter ansari-frontend...
+
+      # The app's vitest suite (lib/ components/ hooks/ constants/, jsdom +
+      # testing-library). It never ran in CI while the app lived outside the
+      # workspace as the SDK 54 prototype (#262). The job name above stays
+      # frozen, so the required check now covers tests without a rename.
+      - name: Test
+        run: pnpm exec turbo run test --filter ansari-frontend...
 
       # This step exists for @ansari/types specifically — the one package under
       # packages/ with NO consumer, so it sits outside every app's dependency closure

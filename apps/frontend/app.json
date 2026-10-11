@@ -1,45 +1,50 @@
 {
   "expo": {
-    "name": "Ask Ansari",
+    "name": "Ansari",
     "owner": "ansari-project",
     "slug": "ansari-chat",
     "version": "4.0.0",
-    "scheme": "askansari",
+    "scheme": "ansarichat",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "userInterfaceStyle": "automatic",
-    "web": {
-      "bundler": "metro",
-      "output": "single",
-      "favicon": "./assets/images/favicon.png"
+    "newArchEnabled": true,
+    "backgroundColor": "#E7E5E4",
+    "splash": {
+      "image": "./assets/images/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#E7E5E4",
+      "dark": {
+        "image": "./assets/images/splash-icon-dark.png",
+        "resizeMode": "contain",
+        "backgroundColor": "#13100E"
+      }
     },
     "ios": {
       "bundleIdentifier": "chat.ansari.app",
       "supportsTablet": false,
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "CADisableMinimumFrameDurationOnPhone": true
       }
     },
     "android": {
       "package": "chat.ansari.app",
+      "backgroundColor": "#E7E5E4",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundImage": "./assets/images/adaptive-icon-background.png",
+        "backgroundColor": "#E7E5E4"
       },
       "predictiveBackGestureEnabled": false
     },
-    "plugins": [
-      "expo-router",
-      [
-        "expo-splash-screen",
-        {
-          "image": "./assets/images/splash-icon.png",
-          "resizeMode": "contain",
-          "backgroundColor": "#ffffff"
-        }
-      ],
-      "expo-status-bar"
-    ],
+    "web": {
+      "bundler": "metro",
+      "favicon": "./assets/images/icon.png",
+      "output": "single",
+      "backgroundColor": "#E7E5E4"
+    },
+    "plugins": ["expo-router", "expo-font", "expo-web-browser", "expo-video", "expo-secure-store"],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true

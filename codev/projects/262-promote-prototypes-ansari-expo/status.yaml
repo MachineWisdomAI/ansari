@@ -1,0 +1,30 @@
+id: '262'
+title: promote-prototypes-ansari-expo
+protocol: pir
+phase: verified
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: approved
+    requested_at: '2026-10-11T06:59:47.317Z'
+    approved_at: '2026-10-11T07:06:18.421Z'
+  dev-approval:
+    status: approved
+    requested_at: '2026-10-11T07:29:04.571Z'
+    approved_at: '2026-10-11T07:54:28.980Z'
+  pr:
+    status: approved
+    requested_at: '2026-10-11T08:04:26.422Z'
+    approved_at: '2026-10-11T08:14:08.376Z'
+iteration: 1
+build_complete: true
+history: []
+started_at: '2026-10-11T06:53:06.748Z'
+updated_at: '2026-10-11T08:14:10.174Z'
+pr_history:
+  - phase: review
+    pr_number: 270
+    branch: builder/pir-262
+    created_at: '2026-10-11T07:56:53.255Z'
+pr_ready_for_human: false
