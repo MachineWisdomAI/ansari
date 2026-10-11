@@ -26,8 +26,8 @@ headless Chrome. Results:
 |---|---|
 | `npx expo install --check` | **"Dependencies are up to date"** |
 | `tsc --noEmit` (TS 6.0, catalog) | **24 errors**, in 4 root causes (below), all fixed in the spike |
-| `vitest run` | **44 files / 606 tests; 605 pass.** The 1 failure is the `app.json` name conflict (open question 1) |
-| `npx expo config --type public` | name `Ask Ansari`, slug `ansari-chat`, scheme `askansari`, `chat.ansari.app` (iOS + Android), sdkVersion 57.0.0 |
+| `vitest run` | **44 files / 606 tests; 605 pass.** The 1 failure was the spike's `app.json` name ("Ask Ansari"); with the owner's "Ansari" (resolved below) it passes unchanged |
+| `npx expo config --type public` | slug `ansari-chat`, `chat.ansari.app` (iOS + Android), sdkVersion 57.0.0 resolve (spike used the scaffold's name/scheme; the plan now takes the legacy identity, see phase 2) |
 | `expo export --platform web` | builds: `dist/` with the custom `public/index.html` shell (21 KB), fonts, icons, videos; 3.7 MB entry bundle |
 | headless Chrome on `dist/` | **first run: error boundary ("Something went wrong").** After fix 3 below, the app renders: composer (`Ask Ansari` placeholder, `Send question`), `Menu` button, no errors except a video `play()` AbortError (see risks) |
 | `eslint .` (base + expo flat) | 161 errors / 36 warnings before any fix; breakdown under phase 3 |
@@ -122,10 +122,21 @@ One PR, phases as commits (`[PIR #262][Phase: implement] …`).
   (`babel-preset-expo/build/index.d.ts:37-43`), so the old flag is silently ignored and the
   transform is on regardless. No source file uses `import.meta`. I drop the dead option and
   keep the file with the plain preset, with a one-line comment pointing at the new default.
-- **`app.json`**: EAS identity from f396356, verbatim: `name`, `owner`, `slug`, `version`,
-  `scheme`, `ios.bundleIdentifier`, `ios.infoPlist.ITSAppUsesNonExemptEncryption`,
-  `android.package`, `predictiveBackGestureEnabled`, `runtimeVersion`, `updates.url`,
-  `extra.eas.projectId`, `extra.router.origin: false`, `web.bundler`. Functional config from
+- **`app.json`**: **identity from the legacy store app, `legacy/frontend-app/app.json`**
+  (owner decision at the plan gate, 2026-10-11; this overrides the issue's "f396356
+  verbatim"): `name` **"Ansari"**, `owner` `ansari-project`, `slug` `ansari-chat`, `scheme`
+  **`ansarichat`**, `ios.bundleIdentifier` / `android.package` `chat.ansari.app`,
+  `ios.infoPlist.ITSAppUsesNonExemptEncryption: false`, `runtimeVersion {policy: fingerprint}`,
+  `updates.url` (u.expo.dev/e2f465a7-…), `extra.eas.projectId` e2f465a7-…,
+  `extra.router.origin: false`, `web.bundler: metro`. The scaffold (f396356) agreed with legacy
+  on all of these except `name` ("Ask Ansari") and `scheme` (`askansari`). Legacy wins on both,
+  so existing `ansarichat://` links keep reaching the successor app.
+  **`version`** is a store marketing number, not an identifier. Legacy ships 3.5.0; I keep
+  f396356's `4.0.0`, its successor version (build numbers are remote, per `eas.json`).
+  Tell me if it should be 3.5.0. From the scaffold I also keep
+  `android.predictiveBackGestureEnabled: false`. Legacy-only plugins (Sentry,
+  expo-localization, expo-screen-orientation, expo-build-properties) and `extra.criticalIndex`
+  / `supportsRTL` are runtime features of the old app, not identity, and are not carried. Functional config from
   the prototype: `newArchEnabled`, `backgroundColor`s, light/dark `splash`, `supportsTablet`,
   `CADisableMinimumFrameDurationOnPhone`, the two-layer adaptive icon, `web.output: single`
   and favicon, plugins **exactly** `["expo-router","expo-font","expo-web-browser","expo-video"]`,
@@ -133,7 +144,8 @@ One PR, phases as commits (`[PIR #262][Phase: implement] …`).
   `expo-secure-store` plugins in the spike. I revert that to the prototype's list as the issue
   specifies, and note it for the EAS follow-up. The scaffold's `expo-splash-screen` and
   `expo-status-bar` plugin entries are replaced by the prototype's top-level `splash`.
-  `eas.json` is unchanged.
+  `eas.json` is unchanged. It matches legacy's except the CLI floor (`>= 21.0.0` vs
+  `>= 15.0.12`), and the newer floor stays.
 - **`.gitignore`**: the scaffold's file, plus the prototype's `.env` line. The prototype's
   lockfile ignores are not carried (they would hide a stray nested lockfile).
 - **`turbo.json`**: no change expected. `test` already exists, `EXPO_PUBLIC_*` and `VITEST`
@@ -205,14 +217,12 @@ One PR, phases as commits (`[PIR #262][Phase: implement] …`).
 
 ## Open questions for the gate
 
-1. **`app.json` `name`: "Ask Ansari" or "Ansari"?** The issue lists `name` among the
-   f396356 identity fields to take verbatim ("Ask Ansari"). The prototype's
-   `lib/page-metadata.test.ts:57-59` (#238) asserts `expo.name === 'Ansari'` ("names the web
-   app plainly"). With `output: single` and the custom `public/index.html` +
-   `site.webmanifest`, the web tab title and PWA name come from the shell, not from
-   `expo.name`, so this is essentially the **native home-screen name**. **Default unless told
-   otherwise:** follow the issue ("Ask Ansari") and change that one assertion to pin the
-   EAS identity name, with a comment explaining why.
+1. ~~`app.json` name~~ **Resolved (owner, 2026-10-11): "Ansari", with the identity taken
+   from `legacy/frontend-app/app.json`** (phase 2). The #238 assertion in
+   `lib/page-metadata.test.ts` passes unchanged. Consequence for the issue's acceptance line:
+   `expo config` resolves scheme **`ansarichat`**, not `askansari`.
+   No code hard-codes a URL scheme (grep for `://` schemes, `Linking.createURL` and
+   `makeRedirectUri` finds none), so the change is confined to `app.json`.
 2. **Global CSS import.** I keep Uniwind wired (metro, `src/global.css`, `gen:types`, types,
    deps) but do **not** import `src/global.css` or mount `HeroUINativeProvider` in the ported
    `app/_layout.tsx`. On web, `@import "tailwindcss"` brings Tailwind's preflight reset, which
@@ -230,7 +240,6 @@ One PR, phases as commits (`[PIR #262][Phase: implement] …`).
   .gitignore,eslint.config.mjs,Dockerfile.web,README.md}`, merged and edited as above
 - `apps/frontend/app/_layout.tsx` (fixes 2, 3), `hooks/useScreenLandmark.ts` (fix 3),
   `components/Sidebar.tsx` (fix 4), 10 components (fix 1), plus mechanical lint fixes
-- `apps/frontend/lib/page-metadata.test.ts:58` (only if open question 1 resolves to "Ask Ansari")
 - `pnpm-lock.yaml`, root `package.json` (`prototype` script removed), `.github/workflows/ci.yml`
 - `codev/resources/{arch.md,arch-critical.md,lessons-learned.md,lessons-critical.md}`
 - `codev/state/pir-262_thread.md`
@@ -265,7 +274,8 @@ One PR, phases as commits (`[PIR #262][Phase: implement] …`).
 - `pnpm exec turbo run lint --filter ansari-frontend`, then `typecheck`, then `test`, then
   `build`, as separate invocations like CI. `test` reports **44 files** (606 tests today).
   `gen:types` runs under the graph.
-- `npx expo config --type public`: slug `ansari-chat`, scheme `askansari`, `chat.ansari.app`,
+- `npx expo config --type public`: name `Ansari`, slug `ansari-chat`, scheme `ansarichat`,
+  `chat.ansari.app`, projectId e2f465a7-…,
   the prototype's 4 plugins.
 - `pnpm --filter ansari-frontend run build:web` produces `dist/`. Serve it statically and load
   it in Chrome: auto-guest provisions, an answer streams with citations from `api-staging`,

@@ -14,3 +14,4 @@
 - Open at gate: app.json `name` ("Ask Ansari" per issue vs #238 test asserting "Ansari");
   global.css left unimported (Tailwind preflight); React Compiler lint rules → warn.
 - Issue correction: RELEASE.md has no prototype references today.
+- Gate feedback (owner): app name "Ansari"; identity from legacy/frontend-app/app.json → scheme ansarichat (not askansari). Version kept 4.0.0 pending confirmation.
