@@ -36,11 +36,12 @@ export function createAuth(db: Db = createDb()) {
       schema,
     }),
     // CORS_ORIGIN is the web origin; the rest are the Expo app's origins. The
-    // custom scheme MUST match apps/frontend/app.json (`"scheme": "askansari"`)
-    // — a native request carries `expo-origin: askansari://…`, and a mismatch
+    // custom scheme MUST match apps/frontend/app.json (`"scheme": "ansarichat"`,
+    // the legacy store app's scheme, kept by its successor — #262)
+    // — a native request carries `expo-origin: ansarichat://…`, and a mismatch
     // fails origin validation in production. `exp://` is Expo Go; the
     // `http://localhost:8081` is Metro's web/dev origin.
-    trustedOrigins: [env.CORS_ORIGIN, 'askansari://', 'exp://', 'http://localhost:8081'],
+    trustedOrigins: [env.CORS_ORIGIN, 'ansarichat://', 'exp://', 'http://localhost:8081'],
     emailAndPassword: {
       enabled: true,
     },

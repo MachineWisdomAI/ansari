@@ -70,14 +70,18 @@ afterAll(async () => {
 });
 
 describe('trusted origins carry the frontend Expo scheme', () => {
-  it('trusts askansari:// (apps/frontend/app.json) and not the scaffold default ansari://', () => {
+  // `ansarichat` is apps/frontend/app.json's scheme (the legacy store app's,
+  // #262). The rejected ones are the prototype default `ansari://` and the
+  // scaffold's former `askansari://`, so reverting the scheme here fails.
+  it('trusts ansarichat:// (apps/frontend/app.json), not ansari:// or askansari://', () => {
     const origins = auth.options.trustedOrigins as string[];
-    expect(origins).toContain('askansari://');
+    expect(origins).toContain('ansarichat://');
     expect(origins).not.toContain('ansari://');
+    expect(origins).not.toContain('askansari://');
   });
 
-  it('accepts a sign-in bearing the askansari:// origin over HTTP', async () => {
-    const res = await auth.handler(signInReq(BASE, 'askansari://'));
+  it('accepts a sign-in bearing the ansarichat:// origin over HTTP', async () => {
+    const res = await auth.handler(signInReq(BASE, 'ansarichat://'));
     expect(res.status).toBe(200);
   });
 });
