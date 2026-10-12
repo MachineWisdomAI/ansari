@@ -3,7 +3,36 @@
 Thank you for wanting to improve Ansari. Contributions of all kinds are welcome —
 bug reports, fixes, tests, documentation, and translations.
 
+## Filing an issue
+
+You don't need to write code to help — a clear report is a real contribution.
+[Open an issue](https://github.com/iaser-ai/ansari/issues/new/choose) and pick the
+form that fits:
+
+- **Bug report** — what happened, what you expected, the steps to reproduce it,
+  where you saw it (askansari.ai, the mobile app, the API, or a self-hosted
+  instance), and roughly when, with your timezone, so we can find the matching logs.
+- **Feature request** — start with the problem you are trying to solve and who it
+  affects, then any alternatives you considered. A proposed solution is welcome
+  but optional.
+
+If neither form fits, a blank issue is fine. For general questions, email
+`info@iaser.ai`.
+
+**Answer-accuracy issues should cite sources.** Ansari is an Islamic Q&A
+assistant, so accuracy and sourcing are the heart of the project. If an answer is
+wrong or misleading, include the exact question you asked and the evidence for
+what it should have said — the Qur'an ayah, hadith reference, or scholarly work.
+
+**Security vulnerabilities never go in a public issue** — see
+[Reporting security issues](#reporting-security-issues) below.
+
 ## Development setup
+
+You need **Node 22** (22.18 or newer; `.nvmrc` pins the major for `nvm use`).
+[`docs/self-hosting.md`](docs/self-hosting.md) covers prerequisites and the full
+environment contract, and [`apps/api/README.md`](apps/api/README.md) covers the
+backend in more depth.
 
 This is a **pnpm workspace** (`apps/api/` + `apps/frontend/`) driven by
 **[Turborepo](https://turborepo.com)**: install once at the repo root, then run
@@ -67,6 +96,16 @@ You can still target one package directly — `pnpm api lint`, `pnpm frontend we
 
 ## Pull requests
 
+- **Branch from `develop` and target `develop`** — not `main`. `main` is
+  production and is only ever fast-forwarded to `develop` during a release (see
+  [RELEASE.md](RELEASE.md)), so PRs against it can't be merged.
+- CI must be green before a PR can merge. `develop` requires all four checks:
+  `api (lint, typecheck, test, build)`, `auth (lint, typecheck, test, build)`,
+  `frontend (lint, typecheck)`, and `gitleaks (secret scan)`. The
+  [Checks](#checks) above are the same tasks, so passing them locally is a good
+  predictor. If the secret scan fails, see [Secret scanning](#secret-scanning).
+- Stage files explicitly (`git add path/to/file`). Please don't use `git add -A`
+  or `git add .` — that is how stray files and secrets end up in commits.
 - Keep PRs focused: one change per PR.
 - Add or update tests for any behavior change. The Vitest suite
   (`tests/*.test.ts`) is the regression net.
@@ -76,6 +115,29 @@ You can still target one package directly — `pnpm api lint`, `pnpm frontend we
   scrutiny: accuracy and proper sourcing are the core of this project. Cite the
   basis for any change to `lib/ai/prompts/`.
 
+## Secret scanning
+
+Every PR is scanned for credentials by [gitleaks](https://github.com/gitleaks/gitleaks).
+On a PR the scan covers **only the PR's own commits** (`origin/develop..HEAD`), so
+a hit is in a commit on your branch. (Pushes to `develop` and `main` scan the
+branch's full history.) If it flags something:
+
+- **A real credential** — rotate it immediately, then remove it from your
+  branch's history by rewriting the commit. An allowlist entry is not a fix: the
+  secret is already exposed.
+- **A test fixture** (a fake key or token in a test) — prefer changing the
+  fixture to a value that doesn't trip the scanner. If that is genuinely
+  impossible, add an allowlist entry with a written justification beside it:
+  either a `.gitleaksignore` fingerprint (`commit:file:rule:line`, which pins one
+  adjudicated finding) or a `.gitleaks.toml` regex (wider, so it needs a stronger
+  reason).
+
+Changes to `.gitleaksignore` and `.gitleaks.toml` always get extra scrutiny — a
+maintainer reviews the entry itself, not just the PR around it.
+
 ## Reporting security issues
 
-Do not open a public issue — see [SECURITY.md](SECURITY.md).
+**Please never report a vulnerability in a public issue, PR, or comment.** Use
+GitHub's [private vulnerability reporting](https://github.com/iaser-ai/ansari/security/advisories/new)
+("Report a vulnerability" under the repository's Security tab) so it can be fixed
+before it is disclosed. [SECURITY.md](SECURITY.md) has the full policy.

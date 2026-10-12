@@ -12,6 +12,30 @@ export default [
   ...expoConfig,
   {
     // App-specific ignores; the shared base covers node_modules/dist/.expo.
-    ignores: ['expo-env.d.ts', 'uniwind-types.d.ts'],
+    // `vendor/api-client-react/generated/` is orval output (machine-written,
+    // regenerated rather than edited), so it is not hand-lintable.
+    ignores: ['expo-env.d.ts', 'uniwind-types.d.ts', 'vendor/api-client-react/generated/**'],
+  },
+  {
+    // Build scripts run under Node, not in the app bundle.
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      globals: { Buffer: 'readonly', process: 'readonly' },
+    },
+  },
+  {
+    // SCOPED OVERRIDE (#262 -> #264). eslint-config-expo 57 ships
+    // eslint-plugin-react-hooks v7, whose React Compiler rules flag 26 sites
+    // in code ported verbatim from the SDK 54 prototype (which never ran
+    // eslint). They mark components the compiler skips optimising, not
+    // runtime errors, and each fix restructures a component, which is
+    // #264's job, not a verbatim port's. Downgraded to warnings so they stay
+    // visible; restore to errors in #264 once fixed.
+    rules: {
+      'react-hooks/set-state-in-effect': 'warn',
+      'react-hooks/refs': 'warn',
+      'react-hooks/immutability': 'warn',
+      'react-hooks/globals': 'warn',
+    },
   },
 ];

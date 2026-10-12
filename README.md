@@ -14,7 +14,7 @@ Alliance for Safe, Ethical, and Responsible AI).
 | Directory | Contents |
 |-----------|----------|
 | [`apps/api/`](apps/api/) | The production backend: Next.js API, Gemini-powered facilitator, Islamic search tools |
-| [`apps/frontend/`](apps/frontend/) | The Ask Ansari app: Expo / React Native (iOS, Android, and web via react-native-web) |
+| [`apps/frontend/`](apps/frontend/) | The Ansari app: Expo / React Native (iOS, Android, and web via react-native-web) |
 | [`docs/`](docs/) | Documentation, including the [self-hosting guide](docs/self-hosting.md) |
 
 This is a [pnpm workspace](https://pnpm.io/workspaces) driven by

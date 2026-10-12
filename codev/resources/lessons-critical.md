@@ -8,7 +8,7 @@ STARTER: a few universal lessons are seeded; add your project's as you learn the
 
 ## Critical lessons (consult before deciding)
 - Check for existing work (PRs, git history) before building from scratch.
-- "It compiled" / "tests pass" is not "it works" — verify the real user path before calling it done.
+- "It compiled" / "tests pass" is not "it works" — verify the real user path before calling it done. For anything visual or timing-sensitive, that means the real device, from the moment the symptom starts (not a Simulator, not steady state), judged blind when it is a matter of eye.
 - When stuck (2 failed hypotheses or ~30 min), get an outside perspective instead of guessing.
 - Test transactional/atomic behavior against a real DB (pglite), not mocks — a helper that ignores its `tx` executor passes every mocked test but commits nothing atomically.
 - Never log a raw driver/DB error object — it can embed user content (email, query params, password hash). Log only `{name, code}`.
@@ -22,5 +22,12 @@ STARTER: a few universal lessons are seeded; add your project's as you learn the
 - Auth hardening (spec 4) — consult when working on sessions/tokens, revocation races, anti-oracle responses, or drizzle/pg error handling.
 - Gemini history fidelity (issue #70) — consult when persisting replayed payloads, cutting streams mid-loop, or changing the messages schema used by pglite test DDL.
 - Tool-call persistence (spec 73) — consult when adding message columns, persisting on error paths, mocking modules routes import, or numbering migrations after a concurrent merge.
-- Monorepo migration & verification discipline (spec 48) — consult when verifying build/cache/env changes, writing scan patterns, or fixing docs across a monorepo.
-- Incremental streaming render — prototype (issue #65) — consult when rendering an SSE/streamed response incrementally, swapping a synthetic in-progress element for a persisted one without flicker, or distinguishing transport streaming from render streaming.
+- Monorepo migration & verification discipline (spec 48) + prototype promotion (issue #262) — consult when verifying build/cache/env changes, writing scan patterns, fixing docs across a monorepo, upgrading an Expo/RN SDK, or trusting a green check on code that only runs on native.
+- Incremental streaming render / Paced streaming reveal — frontend (issues #65, #189) — consult when rendering a streamed response incrementally, swapping a synthetic in-progress element for a persisted one without flicker, or pacing/animating streamed text against a cursor over revisable text.
+- Derived citable documents (spec 168) — consult when deriving a fact from stored records, writing type-level or source-scan tests, adding a bench/vitest config, or chasing a failure right after a load test.
+- Citation mapping (issue #161) + Hadith grades & source pills (issue #194) — frontend — consult when matching model output to retrieved sources, joining a second endpoint's data onto a list, adding an auxiliary fetch to a screen, parsing a data shape known only from a symptom, or folding/collapsing a wrapping layout.
+- Composer tap on mobile web (issue #202) + Sign-in sheet (issue #245) — frontend — consult when a field loses focus unexpectedly on the web, a list or modal must move in step with a keyboard/shell resize, testing a module that listens at import time, verifying anything on mobile web (iOS Simulator + idb for layout and input, not headless Chrome; smoothness needs a real device, #254), or a dev server seems to ignore your edits.
+- Compact retrieval trace — frontend (issue #204) — consult when deriving a summary view over per-event records, giving one word of a line its own opacity, or a reviewer can't see a pushed fix in the dev server.
+- New Ansari logo — frontend (issue #223) — consult when changing an SVG mark or its viewBox, regenerating icon rasters, adding a test in a new directory, or taking screenshots without the Chrome extension.
+- Ambient shadow strength (issue #225) + jitter (issue #254) — frontend — consult when tuning a visual intensity constant (size it in ΔL*), turning a knob whose effect a solver may cancel, chasing a smoothness report from a phone, measuring on a real device without a cable, judging a visual change by eye (blind A/B), or changing a video's playback rate, loop encode or arrival.
+- Scripture in answer prose — frontend (issue #228) — consult when mixing Arabic and English in one text block, classifying text by script, keeping an inline control on its word's line, balancing centred lines, or asserting react-native-web styles in jsdom.

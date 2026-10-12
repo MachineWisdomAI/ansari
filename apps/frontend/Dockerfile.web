@@ -24,17 +24,9 @@ COPY apps/frontend apps/frontend
 
 # EXPO_PUBLIC_* values are baked into the JS bundle at export time.
 # Railway service variables arrive here as build args.
-ARG EXPO_PUBLIC_API_V2_URL
-ARG EXPO_PUBLIC_API_TIMEOUT
-ARG EXPO_PUBLIC_ENVIRONMENT
-ARG EXPO_PUBLIC_SENTRY_DSN
-ARG EXPO_PUBLIC_SUBSCRIBE_URL
-ARG EXPO_PUBLIC_FEEDBACK_EMAIL
-ARG EXPO_PUBLIC_COMPREHENSIVE_GUIDE_URL
-ARG EXPO_PUBLIC_PRIVACY_URL
-ARG EXPO_PUBLIC_TERMS_URL
-ARG EXPO_PUBLIC_ENABLE_SHARE
-ARG EXPO_PUBLIC_SHARE_URL
+# EXPO_PUBLIC_API_URL is the app's ENTIRE env surface (lib/api/config.ts); unset,
+# the bundle uses its baked default, https://api-staging.askansari.ai.
+ARG EXPO_PUBLIC_API_URL
 # A declared ARG is visible as an env var to RUN steps in this stage, so the
 # args above reach the export below without re-exporting via ENV.
 ENV EXPO_NO_TELEMETRY=1
