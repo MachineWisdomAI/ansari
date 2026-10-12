@@ -50,8 +50,11 @@ environment-variable contract, and deployment notes.
 
 Ansari is a [Codev](https://codevos.ai) project: development follows the Codev
 methodology of AI-assisted engineering, with specs, plans, and reviews versioned
-in [`codev/`](codev/). You don't need to know Codev to contribute — see
-[`CONTRIBUTING.md`](CONTRIBUTING.md) to get started.
+in [`codev/`](codev/). Developing with
+[Codev](https://github.com/cluesmith/codev) is strongly recommended — see
+[`CONTRIBUTING.md`](CONTRIBUTING.md) to get started, and its
+[Codev section](CONTRIBUTING.md#developing-with-codev-strongly-recommended) for
+working from a fork.
 
 Security issues: see [`SECURITY.md`](SECURITY.md) — please do not open public
 issues for vulnerabilities.

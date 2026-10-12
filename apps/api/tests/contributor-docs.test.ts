@@ -110,6 +110,16 @@ describe('CONTRIBUTING.md', () => {
     expect(readFileSync(resolve(repoRoot, '.github/scripts/gitleaks-scan.sh'), 'utf8')).toContain('range="${base}..HEAD"');
   });
 
+  it('keeps the recommended Developing-with-Codev section, and README points at it', () => {
+    // README strongly recommends Codev and sends fork contributors here; the
+    // section must survive edits and keep saying so.
+    expect(doc).toMatch(/^### Developing with Codev \(strongly recommended\)$/m);
+    expect(doc).toContain('We strongly recommend developing with [Codev](https://github.com/cluesmith/codev)');
+    const readme = readFileSync(resolve(repoRoot, 'README.md'), 'utf8');
+    expect(readme).toContain('CONTRIBUTING.md#developing-with-codev-strongly-recommended');
+    expect(readme).toMatch(/strongly\s+recommended/);
+  });
+
   it('targets develop and mentions git add -A only to discourage it', () => {
     expect(doc).toMatch(/target `develop`/);
     const lines = doc.split('\n').filter((l) => l.includes('git add -A'));
