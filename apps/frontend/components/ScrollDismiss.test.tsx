@@ -27,12 +27,15 @@ beforeEach(() => {
 // `document` throws into whatever file the worker runs next (#290). So
 // it runs here, while the page still exists — and nothing may outlive it.
 afterEach(() => {
-  act(() => {
-    vi.runOnlyPendingTimers();
-  });
-  expect(vi.getTimerCount()).toBe(0);
-  cleanup();
-  vi.useRealTimers();
+  try {
+    act(() => {
+      vi.runOnlyPendingTimers();
+    });
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    cleanup();
+    vi.useRealTimers();
+  }
 });
 
 function scrollWhileTyping(mode: 'on-drag' | 'none') {
