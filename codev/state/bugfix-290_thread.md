@@ -53,3 +53,13 @@ Ran full `turbo run test --force` at default concurrency, 10 times, with `.env.c
 - 3× `eslint-env-guard` "the real tree is clean" hit the 5s timeout (already #292).
 - 1× `thread-get-contract.test.ts:266`: `share!.content.messages[1].documents` was undefined under load. This one is NOT
   in #292's list; it was flagged to the architect.
+
+## PR #293 + CMAP (2026-10-13)
+
+`consult` needed `--issue 290` here ("Multiple projects found" without it). Gemini's first lane was skipped (agy gave no output), and the retry approved.
+- gemini APPROVE.
+- codex COMMENT: the branch is 10 commits behind develop. Those commits touch unrelated files and the merge-tree is clean, so I left it.
+- claude APPROVE. One item was taken: the ScrollDismiss `afterEach` now runs `cleanup`/`useRealTimers` in a `finally`, so a tripped
+  drain assertion can't leak fake timers into the next test (d305c40). Two were declined:
+  - "Use Part of #290": the triage made #290 frontend-only, with the api half in #292.
+  - "File the thread-get-contract flake": the architect already forwarded it to main for #292.
