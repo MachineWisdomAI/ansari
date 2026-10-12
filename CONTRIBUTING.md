@@ -115,11 +115,11 @@ You can still target one package directly — `pnpm api lint`, `pnpm frontend we
   scrutiny: accuracy and proper sourcing are the core of this project. Cite the
   basis for any change to `lib/ai/prompts/`.
 
-### Using the Codev tooling (optional)
+### Using the Codev tooling (strongly recommended)
 
-You never need Codev to contribute; a plain fix with tests is always welcome. If
-you do drive your work with `afx spawn` and porch from a fork, a few notes save
-the usual papercuts:
+We strongly recommend driving your work with Codev (`afx spawn` and porch); it
+is how this project is built. If you use it from a fork, a few notes save the
+usual papercuts:
 
 - The CLI reference is `codev/resources/commands/overview.md`. It and the
   protocol docs (`codev/protocols/<name>/`) ship with the installed

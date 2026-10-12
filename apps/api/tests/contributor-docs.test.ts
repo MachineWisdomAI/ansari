@@ -110,14 +110,14 @@ describe('CONTRIBUTING.md', () => {
     expect(readFileSync(resolve(repoRoot, '.github/scripts/gitleaks-scan.sh'), 'utf8')).toContain('range="${base}..HEAD"');
   });
 
-  it('keeps the optional Codev-tooling section, and README points at it', () => {
-    // README promises Codev is optional and sends fork contributors here; the
+  it('keeps the recommended Codev-tooling section, and README points at it', () => {
+    // README strongly recommends Codev and sends fork contributors here; the
     // section must survive edits and keep saying so.
-    expect(doc).toMatch(/^### Using the Codev tooling \(optional\)$/m);
-    expect(doc).toContain('You never need Codev to contribute');
+    expect(doc).toMatch(/^### Using the Codev tooling \(strongly recommended\)$/m);
+    expect(doc).toContain('We strongly recommend driving your work with Codev');
     const readme = readFileSync(resolve(repoRoot, 'README.md'), 'utf8');
-    expect(readme).toContain('CONTRIBUTING.md#using-the-codev-tooling-optional');
-    expect(readme).toContain("You don't need to know Codev to contribute");
+    expect(readme).toContain('CONTRIBUTING.md#using-the-codev-tooling-strongly-recommended');
+    expect(readme).toMatch(/strongly\s+recommended/);
   });
 
   it('targets develop and mentions git add -A only to discourage it', () => {
