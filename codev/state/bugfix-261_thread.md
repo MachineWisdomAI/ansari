@@ -53,3 +53,8 @@
   `--model-id gpt-5.5`: APPROVE (reviewed after the tightening commit; gemini and claude
   reviewed before it).
 - `pr` gate requested. Waiting for the architect.
+- `pr` gate approved by the human (relayed by the architect, 2026-10-12). Ran
+  `porch approve` and `porch done`; porch now reports the protocol complete/verified even
+  though PR #288 is NOT merged. This account has read-only access upstream, so the merge
+  is left to a maintainer. No fork-CI `action_required` hold: CI started on the head commit.
+- Still open after merge: rerun the GraphQL `contactLinks` query and confirm both links.
