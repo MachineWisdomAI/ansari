@@ -28,6 +28,15 @@ const requiredIds = (form: Form) =>
     .filter((f) => f.validations?.required === true)
     .map((f) => f.id);
 
+// GitHub's heading anchor: lowercase, punctuation dropped, spaces to hyphens.
+const slug = (heading: string) =>
+  heading
+    .replace(/^#+\s*/, '')
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, '')
+    .trim()
+    .replace(/\s+/g, '-');
+
 describe('issue forms', () => {
   it('are YAML forms, not prose templates', () => {
     const files = readdirSync(templateDir).sort();
@@ -70,6 +79,29 @@ describe('issue forms', () => {
     expect(links.every((l) => l.name && l.url && l.about)).toBe(true);
     expect(links.find((l) => /security/i.test(l.name))?.url).toBe(ADVISORY_URL);
     expect(links.some((l) => /question/i.test(l.name))).toBe(true);
+  });
+
+  it('config contact links are all https, the only scheme GitHub serves', () => {
+    const config = parse(readFileSync(resolve(templateDir, 'config.yml'), 'utf8'));
+    const links: { name: string; url: string }[] = config.contact_links;
+    // GitHub drops a non-https link (mailto: included) from the chooser without
+    // any error, so a link that parses fine here can still never be shown (#261).
+    expect(links.length).toBeGreaterThan(0);
+    for (const link of links) {
+      expect(link.url, `GitHub will drop "${link.name}"`).toMatch(/^https:\/\//);
+    }
+  });
+
+  it('the general-question link lands on the section that gives the email address', () => {
+    const config = parse(readFileSync(resolve(templateDir, 'config.yml'), 'utf8'));
+    const links: { name: string; url: string }[] = config.contact_links;
+    const url = new URL(links.find((l) => /question/i.test(l.name))!.url);
+    expect(url.pathname).toBe('/iaser-ai/ansari/blob/develop/CONTRIBUTING.md');
+    const doc = readFileSync(resolve(repoRoot, 'CONTRIBUTING.md'), 'utf8');
+    const heading = doc.split('\n').find((l) => /^#+ /.test(l) && slug(l) === url.hash.slice(1));
+    expect(heading, `no heading for ${url.hash}`).toBeTruthy();
+    const section = doc.slice(doc.indexOf(heading!)).split(/\n## /)[0];
+    expect(section).toContain('info@iaser.ai');
   });
 });
 
