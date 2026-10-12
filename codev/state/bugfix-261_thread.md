@@ -49,4 +49,7 @@
   next heading of the same or higher level (not a hardcoded `##`), starts at the matched
   line index, and reads the file the URL path names. Negative-tested three ways: `mailto:`
   (2 fail), heading renamed (1 fail), address moved to the next section (1 fail).
-- codex: default model `gpt-5.6-sol` is rejected for this ChatGPT account, so no verdict.
+- codex: default model `gpt-5.6-sol` is rejected for this ChatGPT account. Reran with
+  `--model-id gpt-5.5`: APPROVE (reviewed after the tightening commit; gemini and claude
+  reviewed before it).
+- `pr` gate requested. Waiting for the architect.
