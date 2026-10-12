@@ -1,7 +1,7 @@
 id: bugfix-290
 title: apps-frontend-jsdom-component-
 protocol: bugfix
-phase: fix
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-10-12T23:21:12.151Z'
-updated_at: '2026-10-12T23:26:24.986Z'
+updated_at: '2026-10-12T23:33:54.791Z'
