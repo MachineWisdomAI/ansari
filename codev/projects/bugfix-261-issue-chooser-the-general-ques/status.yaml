@@ -1,7 +1,7 @@
 id: bugfix-261
 title: issue-chooser-the-general-ques
 protocol: bugfix
-phase: pr
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -13,5 +13,5 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-10-12T21:18:34.104Z'
-updated_at: '2026-10-12T23:39:09.435Z'
+updated_at: '2026-10-12T23:39:25.153Z'
 pr_ready_for_human: false
