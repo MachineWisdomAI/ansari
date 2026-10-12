@@ -38,3 +38,15 @@
   identified.
 - Acceptance criterion "GraphQL returns both links" can only be checked after merge: the
   chooser renders from the default branch.
+
+## PR (2026-10-12)
+
+- PR #288 against iaser-ai/ansari `develop`.
+- First CMAP round produced nothing: `consult` stopped on "Multiple projects found" because
+  the develop merge brought every project directory into the worktree. Reran with
+  `--issue 261`.
+- gemini APPROVE, claude APPROVE. Claude's nits taken: the section check now ends at the
+  next heading of the same or higher level (not a hardcoded `##`), starts at the matched
+  line index, and reads the file the URL path names. Negative-tested three ways: `mailto:`
+  (2 fail), heading renamed (1 fail), address moved to the next section (1 fail).
+- codex: default model `gpt-5.6-sol` is rejected for this ChatGPT account, so no verdict.

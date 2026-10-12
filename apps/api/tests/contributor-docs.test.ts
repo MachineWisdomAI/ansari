@@ -96,11 +96,17 @@ describe('issue forms', () => {
     const config = parse(readFileSync(resolve(templateDir, 'config.yml'), 'utf8'));
     const links: { name: string; url: string }[] = config.contact_links;
     const url = new URL(links.find((l) => /question/i.test(l.name))!.url);
-    expect(url.pathname).toBe('/iaser-ai/ansari/blob/develop/CONTRIBUTING.md');
-    const doc = readFileSync(resolve(repoRoot, 'CONTRIBUTING.md'), 'utf8');
-    const heading = doc.split('\n').find((l) => /^#+ /.test(l) && slug(l) === url.hash.slice(1));
-    expect(heading, `no heading for ${url.hash}`).toBeTruthy();
-    const section = doc.slice(doc.indexOf(heading!)).split(/\n## /)[0];
+    // The file read below is the one the URL names, so moving it breaks this test.
+    const prefix = '/iaser-ai/ansari/blob/develop/';
+    expect(url.pathname.startsWith(prefix), url.pathname).toBe(true);
+    const lines = readFileSync(resolve(repoRoot, url.pathname.slice(prefix.length)), 'utf8').split('\n');
+    const start = lines.findIndex((l) => /^#+ /.test(l) && slug(l) === url.hash.slice(1));
+    expect(start, `no heading for ${url.hash}`).toBeGreaterThanOrEqual(0);
+    // The section ends at the next heading of the same or a higher level.
+    const depth = lines[start].match(/^#+/)![0].length;
+    const rest = lines.slice(start + 1);
+    const end = rest.findIndex((l) => new RegExp(`^#{1,${depth}} `).test(l));
+    const section = (end === -1 ? rest : rest.slice(0, end)).join('\n');
     expect(section).toContain('info@iaser.ai');
   });
 });
