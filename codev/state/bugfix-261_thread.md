@@ -17,3 +17,24 @@
   `https://github.com/iaser-ai/ansari/blob/develop/CONTRIBUTING.md#filing-an-issue`, which
   already says to email `info@iaser.ai`. Enabling Discussions is a maintainer decision and
   was left alone.
+
+## Fix (2026-10-12)
+
+- `config.yml`: "General question" now links to
+  `https://github.com/iaser-ai/ansari/blob/develop/CONTRIBUTING.md#filing-an-issue`.
+- `contributor-docs.test.ts`: two new tests. One asserts every contact link is `https://`.
+  The other asserts the question link's anchor resolves to a real CONTRIBUTING.md heading
+  whose section still contains `info@iaser.ai`, so the link cannot rot into a dead end.
+- Negative test: restored the old `mailto:` config, both new tests failed (2 failed / 11
+  passed); with the fix 13 passed.
+- First push was rejected (`workflow` scope missing: the merge of upstream develop carried
+  `.github/workflows/ci.yml` changes the fork did not have). It went through later once the
+  fork's `develop` had caught up to a7134cb; I did not sync the fork myself.
+- porch `build` check needs env. `next build` fails in a bare worktree (no `.env`); ran the
+  checks with the committed dummy `apps/api/.env.ci` loaded, as CI does. Loading
+  `apps/auth/.env.ci` as well makes `@ansari/auth` tests fail, so load only the API one.
+- One porch `tests` run failed in `ansari-api#test` and I did not capture which test. Two
+  full reruns passed (API 84 files, frontend 616 tests), so it is intermittent and not
+  identified.
+- Acceptance criterion "GraphQL returns both links" can only be checked after merge: the
+  chooser renders from the default branch.
