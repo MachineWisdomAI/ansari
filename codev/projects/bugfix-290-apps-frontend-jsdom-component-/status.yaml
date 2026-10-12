@@ -1,0 +1,14 @@
+id: bugfix-290
+title: apps-frontend-jsdom-component-
+protocol: bugfix
+phase: investigate
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-10-12T23:21:12.151Z'
+updated_at: '2026-10-12T23:21:12.152Z'
