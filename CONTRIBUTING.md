@@ -115,15 +115,18 @@ You can still target one package directly — `pnpm api lint`, `pnpm frontend we
   scrutiny: accuracy and proper sourcing are the core of this project. Cite the
   basis for any change to `lib/ai/prompts/`.
 
-### Using the Codev tooling (strongly recommended)
+### Developing with Codev (strongly recommended)
 
-We strongly recommend driving your work with Codev (`afx spawn` and porch); it
-is how this project is built. If you use it from a fork, a few notes save the
-usual papercuts:
+We strongly recommend developing with [Codev](https://github.com/cluesmith/codev),
+the human-agent software development methodology this project is built with:
+spawn a builder with Agent Farm (`afx spawn <issue>`) and let porch drive it
+through the protocol. If you work from a fork, a few notes save the usual
+papercuts:
 
-- The CLI reference is `codev/resources/commands/overview.md`. It and the
-  protocol docs (`codev/protocols/<name>/`) ship with the installed
-  `@cluesmith/codev` package and resolve from there when absent from this repo.
+- The [CLI reference](https://github.com/cluesmith/codev/blob/main/codev/resources/commands/overview.md)
+  covers `codev`, `afx`, `porch` and `consult`. Protocol docs
+  (`codev/protocols/<name>/`) ship with the installed `@cluesmith/codev`
+  package and resolve from there when absent from this repo.
 - Commit the generated `codev/projects/<id>/status.yaml` and
   `codev/state/<id>_thread.md` with your PR. They are expected, not noise:
   builder thread files are versioned on purpose.
