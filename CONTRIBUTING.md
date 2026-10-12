@@ -115,6 +115,29 @@ You can still target one package directly — `pnpm api lint`, `pnpm frontend we
   scrutiny: accuracy and proper sourcing are the core of this project. Cite the
   basis for any change to `lib/ai/prompts/`.
 
+### Using the Codev tooling (optional)
+
+You never need Codev to contribute; a plain fix with tests is always welcome. If
+you do drive your work with `afx spawn` and porch from a fork, a few notes save
+the usual papercuts:
+
+- The CLI reference is `codev/resources/commands/overview.md`. It and the
+  protocol docs (`codev/protocols/<name>/`) ship with the installed
+  `@cluesmith/codev` package and resolve from there when absent from this repo.
+- Commit the generated `codev/projects/<id>/status.yaml` and
+  `codev/state/<id>_thread.md` with your PR. They are expected, not noise:
+  builder thread files are versioned on purpose.
+- In a fresh worktree, porch's `build` check needs the dummy env loaded first —
+  `set -a && . ./apps/api/.env.ci && set +a` — until
+  [#260](https://github.com/iaser-ai/ansari/issues/260) lands.
+- Porch gate approvals recorded in your fork are your own state, not maintainer
+  approval. Maintainers review and merge (with merge commits, never squash).
+- Sync your fork's `develop` with upstream before branching. A stale base means
+  CI tests an old merge, and the review has to re-verify against current
+  `develop`.
+- A first-time fork PR shows "no checks reported" until a maintainer approves the
+  workflow run. That is normal; there is nothing for you to do.
+
 ## Secret scanning
 
 Every PR is scanned for credentials by [gitleaks](https://github.com/gitleaks/gitleaks).
