@@ -58,3 +58,6 @@
   though PR #288 is NOT merged. This account has read-only access upstream, so the merge
   is left to a maintainer. No fork-CI `action_required` hold: CI started on the head commit.
 - Still open after merge: rerun the GraphQL `contactLinks` query and confirm both links.
+- Architect asked for `porch rollback bugfix-261 pr` so the record matches reality (PR #288
+  still open). Done: phase is `pr` again. Next step after the maintainer merges:
+  `porch done bugfix-261 --merged 288` (architect relays re-approval if the gate reappears).
