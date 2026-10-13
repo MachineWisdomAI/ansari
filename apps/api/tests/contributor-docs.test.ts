@@ -28,6 +28,15 @@ const requiredIds = (form: Form) =>
     .filter((f) => f.validations?.required === true)
     .map((f) => f.id);
 
+// GitHub's heading anchor: lowercase, punctuation dropped, spaces to hyphens.
+const slug = (heading: string) =>
+  heading
+    .replace(/^#+\s*/, '')
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, '')
+    .trim()
+    .replace(/\s+/g, '-');
+
 describe('issue forms', () => {
   it('are YAML forms, not prose templates', () => {
     const files = readdirSync(templateDir).sort();
@@ -70,6 +79,35 @@ describe('issue forms', () => {
     expect(links.every((l) => l.name && l.url && l.about)).toBe(true);
     expect(links.find((l) => /security/i.test(l.name))?.url).toBe(ADVISORY_URL);
     expect(links.some((l) => /question/i.test(l.name))).toBe(true);
+  });
+
+  it('config contact links are all https, the only scheme GitHub serves', () => {
+    const config = parse(readFileSync(resolve(templateDir, 'config.yml'), 'utf8'));
+    const links: { name: string; url: string }[] = config.contact_links;
+    // GitHub drops a non-https link (mailto: included) from the chooser without
+    // any error, so a link that parses fine here can still never be shown (#261).
+    expect(links.length).toBeGreaterThan(0);
+    for (const link of links) {
+      expect(link.url, `GitHub will drop "${link.name}"`).toMatch(/^https:\/\//);
+    }
+  });
+
+  it('the general-question link lands on the section that gives the email address', () => {
+    const config = parse(readFileSync(resolve(templateDir, 'config.yml'), 'utf8'));
+    const links: { name: string; url: string }[] = config.contact_links;
+    const url = new URL(links.find((l) => /question/i.test(l.name))!.url);
+    // The file read below is the one the URL names, so moving it breaks this test.
+    const prefix = '/iaser-ai/ansari/blob/develop/';
+    expect(url.pathname.startsWith(prefix), url.pathname).toBe(true);
+    const lines = readFileSync(resolve(repoRoot, url.pathname.slice(prefix.length)), 'utf8').split('\n');
+    const start = lines.findIndex((l) => /^#+ /.test(l) && slug(l) === url.hash.slice(1));
+    expect(start, `no heading for ${url.hash}`).toBeGreaterThanOrEqual(0);
+    // The section ends at the next heading of the same or a higher level.
+    const depth = lines[start].match(/^#+/)![0].length;
+    const rest = lines.slice(start + 1);
+    const end = rest.findIndex((l) => new RegExp(`^#{1,${depth}} `).test(l));
+    const section = (end === -1 ? rest : rest.slice(0, end)).join('\n');
+    expect(section).toContain('info@iaser.ai');
   });
 });
 
