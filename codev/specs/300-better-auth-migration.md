@@ -142,7 +142,7 @@ After the cutover:
    resolves to a Better Auth session. `/api/v1/chat/completions` keeps its `LEADERBOARD_API_KEY`
    check, and `/api/v2/mcp-complete` stays public. There is no global `middleware.ts`.
 5. **The `/v2/users/*` compatibility layer** and the two password-reset routes are reimplemented
-   over Better Auth with **byte-compatible response shapes**. The released mobile build, the admin
+   over Better Auth with **wire-contract-compatible responses** (same status codes, field names, field presence and types; dynamic values such as tokens and timestamps naturally differ). The released mobile build, the admin
    analytics page and `apps/frontend` all keep working, and their users sign in once more.
 6. **Admins are identified by the admin plugin's `role`**, assigned by a script that replaces
    `grant-admin.ts`. Admin is never an email match. `ADMIN_EMAILS` keeps only its reservation role
@@ -207,17 +207,32 @@ window. The check passes only if it proves both properties:
 The method, raw observations and verdict are recorded in the plan and the review. Until the check
 passes, PR B does not merge.
 
-**Fallback if the check fails** (either property). Per-IP limiting is then not trustworthy, and a
-per-IP-only limit would either be spoofable or collapse into a shared bucket. In that case:
+**Fallback if the check fails** (either property). Per-IP limiting is then not trustworthy: it is
+either spoofable or collapses into a shared bucket. The fallback changes how the layer keys and
+counts its sign-in limit.
 
-- The layer's sign-in limit is keyed by the **normalized target email** (5/60s per account), which
-  no header can redirect and no other user can collapse, and sign-up keeps a per-email limit
-  (3/60s) plus a generous **global ceiling** sized from current production sign-up volume, so a
-  misattributed IP can never become the global 5/60s login cap.
-- Per-IP limiting is kept only as an additional key where the IP is trustworthy, never as the only
-  key.
-- Better Auth's own `rateLimit` keeps the decided config (it serves no public production traffic
-  under the hosting proposal), and the IP finding is written into `arch.md`.
+- **Sign-in is keyed by the normalized target email, and only failed attempts count.**
+  - Five failed sign-ins for one email within 60 seconds lock that email for the rest of the
+    window. While the lock lasts, every sign-in for it is rejected with 429, including one with the
+    correct password.
+  - A successful sign-in never consumes budget, so legitimate users do not burn their own allowance.
+  - A sign-in that fails while locked does not extend the lock.
+- **Sign-up** keeps a per-email limit (3/60s) plus a **global ceiling** sized from current
+  production sign-up volume. A misattributed IP can therefore never become a global cap.
+- **Per-IP limiting** remains only as an *additional* key where the IP is trustworthy, and never as
+  the only key.
+- **Alert on list-walking.** When per-email limit hits span many distinct emails in a short period
+  (the threshold is set in the plan from production baselines), an alert fires through the existing
+  Sentry path. It logs counts and hashed or truncated identifiers only, never raw emails. This is
+  the signature of an attacker walking an email list, which nothing else caps once per-IP is
+  untrusted.
+- **Accepted residual risk, stated explicitly:** anyone who knows a user's email can lock that user
+  out of sign-in.
+  - Bound: one 60-second window per burst of five failures. A sustained lockout needs a sustained
+    five failures per minute against that email, and the list-walk alert surfaces it.
+  - Existing sessions are unaffected. Password reset stays available, under its own limit.
+- Better Auth's own `rateLimit` keeps the decided config. Under the hosting proposal it serves no
+  public production traffic. The IP finding is written into `arch.md`.
 - The security architect is told before PR B proceeds, and the fallback is the configuration PR B
   ships with.
 
@@ -251,7 +266,8 @@ Consequences carried forward:
 
 - The decided Better Auth rate limits, database storage included, are **configured** and
   test-covered in `createAuth()`. Production login and register traffic reaches them only through
-  the layer, so the layer must enforce the same budgets itself (Open Question I-2).
+  the layer, so the layer must enforce the same budgets itself, with database-backed counters
+  shared across instances (I-2).
 - The compatibility layer's removal trigger in the reference plan ("90 days or ≥ 95% new-client
   adoption") only becomes meaningful once a Better Auth-native client exists. Moving
   `apps/frontend` to a Better Auth client and exposing `/api/auth/*` (hosting decided then, for
@@ -260,27 +276,104 @@ Consequences carried forward:
 
 ### Migration SQL location (resolves an issue "must be resolved" item)
 
-**Decision: one migration journal, in `apps/api/drizzle/`.** The `auth` schema DDL and the cutover
-migration are numbered migrations in that journal. `packages/auth/drizzle/` is retired: the #59
-scaffold `0000` has never been applied to production. The window's read-only audits and the
-admin-role script live next to the existing operator scripts under `apps/api/scripts/`.
+**Decision: one migration journal, in `apps/api/drizzle/`.** The main architect, who owns that
+journal, its numbering and the `DEPLOYED_THROUGH` contract, agreed on issue #300 (comment of
+2026-10-14 03:40Z) under seven conditions. Each one is a requirement of this spec and is listed
+below. The window's read-only audits and the admin-role script live next to the existing operator
+scripts under `apps/api/scripts/`.
 
 **Departure from the reference plan.** The reference plan offered `packages/auth/drizzle/` or
 `scripts/migrations/better-auth-cutover/`, pending a "ported framework" from Waleed. That framework
 does not exist in the repo. A single journal is chosen for these reasons:
 
 - **The FK repoint forces it.** After cutover, `threads`, `preferences` and `feedback` reference
-  `auth.users`. For `drizzle-kit generate` in `apps/api` to emit and diff those constraints, the
-  `apps/api` schema has to include the `auth` tables. Two journals that both own `auth.users` would
-  fight over it.
-- **The parity test then covers auth.** `migration-schema-parity.test.ts` and `DEPLOYED_THROUGH`
-  apply to the `auth` schema and the cutover. Today `packages/auth/drizzle` sits outside every
-  check, and that is the #165 outage class.
+  `auth.users`. The auth DDL and the cutover depend on `apps/api`'s tables, and two journals would
+  need a cross-journal ordering that nothing enforces.
+- **The parity test then covers auth.** `migration-schema-parity.test.ts` builds its database from
+  this journal only, so putting auth there is what puts it under the drift guard. Today
+  `packages/auth/drizzle` sits outside every check, and that is the #165 outage class.
 - **Fresh databases come out right in one pass.** The `RELEASE.md` smoke test (`pnpm db:migrate` on
-  an empty Postgres) and the pglite suites build the post-cutover shape in a single run. On an empty
-  database the cutover's data copy moves zero rows.
-- **It fits the existing release practice:** reviewed SQL, applied with `psql`, never `db:push`,
-  `inspect → apply → bootstrap → deploy`.
+  an empty Postgres) builds the full shape in a single run. On an empty database the cutover's data
+  copy moves zero rows.
+- **It fits the existing release practice.** The journal is the ordering and test source, not a
+  runner. Production applies reviewed SQL with `psql` and never `db:push`.
+
+**The seven conditions (main architect):**
+
+1. **Two migrations, not one.**
+   - The **additive** migration holds `CREATE SCHEMA auth` and the Better Auth tables. It is
+     backward-compatible with the deployed code, ships in PR A, and is applied ahead of the window
+     like any other migration.
+   - The **cutover** migration holds the rename of `public.users`, the `INSERT … SELECT`, the
+     `auth.account` backfill, the repoint of the three FKs, and `DROP TABLE tokens`. It is **not**
+     backward-compatible. It is the **one named exception** to `RELEASE.md`'s rule that every
+     migration must be, it is applied only inside the offline window, and **PR B amends
+     `RELEASE.md` to say so**.
+2. **The journal is linear, so the cutover file lands last.** A migration generated after the
+   cutover could not be applied before it. The cutover migration merges in the PR that ships the
+   window (PR B). From PR B's merge until the window closes there is a **schema freeze**: no other
+   PR may add a migration.
+3. **`DEPLOYED_THROUGH` moves once per migration**, and each bump is a human assertion, not proof.
+   - The additive bump is made when the additive migration is applied on staging and production.
+   - The cutover bump is made **by the owner**, in PR B.
+
+   The parity test runs at two markers:
+   - **At the pre-cutover marker** (`DEPLOYED_THROUGH` = the additive migration), the
+     deployed-state test exercises the code paths production serves: the JWT auth helpers, threads,
+     messages, shares. Before PR B, it also exercises the new Better Auth helpers that read and
+     write only `auth.*` tables, such as user and account creation, session lookup and role
+     assignment.
+   - **Against the full journal,** every column the Drizzle schema declares must exist.
+   - `develop` carries PR A's unwired Better Auth code before the window. Any PR A test that needs
+     the post-cutover shape (for example an FK cascade from `auth.users` to `threads`) builds its
+     database from the journal **plus the staged cutover SQL**, never from the journal alone. It is
+     not a parity-test path until PR B journals that SQL.
+4. **Numbering rule (main architect's ruling, option (a), posted on issue #300).** Numbers are
+   never chosen independently. For each migration:
+   1. Merge `develop` into the branch.
+   2. Run `drizzle-kit generate`.
+   3. Rename the generated `.sql` file **and** its `_journal.json` tag by hand to the next real
+      number: **`0009_*`** for the additive migration, then **`0010_*`** for the cutover.
+   4. Leave the snapshot file **named by journal index**, as drizzle writes it (`meta/0008_snapshot.json`
+      for the additive migration).
+   5. **Re-check the numbering after every `develop` merge**, because a concurrent migration shifts
+      both the index and the real number.
+
+   The cutover's data steps (rename instead of drop, the copy, the backfill, the guards, the
+   transaction) are hand-edited into the **body** of its generated file. Its snapshot stays
+   drizzle's, and the parity test proves that the edited SQL yields the snapshot's schema.
+   The rule is needed because generate emits the journal index as the prefix: the dry run below
+   produced `0008_*`, which collides with `0008_model_provenance.sql`. The idx-5 gap is never
+   absorbed.
+5. **`apps/api/drizzle.config.ts` must see the `auth` schema.** Its `schema` is
+   `./db/schema/index.ts`, so the Better Auth tables are re-exported from `@ansari/auth` there.
+   **Dry run, 2026-10-14:**
+   - Setup: drizzle-kit 0.31.10 and drizzle-orm 0.45.2, run on a scratch copy of `apps/api/drizzle`.
+     The schema was `db/schema/index.ts` plus a `pgSchema('auth')` pair (`users`, plus `account`
+     with an FK to it and a unique `(user_id, provider_id)`). The scratch directory has been deleted.
+   - It emitted `CREATE SCHEMA "auth";`, `CREATE TABLE "auth"."users"`, `CREATE TABLE
+     "auth"."account"` and `REFERENCES "auth"."users"("id") ON DELETE cascade`. Nothing in `public`
+     was touched.
+   - **`schemaFilter` is not needed for `generate`.** It only scopes `push`, `pull` and
+     introspection, and this project uses none of them.
+   - **The same run named the file `0008_spike.sql`, journal index 8 and tag `0008_spike`.** That
+     collides with the existing `0008_model_provenance.sql`, so the numbering rule in condition 4
+     applies. The rename also corrects `arch.md`'s note, which says "the next generate emits
+     `0008_*`; name it `0009_*`". That note was written before `0008` existed, and is fixed
+     wherever else it is repeated.
+6. **Retire the `packages/auth` journal explicitly.**
+   - Delete `packages/auth/drizzle/` (its `0000_better_auth_init.sql` and `_journal.json`), and
+     remove the `out` and migrate scripts from `packages/auth/drizzle.config.ts` and its
+     `package.json`.
+   - **Establish whether the #59 scaffold tables were ever applied** to staging or production
+     (`public.user`, `session`, `account`, `verification`). This is a `psql \dt` question for the
+     owner.
+   - If they exist, the additive migration drops them with `IF EXISTS`, but only behind an
+     **in-migration guard that aborts if any of them holds a row**. The operator's empty-check is
+     not enough on its own.
+7. **Hand-written pglite DDL.** More than twenty `apps/api` test files hand-write `users` or
+   `tokens` DDL. The plan has a phase that moves the auth-touching ones to the new tables (in PR B,
+   with the schema switch), **coordinated with #292**, which is changing the setup of the same files.
 
 Every "idempotency helper" the reference plan expected is replaced by properties of the migration
 itself:
@@ -288,14 +381,15 @@ itself:
 - The cutover migration runs as **one transaction**, so a failure leaves nothing half-applied.
 - The `account` backfill uses `ON CONFLICT (user_id, provider_id) DO NOTHING` on the unique
   constraint.
-- **Precondition guards** abort the transaction unless `auth.users` and `auth.account` are empty and
-  `public.users` exists.
+- **Precondition guards** abort the transaction unless `public.users` exists and `auth.users` and
+  `auth.account` are empty.
 
-**Reviewers.** The `apps/api/drizzle/` journal and `DEPLOYED_THROUGH` belong to the **main
-architect**, who reviews every hunk touching them; the security architect has raised this decision
-with main directly. **Waleed** is the named reviewer for the migration SQL itself (location, the
-transaction and guards, the backfill), standing in for the "ported framework" alignment the
-reference plan assigned to him. Open Question C-1 tracks both sign-offs.
+**Reviewers.** The main architect reviews every hunk touching the journal, its numbering and
+`DEPLOYED_THROUGH`, as well as lockfile, `turbo.json` and CI hunks. Adding `@ansari/auth` to
+`apps/api` changes the lockfile in PR A. **Waleed** is the named reviewer for the migration SQL.
+He is asked on issue #300, before spec-approval and pending the owner's OK, whether the legacy
+framework exists anywhere and whether he objects to the single journal. His answer can change this
+spec. The migration SQL is High tier. Open Question C-1 tracks these sign-offs.
 
 ### Phasing (resolves an issue "must be resolved" item; proposal — owner decides at spec-approval)
 
@@ -305,9 +399,9 @@ block a release.
 
 | This project | Reference phases | Production-safe while JWT serves? |
 |---|---|---|
-| **PR A: Prepare** | 0, 1 and the code half of 2: `auth` schema migration, `createAuth()` config, dual verify, rate limiting and client IP, bearer session helper, compatibility layer, reset routes, admin script and assert, CORS fix, cutover migration SQL **drafted and rehearsed but not in the journal**, contract tests | **Yes.** The `auth` schema is additive (empty tables beside `public.users`), and the new code paths are not wired to production routes. PR A can merge and promote normally. |
+| **PR A: Prepare** | 0, 1 and the code half of 2: `auth` schema migration, `createAuth()` config, dual verify, rate limiting and client IP, bearer session helper, compatibility layer, reset routes, admin script and assert, CORS fix, the **additive** migration (generated; condition 1), retirement of the `packages/auth` journal, cutover migration SQL **staged and rehearsed outside the journal**, contract tests | **Yes.** The `auth` schema is additive (empty tables beside `public.users`), and the new code paths are not wired to production routes. PR A can merge and promote normally. |
 | Rehearsal (production-data clone) | 2 | Runs from PR B's branch on a clone of production taken after PR A's migration was applied. Does not touch production. |
-| **PR B: Cutover** | 3, plus the code half of 4 | **No.** Merged to `develop` immediately before the window and promoted **in** the window. It holds the cutover migration (journaled), the route switch, the `users` model → `auth.users`, and removal of JWT, `tokens`, `session_version`, `is_admin`, `grant-admin.ts` and the `JWT_*` config. |
+| **PR B: Cutover** | 3, plus the code half of 4 | **No.** Merged to `develop` immediately before the window and promoted **in** the window. It holds the cutover migration (generated last in the journal; schema freeze from merge to window close), the owner's `DEPLOYED_THROUGH` bump, the `RELEASE.md` exception, the pglite DDL move, the route switch, the `users` model → `auth.users`, and removal of JWT, `tokens`, `session_version`, `is_admin`, `grant-admin.ts` and the `JWT_*` config. |
 | Out of this project (follow-up issues) | 4 triggers, 5 | Drop `users_legacy` (14 days + parity + sign-off). Remove the layer (its trigger). Migrate `apps/frontend` to a Better Auth-native client and expose `/api/auth/*`. Fold `apps/auth`. |
 
 **Why a feature flag cannot replace PR B.** The obvious alternative is to merge the cutover code
@@ -353,6 +447,9 @@ rollback deadline passing.
   `ban_expires`), and `auth.session` carries `impersonated_by`. The column names are confirmed from
   the reviewed `drizzle-kit generate` output.
 - [ ] `auth.account` has a unique `(user_id, provider_id)`.
+- [ ] The additive migration drops the #59 scaffold tables in `public` only when they are empty.
+  Its guard aborts the migration if any of them holds a row, and a test proves the abort.
+- [ ] `packages/auth/drizzle/` is deleted, and no second journal creates `auth` tables.
 - [ ] Auth timestamps are `timestamptz`, or the mapping is documented with a test showing that
   `created_at` and `updated_at` survive the copy exactly. The legacy values are `timestamptz`.
 - [ ] The cutover migration does all of the following in one transaction, guarded by its
@@ -375,10 +472,18 @@ rollback deadline passing.
   - the number of `credential` rows equals the number of non-system users
   - **no system account has a `credential` row**
   - every FK on `threads`, `preferences` and `feedback` targets `auth.users`
-  - every `ADMIN_EMAILS` entry has `role = 'admin'` after the role script
+  - every `ADMIN_EMAILS` entry has `role = 'admin'` after the role script, and the set of
+    `role = 'admin'` users equals the owner-approved inventory
 - [ ] Re-running the backfill on its own creates zero duplicate `account` rows.
-- [ ] The parity test covers the new migrations, and `DEPLOYED_THROUGH` is bumped in the PR that
-  adds each one.
+- [ ] The parity test covers both new migrations at the two markers described under Migration SQL
+  location. `DEPLOYED_THROUGH` moves once per migration: the additive bump when that migration is
+  applied on staging and production, and the cutover bump by the owner in PR B.
+- [ ] Both migration files follow the numbering rule: merge `develop`, generate, then hand-rename
+  the `.sql` file and its journal tag (`0009_*` additive, `0010_*` cutover) while the snapshot keeps
+  drizzle's index name, re-checked after every `develop` merge. A generate dry run with the real `apps/api` config shows `CREATE SCHEMA
+  "auth"` and `"auth".`-qualified tables.
+- [ ] The auth-touching pglite DDL in `apps/api` tests is moved to the new tables, coordinated with
+  #292.
 
 **Credentials and sessions**
 
@@ -404,6 +509,14 @@ rollback deadline passing.
   - Admin routes require `role = 'admin'` and return the same 401 and 403 codes as today.
 - [ ] `/api/v1/chat/completions` (`LEADERBOARD_API_KEY`) and `/api/v2/mcp-complete` behave as today.
   There is no global `middleware.ts`.
+- [ ] **Existing admins are preserved deliberately.**
+  - Before the window, the operator produces an inventory of every `is_admin = true` user and
+    compares it with `ADMIN_EMAILS`.
+  - The owner approves the post-cutover admin list, which may include admins not in `ADMIN_EMAILS`.
+  - The role script assigns `role = 'admin'` to exactly that list.
+  - An audit checks that the set of `role = 'admin'` users equals the approved list.
+  - No admin is silently dropped, and nobody is silently promoted. `is_admin` itself is not carried
+    as a column.
 - [ ] The production boot assertion checks that every `ADMIN_EMAILS` entry exists with
   `role = 'admin'`, under the existing `shouldRunAdminStartupCheck` gating.
 
@@ -418,6 +531,9 @@ rollback deadline passing.
   with `token_type: 'bearer'`.
 - [ ] `refresh_token` returns the same token while the session is live, and 401 once it is revoked
   or expired.
+- [ ] Resolving a session through the bearer path, `refresh_token` included, slides its expiry once
+  `updateAge` (1 day) has passed. A test proves that a mobile client which refreshes regularly is
+  never logged out at the 30-day mark.
 - [ ] `logout` revokes **all** of the user's sessions, as today.
 - [ ] `DELETE me` succeeds with a session created more than 24 hours earlier, and afterwards the
   token is dead and the user's threads are gone (cascade).
@@ -444,6 +560,8 @@ rollback deadline passing.
   sign-up 3/60s, and sets `advanced.ipAddress.ipAddressHeaders: ['x-real-ip']`.
 - [ ] Sign-in over the limit returns 429 on the layer's `/v2/users/login` and in Better Auth's own
   handler. The same holds for register and sign-up.
+- [ ] The layer's counters are database-backed and shared across instances. Two app instances on
+  one database share a single budget, proven by a test.
 - [ ] A request carrying a two-entry `X-Forwarded-For` and a distinct `X-Real-IP` is limited under
   its `X-Real-IP`, not in a shared bucket. Forging `X-Forwarded-For` does not let a client switch
   buckets. The test covers both limiters.
@@ -456,8 +574,13 @@ rollback deadline passing.
   `X-Real-IP`; and two clients on different networks observe distinct `X-Real-IP` values equal to
   their own public addresses, never a Railway or private-range address. It uses a temporary echo
   route or equivalent, removed afterwards.
-- [ ] If either property fails, PR B ships the documented fallback (per-email sign-in keying plus
-  a global sign-up ceiling, per-IP only as an additional key) and a test pins it.
+- [ ] If either property fails, PR B ships the documented fallback, and tests pin each part:
+  - sign-in is keyed by email and counts failures only
+  - a correct password is rejected while the email is locked
+  - a successful sign-in consumes no budget
+  - sign-up has a per-email limit plus a global ceiling
+  - per-IP is used only as an additional key
+  - the list-walk alert fires on many distinct locked emails and logs no raw email
 
 **CORS**
 
@@ -479,7 +602,8 @@ rollback deadline passing.
     deployment, and fix-forward after it
 - [ ] The rehearsal of the full runbook, on a clone of production data (never a database production uses), passes all audits, then boots PR B's code against
   the rehearsed database and passes the smoke tests.
-- [ ] `RELEASE.md` records the one-off exception for this window. Its smoke test and admin-bootstrap
+- [ ] PR B amends `RELEASE.md`. It names the cutover migration as the one exception to the
+  backward-compatible rule, applied only in the offline window, and records the schema freeze. Its smoke test and admin-bootstrap
   step are rewritten for Better Auth, which closes #33.
 - [ ] After cutover, migrated users sign in with existing passwords through the layer, the released
   mobile build works without a store release, and no mass password reset happens.
@@ -559,8 +683,9 @@ This spec departs from none of them. Two of its decisions sit next to them and a
 ## Assumptions
 
 - The production database has **no real identities** in the #59 scaffold tables in `public`, and
-  may not have them at all. Dropping them with `IF EXISTS` loses nothing. The plan verifies this
-  against production before the drop ships.
+  may not have them at all. Whether they exist on staging or production is a `psql \dt` question
+  for the owner (main's condition 6). Either way, the additive migration's guard refuses to drop a
+  non-empty table.
 - The rehearsal runs against a **clone of production data**, whatever host it runs on.
   `api-staging.askansari.ai` exists (plan 124), but whether it has its own database, separate from
   production, is unconfirmed; the security architect is asking the owner (C-3). The rehearsal must
@@ -647,12 +772,11 @@ of the failure mode that matters most, mass lockout.
 
 - **I-1: In-process hosting (owner, at spec-approval).** Does the owner accept the departure from reference Q5, which
   means no public `/api/auth/*` in production for now and `apps/frontend` staying on `/v2/users/*`?
-- **I-2: Layer rate-limit storage.** The decided limits use database storage so the budget is not
-  multiplied by the instance count. Must the layer's limiter also be shared across instances, for
-  example by routing the layer's sign-in and sign-up through Better Auth's in-process handler so
-  its database limiter applies? Or is the in-memory `lib/rate-limit.ts` acceptable, given how many
-  `backend` replicas Railway runs today? The plan proposes a mechanism either way. The spec
-  requires only the budgets and the IP source.
+- **I-2 (resolved):** the layer's limits must be **shared across instances** (database-backed). An
+  in-memory limiter would multiply the decided budgets by the replica count, contradicting the
+  decided database storage. The plan chooses the mechanism. Options include routing the layer's
+  sign-in and sign-up through Better Auth's in-process handler so its database limiter applies, or
+  having the layer consume `auth.rate_limit` directly.
 - **I-3: Layer removal trigger.** Re-scope the trigger to "90 days after cutover **and** the
   `apps/frontend` Better Auth client has shipped, or ≥ 95% of the released mobile builds are past
   `*_MINIMUM_BUILD_VERSION`"? Owner: Amr. This only affects the follow-up issue.
@@ -714,6 +838,19 @@ of the failure mode that matters most, mass lockout.
     builder demonstrates this once and records it in the review.
 19. A credentialed CORS preflight from a disallowed origin does not get an allow response.
 
+22. The additive migration runs against a database whose `public.account` scaffold table holds one
+    row: it aborts and changes nothing. Against empty scaffold tables, or none, it succeeds.
+23. Admin inventory: a legacy admin missing from `ADMIN_EMAILS` but on the owner-approved list holds
+    `role = 'admin'` after the role script. A legacy admin left off the list does not.
+24. IP fallback (only if the edge check fails):
+    - Five wrong passwords for one email within 60 seconds, then the right password: 429.
+    - After the window ends, the right password succeeds.
+    - Ten correct sign-ins in a row for one email: never limited.
+    - Lockouts across many distinct emails fire the list-walk alert, which contains no raw email.
+25. Two app instances sharing one database share a single layer sign-in budget.
+26. A session last used 2 days ago is used again through the bearer path, and its expiry moves
+    forward.
+
 **Non-functional**
 
 20. Bearer session resolution costs one session-row read per request, the same cost class as
@@ -738,7 +875,11 @@ of the failure mode that matters most, mass lockout.
 | Two migration journals drift (`packages/auth/drizzle` vs `apps/api/drizzle`) | Medium if both kept | High | Single journal; retire the scaffold journal |
 | better-auth behaviour differs from the 1.7.7 citations | Low | High | Pin 1.7.7; tests pin each relied-on behaviour |
 | In-process Better Auth misbehaves in Next.js | Low | Medium | Spike first in PR A, before building on it |
-| Layer limiter's budget multiplied by instance count | Medium | Low–Medium | I-2: database-backed or handler-routed limiting if replicas exceed one |
+| Layer limiter's budget multiplied by instance count | Medium | Low–Medium | I-2 resolved: database-backed counters shared across instances |
+| Targeted sign-in lockout under the IP fallback | Medium (fallback only) | Low | Failed-only counting, bounded to one 60s window per five failures; list-walk alert; reset unaffected |
+| Legacy admin silently dropped or added | Medium if overlooked | High | Owner-approved inventory; role-set audit |
+| Migration numbering collides after a concurrent merge | Medium | Medium | Numbering rule: merge `develop`, generate, rename, re-check after every merge; schema freeze from PR B's merge to window close |
+| #59 scaffold tables hold data at drop time | Low | Medium | In-migration guard aborts on any row |
 | Layer never removed | Medium | Low | Follow-up issue with a dated trigger and owner |
 
 ## References

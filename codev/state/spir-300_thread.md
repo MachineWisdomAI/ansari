@@ -13,3 +13,13 @@
   pre-window); single migration journal in `apps/api/drizzle/` (FK repoint forces it); Better Auth
   in-process in `apps/api` with no public `/api/auth/*` at cutover (departure from ref Q5); two PRs
   (A prepare = prod-safe, B cutover = merged at window) — needs architect authorization (C-2).
+- Security architect review applied (60ca04d): IP check moved into PR A work (overwrite + distinctness),
+  with a fallback; hosting and the two-PR split recast as owner proposals; added why a flag can't replace PR B.
+- Main architect agreed to the single `apps/api` journal with 7 conditions (issue #300 comment
+  03:40Z), all folded in. Generate dry run (drizzle-kit 0.31.10): `CREATE SCHEMA "auth"` + qualified
+  tables OK, no schemaFilter needed, but the prefix = journal idx → `0008_*` collides. Main ruled:
+  generate then hand-rename sql + journal tag (0009 additive, 0010 cutover), snapshot keeps the idx
+  name, re-check after every develop merge.
+- Consult iter1: Gemini APPROVE; Codex REQUEST_CHANGES (DB-backed layer limiter, admin inventory,
+  scaffold-drop guard, "byte-compatible" wording) — all applied. Security: IP fallback counts
+  failed attempts only per email, accepted 60s-window lockout risk, list-walk alert.
