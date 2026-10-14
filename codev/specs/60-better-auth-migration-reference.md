@@ -1,10 +1,18 @@
-# Specification: Better Auth Migration Plan
+# Specification: Better Auth Migration Plan (reference)
+
+> **Reference document.** This is the issue #60 spec as approved in PR #134 and amended in PR #148,
+> with the PR #148 round-3 decisions and the better-auth 1.7.7 re-verification folded in. It was
+> renamed from `60-better-auth-migration.md` so it does not collide with the spec the SPIR builder
+> writes for the implementation issue. The builder's spec is canonical once approved; where the two
+> differ, the builder's spec wins and should say why.
 
 ## Metadata
 
 - **ID**: spec-2026-09-11-better-auth-migration
 - **Status**: approved (PR #134); amended in PR #148 (legacy `/v2/users/*` compatibility layer,
-  `first_name` / `last_name` retained, `emailVerified` decided)
+  `first_name` / `last_name` retained, `emailVerified` decided); round-3 decisions and better-auth
+  1.7.7 re-verification applied 2026-10-14 (dedicated `auth` Postgres schema, password-reset routes,
+  rate limiting in scope)
 - **Created**: 2026-09-11
 - **Source**: GitHub issue #60
 - **Depends on**: #59 (Better Auth scaffold in `apps/auth` + `packages/auth`)
@@ -42,16 +50,27 @@ repoint** to Better Auth's user table (same UUID values). `tokens` is retired wi
 
 ### Post-#59 constraints
 
-- **`user` vs `users`**: Consolidation is decided here (#59 deferred). Better Auth supports
-  `modelName` — the canonical table may still be named **`users`** to avoid quoting the SQL reserved
-  word `user`. The **legacy `users` table is not adapted in place**; data moves into the Better Auth
-  table and the legacy table is renamed aside (see Retention).
+- **`user` vs `users`**: Consolidation is decided here (#59 deferred). **All Better Auth tables live
+  in a dedicated Postgres schema, `auth`** (Drizzle `pgSchema('auth')`): `auth.users` (via
+  `modelName`, avoiding the reserved word `user`), `auth.session`, `auth.account`,
+  `auth.verification`, `auth.rate_limit`. This dissolves the name collision with legacy
+  `public.users` in every environment (dev databases share one `DATABASE_URL` between `apps/api` and
+  `packages/auth`), so the Better Auth migration can run **ahead of** the cutover window. The
+  **legacy `users` table is not adapted in place**; data moves into `auth.users` and the legacy table
+  is renamed aside (see Retention). The rename no longer makes room for anything — it exists so
+  nothing reads the archive by accident. Foreign keys cross schemas within one database, so the
+  UUID-preserving FK repoint is unchanged. better-auth 1.7.7's Drizzle adapter supports this
+  directly: its `schemaName` option generates `pgSchema("auth")` tables, and at runtime it resolves
+  each model through the Drizzle table object it is given.
 - **CORS**: `apps/api/next.config.ts` sets `Access-Control-Allow-Origin: *` alongside
   `Access-Control-Allow-Credentials: true`. Invalid for cookie-based auth — fix before credentialed
   Better Auth traffic hits `apps/api`.
-- **`trustedOrigins` (better-auth@1.6.27)**: PR #61 probed custom schemes — e.g. `askbad://` can
-  still return 200 on sign-in/sign-out. **`trustedOrigins` is not treated as a security boundary for
-  custom URI schemes on this version.** Do not add a vacuous “list sync” test that passes while wrong
+- **`trustedOrigins` (re-verified on better-auth@1.7.7)**: PR #61 probed custom schemes — e.g.
+  `askbad://` can still return 200 on sign-in/sign-out. **`trustedOrigins` is not treated as a
+  security boundary for custom URI schemes.** On 1.7.7 the origin check runs only when the request
+  carries a cookie, and the Expo plugin copies the client-supplied `expo-origin` header into `Origin`.
+  1.7.7 rewrote custom-scheme matching (scheme/authority/path, traversal-safe), but a bare
+  `ansarichat://` entry still matches any `ansarichat:` URL. Do not add a vacuous “list sync” test that passes while wrong
   origins succeed; any origin test must be proven to **fail** on a wrong origin, or document the
   limitation explicitly.
 
@@ -100,17 +119,17 @@ fields, optional `users` table name via `modelName`). Document in `arch.md`.
 ## #59 scaffold disposition
 
 Issue #59 may have applied `packages/auth/drizzle/0000_better_auth_init.sql`, creating singular
-`user` (text id) plus `session` / `account` / `verification` **alongside** legacy `public.users`
-(UUID). That scaffold is **not** the cutover target.
+`user` (text id) plus `session` / `account` / `verification` in **`public`**, alongside legacy
+`public.users` (UUID). That scaffold is **not** the cutover target.
 
 **Phase 0 (before staging backfill):**
 
-1. Regenerate `@ansari/auth` Drizzle schema with **`advanced.database.generateId = "uuid"`** and
-   **`modelName` → canonical table `users`** (or an explicitly documented staging name — see cutover
-   sequence).
-2. Replace the #59 migration path: new generated migration **drops** the four scaffold tables if they
-   exist (`user`, `session`, `account`, `verification`), then creates the UUID **`users`**-shaped
-   Better Auth tables. Environments that never applied #59 skip the drop safely via `IF EXISTS`.
+1. Regenerate `@ansari/auth` Drizzle schema with **`advanced.database.generateId = "uuid"`**,
+   **`modelName` → `users`**, and every table declared on **`pgSchema('auth')`**.
+2. Replace the #59 migration path: new generated migration **drops** the four scaffold tables from
+   `public` if they exist (`user`, `session`, `account`, `verification`), then `CREATE SCHEMA auth`
+   and the UUID-shaped Better Auth tables inside it. Environments that never applied #59 skip the
+   drop safely via `IF EXISTS`. This migration runs in production **before** the cutover window.
 3. **No production user data** lives in the #59 `user` table at cutover; any rows there are test or
    dev-only and are discarded with the drop. All real identities remain in legacy `public.users` until
    the cutover window.
@@ -140,22 +159,23 @@ switched on. (Decided in PR #148 review.)
 
 ### Cutover window — ordered operations
 
-Single maintenance window; **no dual-run serving**. When the canonical Better Auth table is named
-**`users`** via `modelName`, operations run in this order (same UUID values throughout):
+Single maintenance window; **no dual-run serving**. The `auth` schema and its empty tables already
+exist (created before the window). Operations run in this order (same UUID values throughout):
 
-1. **Quiesce auth traffic** (deploy gate or brief read-only — plan defines mechanism).
+1. **Take `apps/api` offline** (plan defines the mechanism).
 2. **Rename** legacy `public.users` → **`public.users_legacy`** (existing FKs on `threads`,
    `preferences`, `feedback`, `tokens` now reference `users_legacy.id`; still valid).
-3. **Create** empty Better Auth **`public.users`** (UUID PK, BA columns + `additionalFields`).
-4. **`INSERT … SELECT`** from `users_legacy` into `users` (id, email, derived `name`, timestamps,
+3. **Verify** the pre-created **`auth.users`** (UUID PK, BA columns + `additionalFields`) and its
+   sibling tables exist and hold no rows. No DDL in the window.
+4. **`INSERT … SELECT`** from `users_legacy` into `auth.users` (id, email, derived `name`, timestamps,
    `first_name`, `last_name`, `system_key`, `source`, `registered_via`; omit `is_admin`,
    `session_version`).
-5. **Backfill `account`** rows (`provider_id = 'credential'`, bcrypt copy from
+5. **Backfill `auth.account`** rows (`provider_id = 'credential'`, bcrypt copy from
    `users_legacy.password_hash`) with idempotent `ON CONFLICT` on `(user_id, provider_id)`.
-6. **`ALTER` FK constraints** on `threads`, `preferences`, `feedback` to reference **`users.id`**
-   instead of `users_legacy.id` (UUID unchanged → row data untouched). Retire or drop `tokens` with
-   JWT routes in the same window.
-7. **Deploy** app code that reads/writes only the new `users` + BA session model; **no Drizzle model**
+6. **`ALTER` FK constraints** on `threads`, `preferences`, `feedback` to reference
+   **`auth.users.id`** instead of `users_legacy.id` (UUID unchanged → row data untouched). **Drop
+   `tokens`** in the same window.
+7. **Deploy** app code that reads/writes only `auth.users` + the BA session model; **no Drizzle model**
    for `users_legacy`.
 8. **Invalidate** all legacy JWT/`tokens` sessions; users re-authenticate via Better Auth.
 
@@ -168,7 +188,7 @@ After step 7, **`users_legacy` remains** as a read-only archive **only** (no app
 **Drop `users_legacy`** in Phase 4 when **all** of the following are true:
 
 1. **≥ 14 calendar days** since the cutover deploy completed successfully.
-2. **Row-count parity:** `count(*)` from `users_legacy` equals `count(*)` from canonical `users`
+2. **Row-count parity:** `count(*)` from `users_legacy` equals `count(*)` from `auth.users`
    (by primary key set equality audit, not estimate).
 3. **No open rollback** request or incident requiring restore from pre-cutover snapshot.
 4. **Operator sign-off** recorded in the deploy runbook (human step).
@@ -280,7 +300,7 @@ cutover approval.
 | Clients | New clients call Better Auth directly (`apps/auth`). Released mobile builds keep calling
   `/api/v2/users/*`, which stays up as a compatibility layer over Better Auth (below). “Log in again”
   works for both. |
-| Legacy `/v2/users/*` | Kept, reimplemented over Better Auth — no JWT, no `tokens`, no `session_version`. Same request and response shapes as today. Removed 90 days after cutover or at ≥ 95% new-client adoption, whichever comes first. |
+| Legacy `/v2/users/*` | Kept, reimplemented over Better Auth — no JWT, no `tokens`, no `session_version`. Same request and response shapes as today. Includes `/v2/request_password_reset` and `/v2/reset_password` (decided in PR #148 round 3). Removed 90 days after cutover or at ≥ 95% new-client adoption, whichever comes first. |
 
 **Why the legacy endpoints stay.** The released iOS/Android build has `/users/login` and
 `/users/refresh_token` compiled in, and logs the user out whenever `refresh_token` returns non-OK.
@@ -315,7 +335,9 @@ per trustedOrigins limitation above).
 Before bulk backfill or production cutover, Phase 0 must prove:
 
 1. **UUID round-trip:** `advanced.database.generateId = "uuid"` — id written by Better Auth's Drizzle
-   adapter persists and reads correctly in a UUID-typed column (verified against better-auth@1.6.27).
+   adapter persists and reads correctly in a UUID-typed column in the `auth` schema (verified against
+   the installed better-auth, 1.7.7 as of 2026-10-14). Not yet proven on any version: the #59
+   scaffold still uses text ids.
 2. **One migrated user:** `INSERT … SELECT` + `account` row → sign-in via Better Auth with **unchanged
    password** (bcrypt path).
 3. **Timestamps:** `timestamptz` legacy data vs Better Auth `timestamp` schema — document chosen mapping
@@ -332,7 +354,7 @@ After cutover:
 1. All product auth through Better Auth (`apps/auth` initially).
 2. Existing users authenticate with **same passwords** (bcrypt verify path).
 3. New passwords use scrypt unless/until bcrypt path is retired by a future change.
-4. User UUIDs unchanged; **FKs point at Better Auth user table** (`users` name via `modelName` if chosen).
+4. User UUIDs unchanged; **FKs point at `auth.users`**; every Better Auth table lives in the `auth` schema.
 5. Admin via **admin plugin**; no `is_admin` column.
 6. System accounts via **`system_key`** additional field.
 7. JWT, `tokens`, `session_version`, `grant-admin.ts` **removed**. Legacy `/v2/users/*` served over
@@ -346,8 +368,8 @@ Phases are **sequential preparation**, not dual-run serving:
 
 ### Phase 0 — Spike and schema
 
-UUID config; **#59 scaffold disposition** (drop text-id `user` tables, create UUID `users`); `modelName`
-decision; FK migration design; Phase 0 exit criteria green.
+UUID config; **#59 scaffold disposition** (drop text-id `user` tables from `public`, create UUID
+tables in the `auth` schema); FK migration design; rate limiting; Phase 0 exit criteria green.
 
 ### Phase 1 — Prepare
 
@@ -357,7 +379,8 @@ Dual bcrypt/scrypt verifier; admin plugin wired; CORS allowlist; client auth pat
 ### Phase 2 — Backfill
 
 Idempotent SQL migration (ported framework): user + account rows; `additionalFields`; **no** live
-cutover yet — validate in staging.
+cutover yet — validate in staging. The `auth` schema migration is applied to production here, ahead of
+the window.
 
 ### Phase 3 — Cutover
 
@@ -400,7 +423,8 @@ Fold auth into `apps/api` (`toNextJsHandler`); retire `apps/auth` service.
 
 ## Assumptions
 
-- #59 scaffold runnable; better-auth@1.6.27 behavior as probed in #61 for `trustedOrigins`.
+- #59 scaffold runnable; better-auth behavior re-verified on 1.7.7 (installed on `develop` since
+  83f31be) for `trustedOrigins`, rate limiting, `deleteUser`, admin schema and session revocation.
 - Ported SQL migration framework available before Phase 2 implementation.
 - **Cutover release** includes client auth path updates for all supported production clients (or
   documents explicit exceptions).
@@ -413,6 +437,7 @@ Fold auth into `apps/api` (`toNextJsHandler`); retire `apps/auth` service.
 | JWT via `config.auth` | Better Auth env / `@ansari/auth` |
 | Token rotation in `tokens` | Better Auth sessions |
 | Admin = `users.is_admin` | Admin plugin |
+| Users in `public.users` | All auth tables in the `auth` schema (`auth.users`, `auth.session`, …) |
 | **Unchanged** | System by `system_key`; admin never email-match; drizzle never db:push |
 
 ## Risks
@@ -423,13 +448,14 @@ Fold auth into `apps/api` (`toNextJsHandler`); retire `apps/auth` service.
 | FK repoint error | Staging cutover rehearsal; row-count audits |
 | Released mobile builds on `v2/users/*` | Compatibility layer over Better Auth with contract tests; removal trigger in Q7 |
 | Duplicate `account` rows | Unique `(user_id, provider_id)` + ON CONFLICT |
-| Wrong-origin auth on native | Do not rely on `trustedOrigins` for custom schemes on 1.6.27 |
+| Wrong-origin auth on native | Do not rely on `trustedOrigins` for custom schemes (re-verified on 1.7.7) |
+| Rate limit collapses to one global bucket | Configure the client-IP source explicitly (plan Phase 0) |
 
 ## Out of Scope
 
 - OAuth, 2FA, email verification, passkeys (later BA config).
-- Rate limiting, MCP auth, spend caps.
-- Implementation detail (plan: `codev/plans/60-better-auth-migration.md`).
+- MCP auth, spend caps.
+- Implementation detail (plan: `codev/plans/60-better-auth-migration-reference.md`).
 
 ## References
 
