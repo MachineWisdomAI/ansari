@@ -191,24 +191,50 @@ Evidence:
   trusts first, which lets a client pick its own bucket if the edge ever appends.
 
 The documentation establishes only that the header exists. The overwrite guarantee is a staff
-statement, so it **must be verified empirically on the deployed service before the cutover**
-(Success Criteria). The test sends forged `X-Real-IP` and `X-Forwarded-For` values through each
-public domain over IPv4, and over IPv6 where reachable. The forged values must never come back as
-the observed client IP, and the result is recorded in the plan and review.
+statement, staff answers on the forum conflict, and Help Station threads report `X-Real-IP`
+sometimes carrying **Railway infrastructure IPs** instead of the client's. So the header **must be
+verified empirically on the deployed service, as part of PR A's work** — not left until the
+window. The check passes only if it proves both properties:
+
+1. **Overwrite.** Forged `X-Real-IP` and `X-Forwarded-For` values sent through each public domain
+   (both production domains and the `*.up.railway.app` domain), over IPv4 and over IPv6 where
+   reachable, never come back as the observed `X-Real-IP`.
+2. **Distinctness.** Two clients on different networks (for example a home connection and a mobile
+   hotspot, or two cloud hosts in different regions) observe two different `X-Real-IP` values, each
+   equal to that client's own public address, across repeated requests. A value that is the same
+   for both clients, or that falls in a non-public range, fails the check.
+
+The method, raw observations and verdict are recorded in the plan and the review. Until the check
+passes, PR B does not merge.
+
+**Fallback if the check fails** (either property). Per-IP limiting is then not trustworthy, and a
+per-IP-only limit would either be spoofable or collapse into a shared bucket. In that case:
+
+- The layer's sign-in limit is keyed by the **normalized target email** (5/60s per account), which
+  no header can redirect and no other user can collapse, and sign-up keeps a per-email limit
+  (3/60s) plus a generous **global ceiling** sized from current production sign-up volume, so a
+  misattributed IP can never become the global 5/60s login cap.
+- Per-IP limiting is kept only as an additional key where the IP is trustworthy, never as the only
+  key.
+- Better Auth's own `rateLimit` keeps the decided config (it serves no public production traffic
+  under the hosting proposal), and the IP finding is written into `arch.md`.
+- The security architect is told before PR B proceeds, and the fallback is the configuration PR B
+  ships with.
 
 **Residual risk, accepted and documented:** a request that reaches `apps/api` over Railway's
 private network (`*.railway.internal`) skips the edge and can set any `X-Real-IP`. No such caller
 exists today.
 
-### Hosting: Better Auth runs in-process in `apps/api` at cutover (Departure)
+### Hosting: Better Auth runs in-process in `apps/api` at cutover (Proposal — owner decides at spec-approval)
 
-**Departure from reference spec Q5.** The reference spec hosts Better Auth on `apps/auth` through
+**Proposal; departs from reference spec Q5.** The owner decides it at spec-approval (I-1). The
+reference spec hosts Better Auth on `apps/auth` through
 the cutover, and has new clients call `/api/auth/*` there directly. That assumed `apps/auth` was a
 deployed service, and it is not: it has no Dockerfile and no Railway service. Deploying it means a
 new service, a new domain, cross-origin cookie and `set-auth-token` CORS work, and a client rewrite
 of `apps/frontend`, all on the critical path of an already irreversible window.
 
-This spec instead has `apps/api` import `@ansari/auth` and use Better Auth **in-process**, through
+This spec proposes instead that `apps/api` import `@ansari/auth` and use Better Auth **in-process**, through
 the bearer plugin for session validation and server-side calls for the compatibility layer.
 **No Better Auth HTTP router (`/api/auth/*`) is exposed publicly in production by this project.**
 Every production client, `apps/frontend` included, keeps calling `/v2/users/*` at cutover.
@@ -265,10 +291,13 @@ itself:
 - **Precondition guards** abort the transaction unless `auth.users` and `auth.account` are empty and
   `public.users` exists.
 
-This needs **Waleed's confirmation** at the spec-approval gate, which is Open Question C-1, and the
-**main architect's review** for `apps/api/drizzle/` numbering and `DEPLOYED_THROUGH`.
+**Reviewers.** The `apps/api/drizzle/` journal and `DEPLOYED_THROUGH` belong to the **main
+architect**, who reviews every hunk touching them; the security architect has raised this decision
+with main directly. **Waleed** is the named reviewer for the migration SQL itself (location, the
+transaction and guards, the backfill), standing in for the "ported framework" alignment the
+reference plan assigned to him. Open Question C-1 tracks both sign-offs.
 
-### Phasing (resolves an issue "must be resolved" item)
+### Phasing (resolves an issue "must be resolved" item; proposal — owner decides at spec-approval)
 
 The reference plan's Phases 0–5 map onto this project as **two PRs** inside one SPIR project.
 `develop` fast-forwards into `main`, so the split point is chosen so that nothing merged early can
@@ -277,16 +306,33 @@ block a release.
 | This project | Reference phases | Production-safe while JWT serves? |
 |---|---|---|
 | **PR A: Prepare** | 0, 1 and the code half of 2: `auth` schema migration, `createAuth()` config, dual verify, rate limiting and client IP, bearer session helper, compatibility layer, reset routes, admin script and assert, CORS fix, cutover migration SQL **drafted and rehearsed but not in the journal**, contract tests | **Yes.** The `auth` schema is additive (empty tables beside `public.users`), and the new code paths are not wired to production routes. PR A can merge and promote normally. |
-| Staging rehearsal | 2 | Runs from PR B's branch on a clone of production taken after PR A's migration was applied. Does not touch production. |
+| Rehearsal (production-data clone) | 2 | Runs from PR B's branch on a clone of production taken after PR A's migration was applied. Does not touch production. |
 | **PR B: Cutover** | 3, plus the code half of 4 | **No.** Merged to `develop` immediately before the window and promoted **in** the window. It holds the cutover migration (journaled), the route switch, the `users` model → `auth.users`, and removal of JWT, `tokens`, `session_version`, `is_admin`, `grant-admin.ts` and the `JWT_*` config. |
 | Out of this project (follow-up issues) | 4 triggers, 5 | Drop `users_legacy` (14 days + parity + sign-off). Remove the layer (its trigger). Migrate `apps/frontend` to a Better Auth-native client and expose `/api/auth/*`. Fold `apps/auth`. |
+
+**Why a feature flag cannot replace PR B.** The obvious alternative is to merge the cutover code
+behind a flag and flip it in the window. It does not work here, because **the cutover migration
+cannot sit in the journal on `develop`**:
+
+- Everything in the `apps/api` journal on `develop` is, by `RELEASE.md` practice and the
+  `DEPLOYED_THROUGH` assertion, applied to production before the next promote. The cutover
+  migration renames `public.users`, drops `tokens` and repoints FKs; applying it ahead of the
+  window breaks the JWT code still serving, and it is not backward-compatible by design.
+- A fresh `pnpm db:migrate` (the `RELEASE.md` smoke test, pglite suites, the parity test) would
+  build the post-cutover schema, which flag-off code cannot run against.
+- The Drizzle schema in `apps/api` can describe `users` as `public.users` or as `auth.users`, not
+  both; flag-off and flag-on code need different models and different FK targets.
+
+So the migration has to land on `develop` at the window, and the code that depends on it has to
+land with it. That is PR B. A flag could at most gate PR A's new, unwired code paths, which do not
+need one.
 
 PR B also removes the JWT code, which the reference plan defers to Phase 4. Rollback is a snapshot
 restore plus a redeploy of the previous Railway deployment, never a code toggle, so dead JWT code
 adds risk and buys nothing.
 
-**Two PRs depart from the porch default of one PR per project**, so they need the architect's
-explicit authorization (Open Question C-2). The fallback, one PR holding everything and merged at
+**Two PRs depart from the porch default of one PR per project**, so they need the owner's
+explicit decision at spec-approval (Open Question C-2). The fallback, one PR holding everything and merged at
 the window, works too. It keeps a large branch alive across the rehearsal, and it delays the
 production apply of the additive `auth` migration until the window, which the issue's decisions
 rule out ("migrated before the window").
@@ -403,10 +449,15 @@ rollback deadline passing.
   buckets. The test covers both limiters.
 - [ ] `getClientIp` reads `X-Real-IP` only. `tests/rate-limit.test.ts`, which asserts the opposite
   preference today, is updated.
-- [ ] **Empirical edge verification is recorded before the window.** Forged `X-Real-IP` and
-  `X-Forwarded-For` values sent through each production domain (`api.askansari.ai`,
-  `api-35.ansari.chat`) and the `*.up.railway.app` domain never appear as the observed client IP.
-  The verification uses a temporary echo route or equivalent, removed afterwards.
+- [ ] **Empirical edge verification is done during PR A's work and recorded** (method, raw
+  observations, verdict). It proves both properties from the Client IP section: forged `X-Real-IP`
+  and `X-Forwarded-For` values sent through each production domain (`api.askansari.ai`,
+  `api-35.ansari.chat`) and the `*.up.railway.app` domain never appear as the observed
+  `X-Real-IP`; and two clients on different networks observe distinct `X-Real-IP` values equal to
+  their own public addresses, never a Railway or private-range address. It uses a temporary echo
+  route or equivalent, removed afterwards.
+- [ ] If either property fails, PR B ships the documented fallback (per-email sign-in keying plus
+  a global sign-up ceiling, per-IP only as an additional key) and a test pins it.
 
 **CORS**
 
@@ -426,7 +477,7 @@ rollback deadline passing.
   - migration apply, admin roles, deploy, smoke tests
   - the **24-hour rollback deadline**: snapshot restore plus a redeploy of the previous Railway
     deployment, and fix-forward after it
-- [ ] The staging rehearsal of the full runbook passes all audits, then boots PR B's code against
+- [ ] The rehearsal of the full runbook, on a clone of production data (never a database production uses), passes all audits, then boots PR B's code against
   the rehearsed database and passes the smoke tests.
 - [ ] `RELEASE.md` records the one-off exception for this window. Its smoke test and admin-bootstrap
   step are rewritten for Better Auth, which closes #33.
@@ -510,11 +561,13 @@ This spec departs from none of them. Two of its decisions sit next to them and a
 - The production database has **no real identities** in the #59 scaffold tables in `public`, and
   may not have them at all. Dropping them with `IF EXISTS` loses nothing. The plan verifies this
   against production before the drop ships.
-- A **staging environment** exists, or can be created, that can hold a clone of production data and
-  run `apps/api` at PR B's revision. If it cannot, see C-3.
+- The rehearsal runs against a **clone of production data**, whatever host it runs on.
+  `api-staging.askansari.ai` exists (plan 124), but whether it has its own database, separate from
+  production, is unconfirmed; the security architect is asking the owner (C-3). The rehearsal must
+  never run against a database that production also uses.
 - The operator can take a database snapshot, or use PITR, and restore it within the 24-hour deadline.
-- Railway's `X-Real-IP` behaviour as stated by staff holds on our domains. It is verified before the
-  window, not assumed.
+- Railway's `X-Real-IP` behaviour as stated by staff holds on our domains. It is verified during
+  PR A's work, not assumed, and the spec carries a fallback if it does not hold.
 - better-auth 1.7.7's in-process `auth.api.*` calls and bearer plugin work inside the Next.js
   `apps/api` server runtime, in the same process as Drizzle on `pg`. The plan spikes this first.
 - Released mobile builds send `Authorization: Bearer` on every authenticated call, and treat
@@ -577,19 +630,22 @@ of the failure mode that matters most, mass lockout.
 
 **Critical (blocks progress)**
 
-- **C-1: Migration SQL location (Waleed).** This spec places the `auth` DDL and the cutover
-  migration in the single `apps/api/drizzle/` journal, and retires `packages/auth/drizzle/`. The
-  "ported framework" referenced in #60 is not in the repo. Is there such a framework, or a
-  preference, that should override this? This needs Waleed's confirmation, and the main
-  architect's review on numbering.
-- **C-2: Two PRs.** May this project ship PR A (prepare) and PR B (cutover) instead of the porch
-  default of one PR?
-- **C-3: Staging.** Is there a Railway staging environment where a production clone can be restored
-  and PR B's code run? If not, who provisions one? The rehearsal is a hard prerequisite for PR B.
+- **C-1: Migration SQL location.** This spec places the `auth` DDL and the cutover migration in
+  the single `apps/api/drizzle/` journal, and retires `packages/auth/drizzle/`. The "ported
+  framework" referenced in #60 is not in the repo. The journal and `DEPLOYED_THROUGH` are the
+  **main architect's** (the security architect has raised it with main). **Waleed** reviews the
+  migration SQL. Both must accept the location, or name a preference that overrides it.
+- **C-2: Two PRs (owner, at spec-approval).** May this project ship PR A (prepare) and PR B
+  (cutover) instead of the porch default of one PR? The reasons, including why a feature flag
+  cannot replace PR B, are in Phasing.
+- **C-3: Staging database.** `api-staging.askansari.ai` exists (plan 124). Does it have its own
+  database that a production clone can be restored into, and that PR B's code can run against?
+  If not, who provisions one? The security architect is asking the owner. The rehearsal is a hard
+  prerequisite for PR B and is specified against a production-data clone regardless of host.
 
 **Important (shapes design)**
 
-- **I-1: In-process hosting.** Does the architect accept the departure from reference Q5, which
+- **I-1: In-process hosting (owner, at spec-approval).** Does the owner accept the departure from reference Q5, which
   means no public `/api/auth/*` in production for now and `apps/frontend` staying on `/v2/users/*`?
 - **I-2: Layer rate-limit storage.** The decided limits use database storage so the budget is not
   multiplied by the instance count. Must the layer's limiter also be shared across instances, for
