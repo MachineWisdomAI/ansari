@@ -16,7 +16,7 @@ const AnimatedImage = Animated.createAnimatedComponent(Image);
  * Day lays the tile on as ink; night lifts it on as light, so the two
  * carry the same weight of texture at different opacities.
  */
-export const GRAIN_OPACITY = { light: 0.8, dark: 0.34 };
+const GRAIN_OPACITY = { light: 0.8, dark: 0.34 };
 
 const grain = require('@/assets/images/grain.png');
 // react-native-web doesn't tile with resizeMode="repeat"; use CSS there.

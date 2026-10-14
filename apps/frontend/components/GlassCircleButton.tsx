@@ -23,18 +23,18 @@ const liquidGlass = Platform.OS === 'ios' && isLiquidGlassAvailable();
  * own there. Other iOS versions get a real blur, Android/web a crafted
  * translucent linen fallback.
  *
- * Every path draws the same hairline rim, the same quiet fill
- * (`glassButtonFill`) and the same contact shadow, on a plain bordered
- * View that wraps whichever effect is rendering inside it — rather
- * than a ring, and rather than trusting each effect to carry the shape
- * on its own. Real Liquid Glass *can* read as a disc with nothing but
- * its own rendering over varied content, but this app's flat paper —
- * and the thread screen's scroll-edge fade, which washes the page down
- * to one flat colour right where the button sits — leaves it nothing
- * to refract, and GlassView's own border/background sit behind its
- * native subview where they aren't reliably visible regardless. One
- * wrapper, drawn the same way on every path, is what actually holds up
- * everywhere.
+ * Every path draws the same hairline rim and the same contact shadow
+ * on a plain bordered View that wraps whichever effect is rendering
+ * inside it, rather than a ring and rather than trusting a style set
+ * on the effect itself: GlassView composites its native
+ * UIVisualEffectView as a full-bleed subview of itself, so a
+ * border/background set on GlassView directly sits behind that
+ * subview where it isn't reliably visible. The two fallbacks also draw
+ * a quiet fill (`glassButtonFill`) inside the wrapper, since their blur
+ * alone has nothing to read as a disc over this app's flat paper; real
+ * Liquid Glass keeps the wrapper bare of fill on purpose, because it
+ * sits behind the glass here and a fill strong enough to read on its
+ * own would leave nothing behind the glass for it to refract.
  *
  * The rim stays quiet throughout — static edge, not a ring that would
  * react — so press and hover still have to be carried by the fill: a
@@ -101,16 +101,18 @@ export function GlassCircleButton({
       // backdrop (it's the same View the two fallback paths below use
       // for the same job), so it wraps the glass here instead of
       // trusting the effect to carry the shape on its own.
+      // No fill here, unlike the two fallbacks below: the fill would sit
+      // directly behind the glass (the View wraps it, not the other way
+      // round), and real Liquid Glass does refract what's behind it — a
+      // fill strong enough to read on its own would leave the glass
+      // nothing to refract but that one flat colour. The rim is enough
+      // to carry the shape; the glass carries the rest.
       return (
         <View
           style={[
             circle,
             styles.clip,
-            {
-              borderWidth: StyleSheet.hairlineWidth,
-              borderColor: rimColor,
-              backgroundColor: colors.glassButtonFill,
-            },
+            { borderWidth: StyleSheet.hairlineWidth, borderColor: rimColor },
           ]}
         >
           <GlassView

@@ -19,6 +19,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import Head from 'expo-router/head';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
+  FadeIn,
   FadeInDown,
   interpolate,
   ReduceMotion,
@@ -112,10 +113,15 @@ const FOLLOWUP_KEY_PREFIX = '__followup-question-';
  */
 const ANSWER_HELD_LINES = ['96%', '99%', '93%', '97%', '90%', '46%'] as const;
 
-// A new turn taking its place at the foot of the thread. Built once,
-// here: rebuilt inline it allocates a fresh descriptor on every render.
+// A new turn taking its place at the foot of the thread, and the
+// chrome settling onto the paper behind it. Both built once, here:
+// rebuilt inline they allocate a fresh descriptor on every render.
 const TURN_ENTER = FadeInDown.duration(DURATION.enter)
   .easing(EASE_OUT)
+  .reduceMotion(ReduceMotion.System);
+const CHROME_ENTER = FadeIn.duration(DURATION.enter)
+  .easing(EASE_OUT)
+  .delay(60)
   .reduceMotion(ReduceMotion.System);
 
 function SendFailure({
@@ -944,16 +950,13 @@ export default function ChatScreen() {
         </Animated.View>
 
         {/* The ask clears its own floating controls on the way out, so
-          the thread's chrome lands on bare paper instead of swapping one
-          set of buttons for another mid-cut. It used to fade in rather
-          than land, but an entrance that starts a view at zero opacity
-          is exactly what native Liquid Glass fails to install itself
-          under (expo/expo#41024) — the disc could win the race and
-          render real glass, or lose it and sit there as a flat fallback
-          for the rest of the thread, depending on timing the component
-          doesn't control. One recipe for this disc everywhere beats a
-          coin-flip glass effect for a cosmetic settle. */}
-        <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+          the thread's chrome fades onto bare paper instead of swapping
+          one set of buttons for another mid-cut. */}
+        <Animated.View
+          entering={CHROME_ENTER}
+          style={StyleSheet.absoluteFill}
+          pointerEvents="box-none"
+        >
           {/* Desktop names the thread in the rail, where the rest of the
             navigation already is, and starts a new question from there
             too — so there is nothing left for a bar to carry, and an
@@ -986,7 +989,7 @@ export default function ChatScreen() {
               </GlassCircleButton>
             </View>
           )}
-        </View>
+        </Animated.View>
 
         <SourcePanel request={sources} onClose={() => setSources(null)} />
       </Animated.View>
