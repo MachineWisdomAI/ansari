@@ -86,9 +86,11 @@ export function BrassSendButton({
   const metal = dark ? brass.dark : brass.light;
   const reducedMotion = useReducedMotion();
 
-  // Sending keeps the metal lit: the question is gone from the field,
-  // but the control is still the active thing on the screen.
-  const active = canSend || sending;
+  // Sending drops the metal: the control cannot be pressed again until
+  // the answer arrives, and it should look it — back to the same inert
+  // disc as an empty field, with the spinner the only thing marking it
+  // busy rather than merely at rest.
+  const active = canSend;
 
   // The brass rises rather than snaps: light arriving on metal, not a
   // colour swapping. Two stacked fills and an opacity between them,
@@ -235,7 +237,10 @@ export function BrassSendButton({
           </Animated.View>
 
           {sending ? (
-            <ActivityIndicator size="small" color={metal.glint} />
+            <ActivityIndicator
+              size="small"
+              color={palette.mutedForeground}
+            />
           ) : (
             <View style={styles.glyph}>
               {/* Stone ink while the disc is inert. */}
