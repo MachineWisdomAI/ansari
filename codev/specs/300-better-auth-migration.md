@@ -455,8 +455,10 @@ rollback deadline passing.
 - [ ] The cutover migration does all of the following in one transaction, guarded by its
   preconditions:
   - renames `public.users` to `users_legacy`
-  - copies every row into `auth.users` (same `id`, derived `name`, `email_verified = true`, no
-    `is_admin` or `session_version`)
+  - copies every row into `auth.users` (same `id`, **`email = lower(trim(email))`**, derived
+    `name`, `email_verified = true`, no `is_admin` or `session_version`)
+  - **aborts if any two `public.users` rows collide on `lower(trim(email))`.** The guard runs inside
+    the transaction, before the copy.
   - backfills one `credential` account per **non-system** user with the bcrypt hash
   - repoints the FKs on `threads`, `preferences` and `feedback` to `auth.users.id`, keeping
     `ON DELETE CASCADE`
@@ -475,6 +477,18 @@ rollback deadline passing.
   - every `ADMIN_EMAILS` entry has `role = 'admin'` after the role script, and the set of
     `role = 'admin'` users equals the owner-approved inventory
 - [ ] Re-running the backfill on its own creates zero duplicate `account` rows.
+- [ ] **Email case is normalized, and collisions are decided before the window.**
+  - Why: better-auth 1.7.7 lowercases the email on every lookup (`dist/db/internal-adapter.mjs:572`,
+    `dist/api/routes/sign-in.mjs:318`, `dist/api/routes/sign-up.mjs:158`), while
+    `auth.users.email` is unique case-sensitively. Legacy code lowercases on write
+    (`lib/db/users.ts:106`), but that only covers rows written since the monorepo move. Older rows
+    are unverified. A mixed-case row copied as-is could never be found, which is a silent lockout.
+    The user would then re-register as a second user with a new UUID, detached from their threads.
+  - A **read-only pre-window audit** counts rows where `email <> lower(trim(email))`, and lists
+    every case-insensitive duplicate group (`lower(trim(email))` shared by more than one row). It
+    runs in the rehearsal and again by the operator before the window.
+  - The **owner decides every collision before the window**, for example which UUID keeps the
+    address. The cutover's guard then finds none.
 - [ ] The parity test covers both new migrations at the two markers described under Migration SQL
   location. `DEPLOYED_THROUGH` moves once per migration: the additive bump when that migration is
   applied on staging and production, and the cutover bump by the owner in PR B.
@@ -529,6 +543,11 @@ rollback deadline passing.
   `request_password_reset` and `reset_password`.
 - [ ] `login` and `register` return the session token as both `access_token` and `refresh_token`,
   with `token_type: 'bearer'`.
+- [ ] The bearer plugin's `requireSignature` stays **unset**, because the layer hands released
+  clients the raw session token and better-auth 1.7.7 accepts an unsigned bearer token only in that
+  case (`dist/plugins/bearer/index.mjs:34-37`). A test pins it: a raw `access_token` from
+  `/v2/users/login` authenticates a bearer call, a tampered signed token is rejected, and the test
+  fails if `requireSignature` is turned on.
 - [ ] `refresh_token` returns the same token while the session is live, and 401 once it is revoked
   or expired.
 - [ ] Resolving a session through the bearer path, `refresh_token` included, slides its expiry once
@@ -851,6 +870,15 @@ of the failure mode that matters most, mass lockout.
 26. A session last used 2 days ago is used again through the bearer path, and its expiry moves
     forward.
 
+27. A legacy row stored as `  Alice@Example.COM` (mixed case, padded) is migrated as
+    `alice@example.com` and signs in after cutover with `ALICE@example.com` and its unchanged
+    password, keeping the same UUID and threads. Registering `alice@example.com` returns the
+    taken-email 409 instead of creating a second user.
+28. The cutover migration run against two legacy rows `Bob@x.com` and `bob@x.com` aborts with no
+    changes, and the pre-window audit reports that pair.
+29. A raw (unsigned) session token from `/v2/users/login` authenticates a bearer call. Setting
+    `requireSignature: true` makes that test fail.
+
 **Non-functional**
 
 20. Bearer session resolution costs one session-row read per request, the same cost class as
@@ -879,6 +907,8 @@ of the failure mode that matters most, mass lockout.
 | Targeted sign-in lockout under the IP fallback | Medium (fallback only) | Low | Failed-only counting, bounded to one 60s window per five failures; list-walk alert; reset unaffected |
 | Legacy admin silently dropped or added | Medium if overlooked | High | Owner-approved inventory; role-set audit |
 | Migration numbering collides after a concurrent merge | Medium | Medium | Numbering rule: merge `develop`, generate, rename, re-check after every merge; schema freeze from PR B's merge to window close |
+| Mixed-case legacy email becomes unfindable (silent lockout, duplicate re-registration) | Unknown (older rows unverified) | High | Copy `lower(trim(email))`; in-transaction collision guard; pre-window audit with owner decisions; mixed-case sign-in test |
+| Released clients' raw tokens rejected | Low | High | `requireSignature` unset, pinned by a test |
 | #59 scaffold tables hold data at drop time | Low | Medium | In-migration guard aborts on any row |
 | Layer never removed | Medium | Low | Follow-up issue with a dated trigger and owner |
 

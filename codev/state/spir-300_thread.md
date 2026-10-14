@@ -23,3 +23,4 @@
 - Consult iter1: Gemini APPROVE; Codex REQUEST_CHANGES (DB-backed layer limiter, admin inventory,
   scaffold-drop guard, "byte-compatible" wording) — all applied. Security: IP fallback counts
   failed attempts only per email, accepted 60s-window lockout risk, list-walk alert.
+- Security amendment pre-approval: email lower(trim()) copy + in-tx collision guard + pre-window case audit (owner decides collisions) + mixed-case test; bearer requireSignature pinned unset (released clients hold raw tokens).
