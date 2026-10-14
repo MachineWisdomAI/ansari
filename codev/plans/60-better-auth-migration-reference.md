@@ -1,11 +1,20 @@
-# Plan: Better Auth Migration (Custom JWT → Better Auth)
+# Plan: Better Auth Migration (Custom JWT → Better Auth) — reference
+
+> **Reference document.** Merged from PR #148 (author: @deeseeker) as-is, then updated by the
+> security architect with the round-3 review decisions and a re-verification against the installed
+> better-auth **1.7.7** (2026-10-14). Renamed from `60-better-auth-migration.md` so it does not collide
+> with the plan the SPIR builder writes for the implementation issue. Treat it as the starting point
+> and evidence base for that spec and plan, not as an approved plan. Every `dist/...` citation below
+> is a line in the installed better-auth 1.7.7 package; re-check citations if the version moves.
 
 ## Metadata
 
 - **ID**: plan-2026-09-17-better-auth-migration
-- **Status**: draft (revised per PR #148 review, rounds 1 and 2)
-- **Specification**: [codev/specs/60-better-auth-migration.md](../specs/60-better-auth-migration.md)
-  — amended in the same PR (legacy `/v2/users/*` layer, `first_name` / `last_name`, `emailVerified`)
+- **Status**: reference (PR #148 rounds 1–2 addressed by the author; round 3 and 1.7.7 updates applied
+  by the security architect)
+- **Specification**: [codev/specs/60-better-auth-migration-reference.md](../specs/60-better-auth-migration-reference.md)
+  — amended in PR #148 (legacy `/v2/users/*` layer, `first_name` / `last_name`, `emailVerified`) and
+  updated with the round-3 decisions (`auth` schema, reset routes, rate limiting)
 - **Source**: GitHub issue #60 (spec merged via PR #134)
 - **Depends on**: #59 (`apps/auth` + `packages/auth` scaffold)
 - **Created**: 2026-09-17
@@ -13,9 +22,10 @@
 ## Executive Summary
 
 Replace `apps/api`'s custom JWT auth (`tokens`, `session_version`, JWT middleware) with **Better Auth**
-as the only auth model, in a **single cutover**. User **UUIDs are preserved**: legacy `public.users` is
-renamed to `users_legacy`, rows are copied into Better Auth's `users` table, FKs on `threads` /
-`preferences` / `feedback` are repointed, and **`tokens` is dropped** in the same window.
+as the only auth model, in a **single cutover**. All Better Auth tables live in a dedicated Postgres
+schema, **`auth`**, created ahead of the window. User **UUIDs are preserved**: in the window, legacy
+`public.users` is renamed to `users_legacy`, rows are copied into `auth.users`, FKs on `threads` /
+`preferences` / `feedback` are repointed, and **`tokens` is dropped**.
 
 `apps/api` validates requests with Better Auth's **bearer plugin** (`Authorization: Bearer <session
 token>` → `auth.api.getSession`). The legacy **`/v2/users/*` endpoints stay**, reimplemented over
@@ -43,6 +53,15 @@ Carried in from PR #148 review (Amr, 2026-09-18 and round 2):
 - Session lifetime, explicit rate limiting, system accounts excluded from `account` backfill, 24h
   rollback deadline.
 
+Carried in from PR #148 review round 3 (2026-09-29) and the 1.7.7 re-verification (2026-10-14):
+
+- Better Auth tables in a dedicated **`auth`** Postgres schema; the Better Auth migration runs before
+  the window, in every environment.
+- `me` DELETE goes through the internal adapter, not `auth.api.deleteUser` (see the layer section).
+- Password-reset routes added to the layer, with the legacy link shape.
+- Rate-limit values accepted; the client-IP source must be configured explicitly.
+- better-auth is **1.7.7** on `develop` (83f31be); every version-sensitive claim was re-read there.
+
 **Migration SQL** follows the **ported framework** from the legacy auth migration script (coordinate
 with Waleed on location and idempotency helpers before Phase 2).
 
@@ -58,7 +77,10 @@ with Waleed on location and idempotency helpers before Phase 2).
 | Downtime mechanism | Railway: remove both public domains or pause the `backend` service | PR #148 round 2, `RELEASE.md` |
 | Rollback deadline | 24 hours after `apps/api` comes back; after that, fix forward | PR #148 round 2 |
 | Compatibility layer removal | 90 days after cutover or ≥ 95% new-client adoption, whichever first; **owner: Amr** | PR #148 round 2 |
-| Rate limiting | Proposed values below — **for Amr to confirm or adjust** | This revision |
+| Rate limiting | Sign-in 5/60s, sign-up 3/60s, database storage, `enabled: true`; client IP configured explicitly | PR #148 round 3; 1.7.7 re-verification |
+| Where Better Auth tables live | Dedicated Postgres schema `auth` (`pgSchema('auth')`), migrated before the window | PR #148 round 3 |
+| `me` DELETE | Internal adapter delete; `freshAge` left at its default | PR #148 round 3; 1.7.7 re-verification |
+| Password-reset routes | Added to the layer; legacy link shape; `checkPasswordStrength` kept | PR #148 round 3 |
 
 ## How `apps/api` authenticates after cutover
 
@@ -102,16 +124,38 @@ JSON shape. Files stay under `apps/api/src/app/api/v2/users/`.
 | `refresh_token` | POST | Read `refresh_token` from the body, validate it as a session, return the same token again; 401 when revoked |
 | `logout` | POST | Revoke the session |
 | `me` | GET | User fields from the session |
-| `me` | DELETE | Delete the user via Better Auth |
+| `me` | DELETE | Delete the user through Better Auth's internal adapter (below) |
+| `/v2/request_password_reset` | POST | `auth.api.requestPasswordReset`; same response shape |
+| `/v2/reset_password` | POST | `auth.api.resetPassword`; same response shape |
 
-**Proposed addition — needs Amr's call:** the released app also calls `/v2/request_password_reset` and
-`/v2/reset_password` (`legacy/frontend-app/src/services/UserService.ts:22,48`). Both store and read
-reset tokens in `tokens` and sign them with `JWT_SECRET`, so they break at step 7. Proposal: add them
-to the layer — `request_password_reset` → `auth.api.requestPasswordReset` with `sendResetPassword`
-wired to the existing `sendPasswordResetEmail`; `reset_password` → `auth.api.resetPassword` (which,
-with `revokeSessionsOnPasswordReset`, also kills sessions). Response shapes unchanged. Open question:
-reset links already emailed before cutover carry legacy JWTs and will stop working — acceptable given
-their 1-hour expiry?
+**`me` DELETE — do not call `auth.api.deleteUser`.** On 1.7.7 that endpoint returns 404 unless
+`user.deleteUser.enabled` is set (`dist/api/routes/update-user.mjs:278-281`). Without a `password` in
+the body it also rejects any session older than `session.freshAge`, default 24h
+(`update-user.mjs:320-323`, `dist/context/create-context.mjs:149`). The legacy route takes no password
+and mobile sessions are routinely days old. Setting `freshAge: 0` would also remove the freshness
+requirement from `/list-sessions` and `/unlink-account` (`dist/api/routes/session.mjs:350`,
+`account.mjs:263`). Instead, the route calls `(await auth.$context).internalAdapter.deleteUser(userId)`
+(`dist/db/internal-adapter.mjs:232`), which deletes the user's sessions, accounts and user row; user
+data on `threads` / `preferences` / `feedback` goes by the existing `ON DELETE CASCADE`. **Contract
+test:** delete succeeds with a session created more than 24h earlier, and the token is dead afterwards.
+
+**Password-reset routes (decided in round 3).** The released app calls both
+(`legacy/frontend-app/src/services/UserService.ts:22,48`), and so does the legacy web reset page. Both
+routes read and write `tokens` and sign with `JWT_SECRET` today, so they break at step 7. In the layer:
+
+- `sendResetPassword` builds the **legacy** link shape, `${FRONTEND_URL}/reset-password?token=<BA token>`
+  (`apps/api/lib/email.ts:21`), not Better Auth's `url`. The mobile deep link and the web page both read
+  `?token=`. The hook receives the raw token (`dist/api/routes/password.mjs:82-85`).
+- `reset_password` passes that token straight to `auth.api.resetPassword({ body: { newPassword, token } })`;
+  no callback redirect.
+- Run `checkPasswordStrength` before the call, as `register` does. Better Auth enforces only min/max
+  length.
+- `requestPasswordReset` answers identically for unknown emails (`password.mjs:59-70`), preserving
+  the legacy anti-oracle behavior.
+- **Refuse system accounts.** `resetPassword` creates a `credential` account when the user has none
+  (`password.mjs:161`), and system accounts deliberately have none. `sendResetPassword` must send
+  nothing for a user with a `system_key`, and a test pins it.
+- Reset links emailed before cutover stop working; accepted at their 1-hour expiry.
 
 **Frozen response contract** (contract tests pin each one):
 
@@ -193,31 +237,42 @@ moves, and lock in the `createAuth()` configuration the cutover depends on.
 - [ ] **`packages/auth` — `createAuth()` config**
   - `advanced.database.generateId = "uuid"`.
   - `user` model → table **`users`** via `modelName` (avoids quoting the reserved word `user`).
+  - Every table declared on **`pgSchema('auth')`**. Pass `schemaName: 'auth'` to `drizzleAdapter` so
+    the Better Auth CLI generates the same shape (1.7.7 option, `@better-auth/drizzle-adapter`
+    `index.d.mts:59`). At runtime the adapter resolves each model through the table object it is
+    given, so queries are emitted as `"auth"."users"`.
   - `additionalFields`: `system_key`, `source`, `registered_via`, `first_name`, `last_name`
     (`input: false` for `system_key`, `source`, `registered_via`).
   - `plugins`: `expo()`, **`bearer()`**, **`admin()`**.
   - `emailAndPassword`: permanent dual verify (below) plus **`revokeSessionsOnPasswordReset: true`**
-    (read with no default in 1.6.27 — unset, reset leaves every session alive, a regression vs today).
+    (still no default on 1.7.7, `dist/api/routes/password.mjs:169` — unset, reset leaves every session
+    alive, a regression vs today).
   - **`session: { expiresIn: 60 * 60 * 24 * 30, updateAge: 60 * 60 * 24 }`** — 30 days, refreshed
     daily. Approximates the legacy refresh window; Better Auth's default would log mobile users out
     weekly.
   - **Rate limiting** — see proposal below.
   - Sign-up hooks: reserved-email check and `system_key` guard from spec 4 (identical 409, before the
     password-strength check).
-- [ ] **Regenerate Drizzle schema** in `packages/auth/src/schema.ts`: UUID PK/FKs on `users`,
-  `session`, `account`, `verification`; **unique constraint on `account (user_id, provider_id)`**.
+- [ ] **Regenerate Drizzle schema** in `packages/auth/src/schema.ts`: all tables in the `auth`
+  schema; UUID PK/FKs on `users`, `session`, `account`, `verification`; **unique constraint on
+  `account (user_id, provider_id)`**.
 - [ ] **Admin plugin columns** present in the generated schema and migration SQL:
   - `users`: `role`, `banned`, `ban_reason`, `ban_expires`
   - `session`: `impersonated_by`
 
-  Verify exact names from `drizzle-kit generate` output for 1.6.27. If `role` is missing, runbook step 8
-  fails with `apps/api` already offline.
+  The admin plugin schema is byte-identical between 1.6.27 and 1.7.7 (`dist/plugins/admin/schema.mjs`),
+  but no `drizzle-kit generate` run has included it yet: the #59 scaffold has no admin plugin, so the
+  "no drift on 1.7.7" result from 83f31be does not cover these columns. Verify exact names from
+  `drizzle-kit generate` output. If `role` is missing, runbook step 8 fails with `apps/api` already
+  offline.
 - [ ] **`rate_limit` table** (Better Auth model `rateLimit`) if database storage is confirmed.
 - [ ] **Migration** (human-reviewed, never `db:push`):
-  - `DROP TABLE IF EXISTS` the #59 scaffold tables (`user`, `session`, `account`, `verification`).
-  - `CREATE` the UUID-shaped Better Auth tables.
-  - **Where it runs:** dev/test databases in Phase 0. In production it runs **inside the cutover window
-    at step 3** — a Better Auth `public.users` can't exist next to the legacy `public.users`.
+  - `DROP TABLE IF EXISTS` the #59 scaffold tables in `public` (`user`, `session`, `account`,
+    `verification`).
+  - `CREATE SCHEMA auth`, then the UUID-shaped Better Auth tables inside it.
+  - **Where it runs:** dev/test databases in Phase 0; staging and production in Phase 2, **before** the
+    window. `auth.users` coexists with legacy `public.users`, so no environment needs the window to
+    make room. pglite supports schemas, so the test DDL sync still works.
 - [ ] **Permanent dual password verify**: `$2a$` / `$2b$` → bcrypt (with the 72-byte truncation of
   `apps/api/lib/auth/password.ts`); otherwise scrypt.
 - [ ] **Spike:** one legacy-format row → `INSERT` + `account` → sign-in via `apps/auth` with the
@@ -225,13 +280,14 @@ moves, and lock in the `createAuth()` configuration the cutover depends on.
 - [ ] **Timestamp mapping note** (`packages/auth/README`): how legacy `timestamptz` maps to Better Auth
   `timestamp`; switch to `timestamptz` only if the spike shows corruption.
 
-### Rate limiting (proposal — for Amr to confirm)
+### Rate limiting (accepted in round 3)
 
 Today only `/api/v2/mcp-complete` is rate-limited (in-memory `Map`, `apps/api/lib/rate-limit.ts`);
-login and register have none. Better Auth 1.6.27 defaults: enabled only when `NODE_ENV=production`,
-memory storage, 100 requests / 10s, sign-in and sign-up 3 / 10s, password reset 3 / 60s.
+login and register have none. Better Auth 1.7.7 defaults, unchanged from 1.6.27: enabled only in
+production, memory storage, 100 requests / 10s (`dist/context/create-context.mjs:170-175`); sign-in
+and sign-up 3 / 10s, password reset 3 / 60s (`dist/api/rate-limiter/index.mjs`, default special rules).
 
-Proposed `createAuth()` config:
+`createAuth()` config:
 
 ```ts
 rateLimit: {
@@ -248,20 +304,36 @@ rateLimit: {
 
 - `enabled: true` explicitly, so it doesn't hinge on `NODE_ENV`.
 - `storage: 'database'`: memory counters are per-instance, so N instances means N× the budget.
-  Database storage avoids adding Redis. Needs the `rate_limit` table.
+  Database storage avoids adding Redis. Needs the `auth.rate_limit` table (shape unchanged in 1.7.7).
+  1.7.7 makes the atomic `consume` path mandatory and drops the non-atomic get/set fallback; database
+  storage already implements it. A future `customStorage` must implement `consume`.
 - Password reset keeps Better Auth's built-in 3 / 60s.
-- Client IP comes from `advanced.ipAddress.ipAddressHeaders` (default `x-forwarded-for`). Confirm which
-  header Railway's proxy sets before relying on it.
+
+**Client IP must be configured explicitly — this is a hard Phase 0 requirement, not a check.** Better
+Auth reads `advanced.ipAddress.ipAddressHeaders` (default `x-forwarded-for`). Without
+`advanced.ipAddress.trustedProxies`, a header holding more than one address resolves to **no IP**
+(`@better-auth/core` `dist/utils/ip.mjs:174-194`). Requests with no IP all share **one bucket per path**
+(`dist/api/rate-limiter/index.mjs:236-247`). At 5 sign-ins per minute that bucket becomes a global
+login limit for every affected user, and any client can force it by sending its own
+`X-Forwarded-For`, which the proxy then appends to. Behavior is identical on 1.6.27. Deliverables:
+
+- Determine which header Railway's edge sets and how it treats a client-supplied `X-Forwarded-For`.
+- Either point `ipAddressHeaders` at a single-value header the edge overwrites, or set
+  `trustedProxies` to Railway's proxy ranges so the right-most untrusted address is used.
+- Test: a request with a two-entry `X-Forwarded-For` is limited under the client's own address, not a
+  shared bucket. The layer's own limiter must resolve the IP the same way.
 
 **The compatibility layer is not covered by this.** Better Auth rate-limits in its router's `onRequest`
-(`dist/api/index.mjs:168`), which only HTTP requests to its handler pass through. `/v2/users/login`
+(`dist/api/index.mjs:172` on 1.7.7), which only HTTP requests to its handler pass through. `/v2/users/login`
 calling `auth.api.signInEmail(...)` server-side skips it. The layer needs its own limiter —
 `lib/rate-limit.ts` at the same budgets (login 5 / 60s, register 3 / 60s per IP). That limiter is
 in-memory, so the per-instance caveat applies there.
 
 ### Phase 0 exit criteria (spec — must be green)
 
-1. UUID round-trip through the Drizzle adapter into UUID columns (better-auth@1.6.27).
+1. UUID round-trip through the Drizzle adapter into UUID columns in the `auth` schema
+   (better-auth@1.7.7; `generateId: "uuid"` handling is unchanged from 1.6.27,
+   `@better-auth/core` `dist/db/adapter/get-id-field.mjs:12,28`). Not yet proven on any version.
 2. One migrated test user: bcrypt login end-to-end via Better Auth.
 3. Timestamps: documented mapping or schema fix; no silent corruption on `created_at` / `updated_at`.
 4. `(user_id, provider_id)` unique + idempotent backfill re-run verified on a throwaway DB.
@@ -281,16 +353,19 @@ in-memory, so the per-instance caveat applies there.
   `revokeSessionsOnPasswordReset` is removed**.
 - **Integration:** reserved-email sign-up returns the same 409 as a taken email.
 - **Integration:** sign-in over the limit returns 429.
+- **Integration:** two-entry `X-Forwarded-For` is limited per client, not in a shared bucket.
+- **Integration:** UUID round-trip into `auth.users`, read back through the adapter.
 
 ### Rollback Strategy
 
-Revert Phase 0 commits. Production is untouched (migration not applied there until step 3).
+Revert Phase 0 commits. Production is untouched (the `auth` schema migration reaches production in
+Phase 2).
 
 ### Risks
 
 | Risk | Mitigation |
 |------|------------|
-| Better Auth + Drizzle UUID mismatch | Exit criterion 1; pin better-auth@1.6.27 until upgraded deliberately |
+| Better Auth + Drizzle UUID mismatch | Exit criterion 1; pin better-auth@1.7.7 (exact, as on `develop`) until upgraded deliberately, re-verifying this plan's citations on each bump |
 | Dropping #59 tables loses dev-only rows | Acceptable per spec; document in README |
 
 ---
@@ -312,7 +387,7 @@ Phase 3.
   until Phase 3. No global `middleware.ts`.
 - [ ] **Compatibility layer** for `/v2/users/*` (see section above), built behind the same flag, with
   contract tests for every response shape and its own rate limiter.
-- [ ] **Password-reset routes** — implement only if Amr accepts the proposal above.
+- [ ] **Password-reset routes** in the layer (see section above), including the system-account refusal.
 - [ ] **Admin assignment script** replacing `scripts/grant-admin.ts` (e.g. `scripts/assign-ba-admin.ts`):
   sets the admin plugin `role` by email; runs against the DB directly (works while `apps/api` is
   offline); does not touch `is_admin`.
@@ -320,8 +395,11 @@ Phase 3.
   `ADMIN_EMAILS`, checks Better Auth `role`. Keeps `shouldRunAdminStartupCheck` gating. Enabled in
   production only at step 9.
 - [ ] **CORS:** fix `apps/api/next.config.ts` (wildcard origin with credentials); allowlist aligned with
-  `trustedOrigins` for web origins. `trustedOrigins` is not a boundary for custom schemes on 1.6.27 —
-  no vacuous origin tests.
+  `trustedOrigins` for web origins. `trustedOrigins` is not a boundary for custom schemes (re-verified
+  on 1.7.7: checked only when a cookie is present, and `expo-origin` is client-controlled) — no vacuous
+  origin tests. See also #266: the existing HTTP origin test is vacuous because Better Auth skips the
+  check when `NODE_ENV=test` unless `advanced.disableOriginCheck` is set
+  (`dist/context/create-context.mjs:211`).
 - [ ] **CORS on `apps/auth`:** `set-auth-token` exposed to browser clients that need it (bearer plugin
   adds it to `Access-Control-Expose-Headers` on sign-in — verify for our origins).
 - [ ] **New frontend:** sign-in via `apps/auth`, store `set-auth-token`, send `Authorization: Bearer` to
@@ -363,20 +441,24 @@ they are in scope.
 
 ### Deliverables
 
+- [ ] **Apply the `auth` schema migration** (Phase 0 output) to staging and then production, ahead of
+  the window. Human-applied, never by CI. Production now carries empty `auth.*` tables beside legacy
+  `public.users`.
 - [ ] **Migration location** (agree with Waleed): e.g. `packages/auth/drizzle/` or
   `scripts/migrations/better-auth-cutover/`, containing:
   - Name derivation SQL (trim first + last → email local-part → `'User'`).
-  - `INSERT … SELECT` columns: `id`, `email`, derived `name`, `first_name`, `last_name`, timestamps,
+  - `INSERT … SELECT` into `auth.users`, columns: `id`, `email`, derived `name`, `first_name`, `last_name`, timestamps,
     `system_key`, `source`, `registered_via`, `email_verified = true`. Omit `is_admin`,
     `session_version`.
   - `account` backfill `WHERE system_key IS NULL` with `ON CONFLICT (user_id, provider_id) DO NOTHING`.
     System accounts (`ai-skill`, `leaderboard`) carry a `password_hash` (column is `NOT NULL`) but must
     stay non-login.
-  - FK repoint for `threads`, `preferences`, `feedback`.
+  - FK repoint for `threads`, `preferences`, `feedback` to `auth.users.id`.
   - `DROP TABLE tokens`.
-- [ ] **Rehearsal runbook** for steps 1–8, on a clone of production data.
+- [ ] **Rehearsal runbook** for steps 1–8, on a clone of production data taken after the `auth`
+  schema migration, so the rehearsal starts from the real pre-window state.
 - [ ] **Audits:**
-  - PK-set equality `users_legacy` vs `users`.
+  - PK-set equality `users_legacy` vs `auth.users`.
   - `account` rows = non-system users.
   - **No system account has a `credential` row.**
   - Every `ADMIN_EMAILS` entry has `role = 'admin'` after step 8.
@@ -443,20 +525,23 @@ This numbering is canonical. The spec's eight ordered operations map to it as: s
    `getSystemUserId()` in `/api/v1/chat/completions` and `/api/v2/mcp-complete`, admin stats in
    `lib/db/stats.ts`. Any writes accepted while partly live are lost on snapshot restore.
    `MAINTENANCE_MODE` doesn't help: `/api/v2/app-check` only reports it to clients.
-2. **`ALTER TABLE users RENAME TO users_legacy`.** FKs on `threads`, `preferences`, `feedback`, `tokens`
-   now reference `users_legacy.id`.
-3. **Run the Better Auth migration:** drop #59 scaffold tables if present; create `users` (with admin
-   columns), `session`, `account`, `verification` (+ `rate_limit` if database storage).
-4. **`INSERT … SELECT`** from `users_legacy` → `users` (columns per Phase 2; `email_verified = true`).
-5. **Backfill `account`** `WHERE system_key IS NULL`, idempotent `ON CONFLICT`.
-6. **Repoint FKs** on `threads`, `preferences`, `feedback` to `users.id`.
+2. **`ALTER TABLE public.users RENAME TO users_legacy`.** FKs on `threads`, `preferences`, `feedback`,
+   `tokens` now reference `users_legacy.id`. The rename no longer makes room for anything; it stops
+   accidental reads of the archive.
+3. **Verify the `auth` schema** (migrated in Phase 2): `auth.users` (with admin columns),
+   `auth.session`, `auth.account`, `auth.verification`, `auth.rate_limit` exist, and `auth.users` and
+   `auth.account` are empty. No DDL in the window.
+4. **`INSERT … SELECT`** from `users_legacy` → `auth.users` (columns per Phase 2; `email_verified = true`).
+5. **Backfill `auth.account`** `WHERE system_key IS NULL`, idempotent `ON CONFLICT`.
+6. **Repoint FKs** on `threads`, `preferences`, `feedback` to `auth.users.id`.
 7. **`DROP TABLE tokens`.** Required — otherwise it blocks `DROP TABLE users_legacy` later.
 8. **Assign admin roles** for every `ADMIN_EMAILS` entry with the Phase 1 script. Must finish before
    step 9, because the replacement assert runs at boot.
 9. **Deploy and bring `apps/api` back** (restore domains / unpause) with:
    - Session helper on all 12 route files below.
-   - `/v2/users/*` serving the compatibility layer (plus reset routes if accepted).
-   - Drizzle `users` model matching Better Auth; no model for `users_legacy`; `tokens` callers removed
+   - `/v2/users/*` serving the compatibility layer, plus the two reset routes.
+   - Drizzle `users` model is the auth package's exported `auth.users` table object; no model for
+     `users_legacy`; `tokens` callers removed
      from `lib/db/users.ts`.
    - Replacement admin assert enabled; `is_admin` reads removed (`lib/auth/startup-checks.ts`,
      `lib/auth/admin.ts`).
@@ -534,7 +619,7 @@ compatibility layer when its trigger fires.
   2. PK-set parity audit passes.
   3. No open rollback or incident needing the snapshot.
   4. Operator sign-off recorded.
-- [ ] **Remove the compatibility layer** (`/v2/users/*`, and reset routes if added) at 90 days after
+- [ ] **Remove the compatibility layer** (`/v2/users/*` and the reset routes) at 90 days after
   cutover or ≥ 95% new-client adoption, whichever first. **Owner: Amr.** Suggested: bump
   `IOS_MINIMUM_BUILD_VERSION` / `ANDROID_MINIMUM_BUILD_VERSION` in the same release, so remaining old
   builds get the update prompt from `/v2/app-check` instead of failing on removed routes.
@@ -586,7 +671,9 @@ work on either side of it.
 | Feedback / ownership | 3+ | Keep |
 | `bcrypt-compat.test.ts` | 0+ | Keep |
 | `revokeSessionsOnPasswordReset` | 0 | Fails if flag removed |
-| Rate limiting | 0–1 | 429 over limit on both paths |
+| Rate limiting | 0–1 | 429 over limit on both paths; multi-entry `X-Forwarded-For` not collapsed into one bucket |
+| `me` DELETE | 1 | Succeeds with a >24h-old session; token dead afterwards |
+| Password reset | 1 | Legacy link shape; system accounts get no email; sessions revoked |
 | System accounts non-login | 2 | Audit: no `credential` row |
 | Bcrypt branch removal | 2+ | Fails if branch removed |
 | Origin / `trustedOrigins` | 1 | Only if proven to reject wrong web origins |
@@ -609,7 +696,8 @@ work on either side of it.
   chosen Railway downtime step and alert silencing.
 - [ ] `emailVerified = true` for migrated users recorded in the cutover SQL and `docs/self-hosting.md`.
 - [ ] `.env.example` for `apps/auth` and `apps/api`; JWT vars marked deprecated, removed in Phase 4.
-- [ ] `packages/auth/README`: UUID, dual verify, session lifetime, rate-limit storage.
+- [ ] `packages/auth/README`: UUID, `auth` schema, dual verify, session lifetime, rate-limit storage
+  and client-IP source.
 - [ ] `RELEASE.md`: note the one-off exception for this cutover; retire the `grant-admin.ts` bootstrap
   step in Phase 4.
 - [ ] Update spec/plan/review status as phases complete.
@@ -619,7 +707,7 @@ work on either side of it.
 - [ ] Migrations committed and human-applied at deploy (never by CI).
 - [ ] Security spot-check: reserved emails on both sign-up paths, `system_key` routing, admin never
   email-match, cross-user ownership, rate limits.
-- [ ] Write `codev/reviews/60-better-auth-migration.md`.
+- [ ] Write the implementation review (the builder's `codev/reviews/<issue>-*.md`).
 
 ## Risk register
 
@@ -627,7 +715,10 @@ work on either side of it.
 |------|-------|------------|
 | Mass lockout | 0, 2, 3 | Spike; rehearsal; bcrypt dual verify; 24h rollback |
 | Released mobile users stranded | 1, 3 | Compatibility layer + contract tests |
-| Legacy password reset broken at cutover | 1 | Proposed reset routes in the layer (pending Amr) |
+| Legacy password reset broken at cutover | 1 | Reset routes in the layer (decided round 3) |
+| Reset gives a system account a password | 1 | `sendResetPassword` refuses `system_key` users + test |
+| Rate limit collapses to a global login cap | 0 | Explicit client-IP source + multi-entry XFF test |
+| `me` DELETE 404s or rejects old sessions | 1 | Internal adapter delete + >24h-session contract test |
 | Admin boot crash-loop | 3 | Step 8 before step 9 |
 | `role` column missing mid-window | 0, 2 | Admin columns in migration; rehearsal covers step 8 |
 | `DROP TABLE tokens` fails live | 2 | Rehearsal covers step 7 |
@@ -640,9 +731,9 @@ work on either side of it.
 
 ## Open questions for review
 
-1. Add `/v2/request_password_reset` and `/v2/reset_password` to the compatibility layer? (Proposal
-   above.) If yes: accept that reset links emailed before cutover stop working?
-2. Rate-limit values and database storage — confirm or adjust.
+1. Which header does Railway's edge set for the client IP, and does it overwrite or append to a
+   client-supplied `X-Forwarded-For`? (Blocks the rate-limit config in Phase 0.)
+2. Where does the migration SQL framework live? (Waleed; blocks Phase 2.)
 
 ## Approval
 
@@ -657,10 +748,15 @@ work on either side of it.
 | 2026-09-17 | Initial plan | Implement spec #60 / PR #134 |
 | 2026-09-21 | PR #148 review round 1 | Bearer auth, `revokeSessionsOnPasswordReset`, full downtime, admin columns |
 | 2026-09-29 | PR #148 review round 2 | Compatibility layer, `first_name`/`last_name`, rehearsal scope, `emailVerified = true`, session lifetime, rate limiting, system accounts, route checklist, 24h rollback; Better Auth migration moved into the window in production |
+| 2026-10-14 | PR #148 merged as-is; round 3 + 1.7.7 applied by the security architect; renamed to `-reference` | Dedicated `auth` schema (migration back out of the window), `me` DELETE via internal adapter, reset routes, rate-limit values and explicit client-IP source, system-account reset refusal, 1.7.7 citations, spec one-liners |
 
 ## Notes
 
-- better-auth@1.6.27 behavior (`trustedOrigins`, rate limiter, bearer, admin schema) was read from the
-  installed package; re-check on upgrade.
+- better-auth behavior was re-read from the installed **1.7.7** package on 2026-10-14 and diffed
+  against 1.6.27: `deleteUser` and `freshAge`, rate-limit defaults and router-only limiting,
+  `revokeSessionsOnPasswordReset`, client-IP resolution, admin schema, bearer plugin and
+  `generateId: "uuid"` are unchanged apart from line numbers. Changed: custom-scheme origin matching
+  (rewritten, same result for our entries), mandatory atomic rate-limit `consume`, and the new
+  `schemaName` adapter option. Re-check on every upgrade.
 - `system_key` lookup stays in `apps/api/lib/db/users.ts` (or its successor); the field is server-only.
 - Phase 3 does not merge without rehearsal sign-off.
