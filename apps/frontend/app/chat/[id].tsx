@@ -19,7 +19,6 @@ import { router, useLocalSearchParams } from 'expo-router';
 import Head from 'expo-router/head';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
-  FadeIn,
   FadeInDown,
   interpolate,
   ReduceMotion,
@@ -73,6 +72,7 @@ import {
 import { GlassCircleButton } from '@/components/GlassCircleButton';
 import { KeyboardAvoidingViewCompat } from '@/components/KeyboardAvoidingViewCompat';
 import { PressableScale } from '@/components/PressableScale';
+import { ScrollEdgeFade } from '@/components/ScrollEdgeFade';
 import { GeneratingMark, ThinkingLine } from '@/components/ThinkingLine';
 import {
   getGetConversationQueryKey,
@@ -112,15 +112,10 @@ const FOLLOWUP_KEY_PREFIX = '__followup-question-';
  */
 const ANSWER_HELD_LINES = ['96%', '99%', '93%', '97%', '90%', '46%'] as const;
 
-// A new turn taking its place at the foot of the thread, and the
-// chrome settling onto the paper behind it. Both built once, here:
-// rebuilt inline they allocate a fresh descriptor on every render.
+// A new turn taking its place at the foot of the thread. Built once,
+// here: rebuilt inline it allocates a fresh descriptor on every render.
 const TURN_ENTER = FadeInDown.duration(DURATION.enter)
   .easing(EASE_OUT)
-  .reduceMotion(ReduceMotion.System);
-const CHROME_ENTER = FadeIn.duration(DURATION.enter)
-  .easing(EASE_OUT)
-  .delay(60)
   .reduceMotion(ReduceMotion.System);
 
 function SendFailure({
@@ -674,207 +669,221 @@ export default function ChatScreen() {
             </Text>
           )}
           <KeyboardAvoidingViewCompat style={styles.flex}>
-            {showLoadingScreen ? (
-              // The thread's opening turn, held open at the geometry it
-              // will arrive in: the question at the head of the page,
-              // where the ask left it, and the first lines of its answer
-              // beneath. The conversation fills these shapes rather than
-              // replacing a centred spinner with a page of text.
-              <Placeholder
-                style={[
-                  styles.messages,
-                  !desktop && { paddingHorizontal: gutter },
-                  desktop && styles.messagesDesktop,
-                  { paddingTop: threadContentTop(desktop, insets.top) },
-                ]}
-              >
-                <View style={styles.heldQuestionRow}>
-                  <View style={styles.heldQuestionBubble}>
-                    <PlaceholderLine width="100%" lineHeight={22} />
-                  </View>
-                </View>
-                <View>
-                  {ANSWER_HELD_LINES.map((width, index) => (
-                    <PlaceholderLine
-                      key={index}
-                      width={width}
-                      lineHeight={answerLeading(desktop, screenWidth)}
-                    />
-                  ))}
-                </View>
-              </Placeholder>
-            ) : conversationQuery.isError ? (
-              <View style={styles.center}>
-                <Feather
-                  name="alert-circle"
-                  size={22}
-                  color={colors.destructive}
-                />
-                <Text
-                  style={[styles.errorText, { color: colors.mutedForeground }]}
-                >
-                  This conversation didn&apos;t load. Check your connection.
-                </Text>
-                <PressableScale
-                  onPress={() => conversationQuery.refetch()}
-                  // "Try again" alone says nothing about what would be
-                  // tried; the message above it is not read with the
-                  // button when a reader tabs straight to it.
-                  accessibilityRole="button"
-                  accessibilityLabel="Try loading this conversation again"
-                  style={(state) => [
-                    styles.retryButton,
-                    {
-                      backgroundColor: colors.primary,
-                      ...rounded(RADIUS.md),
-                      opacity: state.pressed
-                        ? 0.85
-                        : isHovered(state)
-                          ? 0.92
-                          : 1,
-                    },
+            <View style={styles.listArea}>
+              <ScrollEdgeFade
+                edge="top"
+                height={threadContentTop(desktop, insets.top)}
+              />
+              {showLoadingScreen ? (
+                // The thread's opening turn, held open at the geometry it
+                // will arrive in: the question at the head of the page,
+                // where the ask left it, and the first lines of its answer
+                // beneath. The conversation fills these shapes rather than
+                // replacing a centred spinner with a page of text.
+                <Placeholder
+                  style={[
+                    styles.messages,
+                    !desktop && { paddingHorizontal: gutter },
+                    desktop && styles.messagesDesktop,
+                    { paddingTop: threadContentTop(desktop, insets.top) },
                   ]}
                 >
+                  <View style={styles.heldQuestionRow}>
+                    <View style={styles.heldQuestionBubble}>
+                      <PlaceholderLine width="100%" lineHeight={22} />
+                    </View>
+                  </View>
+                  <View>
+                    {ANSWER_HELD_LINES.map((width, index) => (
+                      <PlaceholderLine
+                        key={index}
+                        width={width}
+                        lineHeight={answerLeading(desktop, screenWidth)}
+                      />
+                    ))}
+                  </View>
+                </Placeholder>
+              ) : conversationQuery.isError ? (
+                <View style={styles.center}>
+                  <Feather
+                    name="alert-circle"
+                    size={22}
+                    color={colors.destructive}
+                  />
                   <Text
-                    style={[
-                      styles.retryText,
-                      { color: colors.primaryForeground },
+                    style={[styles.errorText, { color: colors.mutedForeground }]}
+                  >
+                    This conversation didn&apos;t load. Check your connection.
+                  </Text>
+                  <PressableScale
+                    onPress={() => conversationQuery.refetch()}
+                    // "Try again" alone says nothing about what would be
+                    // tried; the message above it is not read with the
+                    // button when a reader tabs straight to it.
+                    accessibilityRole="button"
+                    accessibilityLabel="Try loading this conversation again"
+                    style={(state) => [
+                      styles.retryButton,
+                      {
+                        backgroundColor: colors.primary,
+                        ...rounded(RADIUS.md),
+                        opacity: state.pressed
+                          ? 0.85
+                          : isHovered(state)
+                            ? 0.92
+                            : 1,
+                      },
                     ]}
                   >
-                    Try again
-                  </Text>
-                </PressableScale>
-              </View>
-            ) : (
-              <FlatList
-                ref={listRef}
-                data={messages}
-                keyExtractor={keyFor}
-                scrollEnabled={!!messages.length || awaitingAnswer}
-                contentContainerStyle={[
-                  styles.messages,
-                  !desktop && { paddingHorizontal: gutter },
-                  desktop && styles.messagesDesktop,
-                  // Clearance for the frosted bar, so the opening question
-                  // never loads trapped beneath it.
-                  { paddingTop: threadContentTop(desktop, insets.top) },
-                ]}
-                // Not 'on-drag' on the web: react-native-web cannot tell a
-                // drag from any other scroll, and dismisses on every one —
-                // including the list keeping its foot in view as the
-                // keyboard makes room, which took focus straight back off
-                // the composer the reader had just tapped (#202).
-                keyboardDismissMode={
-                  Platform.OS === 'ios'
-                    ? 'interactive'
-                    : Platform.OS === 'web'
-                      ? 'none'
-                      : 'on-drag'
-                }
-                keyboardShouldPersistTaps="handled"
-                // Indicators are hidden by design, so none can ride under
-                // the frosted bar; nothing needs indicator insets.
-                showsVerticalScrollIndicator={false}
-                onScroll={(event) => {
-                  const { contentOffset, contentSize, layoutMeasurement } =
-                    event.nativeEvent;
-                  setShowJumpToLatest(
-                    follow.scrolled({
-                      offset: contentOffset.y,
-                      contentHeight: contentSize.height,
-                      viewportHeight: layoutMeasurement.height,
-                    }),
-                  );
-                }}
-                scrollEventThrottle={100}
-                // Growth moves the foot without any scroll event saying so,
-                // so it is where the thread follows a turn being written —
-                // and where a reader not following learns they have been
-                // left behind.
-                onContentSizeChange={(_width, height) => {
-                  const node = Platform.OS === 'web' ? scroller() : undefined;
-                  const { scrollToEnd, showJump } = follow.grew(
-                    node
-                      ? {
-                          offset: node.scrollTop,
-                          contentHeight: node.scrollHeight,
-                          viewportHeight: node.clientHeight,
-                        }
-                      : {
-                          offset: follow.offset,
-                          contentHeight: height,
-                          viewportHeight: listHeight.current,
-                        },
-                  );
-                  if (scrollToEnd) {
-                    listRef.current?.scrollToEnd({ animated: true });
+                    <Text
+                      style={[
+                        styles.retryText,
+                        { color: colors.primaryForeground },
+                      ]}
+                    >
+                      Try again
+                    </Text>
+                  </PressableScale>
+                </View>
+              ) : (
+                <FlatList
+                  ref={listRef}
+                  data={messages}
+                  keyExtractor={keyFor}
+                  scrollEnabled={!!messages.length || awaitingAnswer}
+                  contentContainerStyle={[
+                    styles.messages,
+                    !desktop && { paddingHorizontal: gutter },
+                    desktop && styles.messagesDesktop,
+                    // Clearance for the frosted bar, so the opening question
+                    // never loads trapped beneath it.
+                    { paddingTop: threadContentTop(desktop, insets.top) },
+                  ]}
+                  // Not 'on-drag' on the web: react-native-web cannot tell a
+                  // drag from any other scroll, and dismisses on every one —
+                  // including the list keeping its foot in view as the
+                  // keyboard makes room, which took focus straight back off
+                  // the composer the reader had just tapped (#202).
+                  keyboardDismissMode={
+                    Platform.OS === 'ios'
+                      ? 'interactive'
+                      : Platform.OS === 'web'
+                        ? 'none'
+                        : 'on-drag'
                   }
-                  setShowJumpToLatest(showJump);
-                }}
-                onLayout={(event) => {
-                  // The keyboard opening (and a window resize, and rotation)
-                  // shortens the list without moving it. A reader who was on
-                  // the newest turn would be left looking at the middle of
-                  // it, with a "Latest" button offering to undo something
-                  // they never did.
-                  // On the web the keyboard's own reshape has usually been
-                  // answered already (`onShellResize`); this is what is
-                  // left — a window resize, a rotation, the eased
-                  // correction once the first keyboard is measured. The
-                  // element is read rather than the event, so both paths
-                  // measure the same box.
-                  const node = Platform.OS === 'web' ? scroller() : undefined;
-                  if (node) holdFoot(node.clientHeight, node.scrollTop);
-                  else holdFoot(event.nativeEvent.layout.height, follow.offset);
-                }}
-                // The waiting line sits beneath the question that prompted
-                // it, at the foot of the thread. It carries the live
-                // retrieval trace while the model searches; once the answer
-                // itself begins streaming, the trace is done its job and the
-                // line steps aside for the in-progress answer bubble — with
-                // the mark alone beneath it for as long as the answer is
-                // still being written. The mark goes in the hand-off commit
-                // that clears `streamingText`, the same one that gives the
-                // answer back its Copy and Share, so the foot of the thread
-                // changes once rather than twice. A failure takes its place.
-                ListFooterComponent={
-                  awaitingAnswer && !revealedText ? (
-                    <ThinkingLine animate={!carriedInWait} trace={trace} />
-                  ) : revealedText && !failedQuestion ? (
-                    <GeneratingMark />
-                  ) : retryQuestion ? (
-                    <SendFailure
-                      question={retryQuestion}
-                      onRetry={() => send(retryQuestion)}
-                    />
-                  ) : null
-                }
-                renderItem={({ item }) => (
-                  // The question carried in from the ask is already drawn,
-                  // at the head of the page, on the screen we came from, so
-                  // it is history the moment this thread loads and does not
-                  // animate. A follow-up typed here, and every answer, is
-                  // new: it rises into place, once.
-                  <Animated.View
-                    entering={
-                      isNewContent(keyFor(item)) ? TURN_ENTER : undefined
+                  keyboardShouldPersistTaps="handled"
+                  // Indicators are hidden by design, so none can ride under
+                  // the frosted bar; nothing needs indicator insets.
+                  showsVerticalScrollIndicator={false}
+                  onScroll={(event) => {
+                    const { contentOffset, contentSize, layoutMeasurement } =
+                      event.nativeEvent;
+                    setShowJumpToLatest(
+                      follow.scrolled({
+                        offset: contentOffset.y,
+                        contentHeight: contentSize.height,
+                        viewportHeight: layoutMeasurement.height,
+                      }),
+                    );
+                  }}
+                  scrollEventThrottle={100}
+                  // Growth moves the foot without any scroll event saying so,
+                  // so it is where the thread follows a turn being written —
+                  // and where a reader not following learns they have been
+                  // left behind.
+                  onContentSizeChange={(_width, height) => {
+                    const node = Platform.OS === 'web' ? scroller() : undefined;
+                    const { scrollToEnd, showJump } = follow.grew(
+                      node
+                        ? {
+                            offset: node.scrollTop,
+                            contentHeight: node.scrollHeight,
+                            viewportHeight: node.clientHeight,
+                          }
+                        : {
+                            offset: follow.offset,
+                            contentHeight: height,
+                            viewportHeight: listHeight.current,
+                          },
+                    );
+                    if (scrollToEnd) {
+                      listRef.current?.scrollToEnd({ animated: true });
                     }
-                  >
-                    {item.role === 'user' ? (
-                      <ThreadQuestion text={item.content} />
-                    ) : (
-                      <AnswerMessage
-                        message={item}
-                        onSourcesOpen={openSources}
-                        generating={
-                          !!streamingText && item.id === streamKey.current
-                        }
+                    setShowJumpToLatest(showJump);
+                  }}
+                  onLayout={(event) => {
+                    // The keyboard opening (and a window resize, and rotation)
+                    // shortens the list without moving it. A reader who was on
+                    // the newest turn would be left looking at the middle of
+                    // it, with a "Latest" button offering to undo something
+                    // they never did.
+                    // On the web the keyboard's own reshape has usually been
+                    // answered already (`onShellResize`); this is what is
+                    // left — a window resize, a rotation, the eased
+                    // correction once the first keyboard is measured. The
+                    // element is read rather than the event, so both paths
+                    // measure the same box.
+                    const node = Platform.OS === 'web' ? scroller() : undefined;
+                    if (node) holdFoot(node.clientHeight, node.scrollTop);
+                    else holdFoot(event.nativeEvent.layout.height, follow.offset);
+                  }}
+                  // The waiting line sits beneath the question that prompted
+                  // it, at the foot of the thread. It carries the live
+                  // retrieval trace while the model searches; once the answer
+                  // itself begins streaming, the trace is done its job and the
+                  // line steps aside for the in-progress answer bubble — with
+                  // the mark alone beneath it for as long as the answer is
+                  // still being written. The mark goes in the hand-off commit
+                  // that clears `streamingText`, the same one that gives the
+                  // answer back its Copy and Share, so the foot of the thread
+                  // changes once rather than twice. A failure takes its place.
+                  ListFooterComponent={
+                    awaitingAnswer && !revealedText ? (
+                      <ThinkingLine animate={!carriedInWait} trace={trace} />
+                    ) : revealedText && !failedQuestion ? (
+                      <GeneratingMark />
+                    ) : retryQuestion ? (
+                      <SendFailure
+                        question={retryQuestion}
+                        onRetry={() => send(retryQuestion)}
                       />
-                    )}
-                  </Animated.View>
-                )}
+                    ) : null
+                  }
+                  renderItem={({ item }) => (
+                    // The question carried in from the ask is already drawn,
+                    // at the head of the page, on the screen we came from, so
+                    // it is history the moment this thread loads and does not
+                    // animate. A follow-up typed here, and every answer, is
+                    // new: it rises into place, once.
+                    <Animated.View
+                      entering={
+                        isNewContent(keyFor(item)) ? TURN_ENTER : undefined
+                      }
+                    >
+                      {item.role === 'user' ? (
+                        <ThreadQuestion text={item.content} />
+                      ) : (
+                        <AnswerMessage
+                          message={item}
+                          onSourcesOpen={openSources}
+                          generating={
+                            !!streamingText && item.id === streamKey.current
+                          }
+                        />
+                      )}
+                    </Animated.View>
+                  )}
+                />
+              )}
+              <ScrollEdgeFade
+                edge="bottom"
+                height={
+                  (desktop
+                    ? THREAD_BOTTOM_PAD.desktop
+                    : THREAD_BOTTOM_PAD.phone) + COMPOSER_TOP_PAD
+                }
               />
-            )}
+            </View>
             {showJumpToLatest &&
               !showLoadingScreen &&
               !conversationQuery.isError && (
@@ -935,13 +944,16 @@ export default function ChatScreen() {
         </Animated.View>
 
         {/* The ask clears its own floating controls on the way out, so
-          the thread's chrome fades onto bare paper instead of swapping
-          one set of buttons for another mid-cut. */}
-        <Animated.View
-          entering={CHROME_ENTER}
-          style={StyleSheet.absoluteFill}
-          pointerEvents="box-none"
-        >
+          the thread's chrome lands on bare paper instead of swapping one
+          set of buttons for another mid-cut. It used to fade in rather
+          than land, but an entrance that starts a view at zero opacity
+          is exactly what native Liquid Glass fails to install itself
+          under (expo/expo#41024) — the disc could win the race and
+          render real glass, or lose it and sit there as a flat fallback
+          for the rest of the thread, depending on timing the component
+          doesn't control. One recipe for this disc everywhere beats a
+          coin-flip glass effect for a cosmetic settle. */}
+        <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
           {/* Desktop names the thread in the rail, where the rest of the
             navigation already is, and starts a new question from there
             too — so there is nothing left for a bar to carry, and an
@@ -974,7 +986,7 @@ export default function ChatScreen() {
               </GlassCircleButton>
             </View>
           )}
-        </Animated.View>
+        </View>
 
         <SourcePanel request={sources} onClose={() => setSources(null)} />
       </Animated.View>
@@ -1018,6 +1030,13 @@ function ThreadQuestion({ text }: { text: string }) {
 const styles = StyleSheet.create({
   flex: {
     flex: 1,
+  },
+  // Owns exactly the box the list used to fill on its own, so the two
+  // edge fades have a positioning parent to overlay without changing
+  // anything about how the list itself is measured or scrolled.
+  listArea: {
+    flex: 1,
+    position: 'relative',
   },
   // The empty screen's chrome box, to the point: the same edge margin
   // and the same row, so the menu disc lands on the identical pixels
