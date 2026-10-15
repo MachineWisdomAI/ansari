@@ -99,14 +99,13 @@ export const NIGHT_SOURCE: Record<
  *
  * `min` continues past this. That tail is the shadow's core and it
  * should be the deepest thing on screen; the test keeps it from running
- * toward black or crushing. 0.495 is the deepest value the current clips'
- * `min` anchors tolerate without crushing — which clip is the binding
- * constraint falls out of both anchors together (gap to `frond`, and
- * `wall`), not from `min` alone, and has moved between clips before as
- * NIGHT_SOURCE changed; re-run the search in `ambientNight.test.ts`'s
- * crush-protection check whenever NIGHT_SOURCE changes.
+ * toward black or crushing. 0.517 is a chosen depth, not the floor of a
+ * search — `ambientNight.test.ts`'s crush-protection check only requires
+ * the graded `min` to clear 0.02, which a much deeper value than this
+ * still clears. Move it by eye against both clips and let the test catch
+ * an actual crush, rather than reading it as a limit the test found.
  */
-export const NIGHT_DEPTH = 0.495;
+export const NIGHT_DEPTH = 0.517;
 
 /**
  * Layer opacity at night. This is not a darkness knob: the grade solves
