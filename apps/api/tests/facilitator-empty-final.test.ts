@@ -154,6 +154,20 @@ async function collect(gen: AsyncGenerator<Event>): Promise<Event[]> {
   return events;
 }
 
+// Runs a budgeted request on a virtual clock (issue #292): runFacilitator's deadlines
+// read Date.now() and the scripted rounds wait on setTimeout, so faking both puts them
+// on one clock — the ordering a test scripts can't be reordered by machine load.
+async function collectOnVirtualClock(gen: AsyncGenerator<Event>, ms: number): Promise<Event[]> {
+  vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+  try {
+    const events = collect(gen);
+    await vi.advanceTimersByTimeAsync(ms);
+    return await events;
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
 function userMessage(text: string): Message {
   return { role: 'user', content: [{ type: 'text', text }] };
 }
@@ -240,11 +254,12 @@ describe('empty final completion (issue #60)', () => {
       };
     h.scripts = [slowEmptyRound(100), slowThrowRound(100), textRound('Synthesized from context.')];
 
-    const events = await collect(
+    const events = await collectOnVirtualClock(
       runFacilitator([userMessage('q')], undefined, {
         budgetMs: 300,
         reserveMs: 150,
-      }) as AsyncGenerator<Event>
+      }) as AsyncGenerator<Event>,
+      300
     );
     const types = events.map((e) => e.type);
 

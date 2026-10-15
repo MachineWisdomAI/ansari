@@ -145,6 +145,20 @@ async function collect(gen: AsyncGenerator<FacilitatorStreamEvent>): Promise<Fac
   return events;
 }
 
+// Runs a budgeted request on a virtual clock (issue #292): runFacilitator's deadlines
+// read Date.now() and the scripted delays wait on setTimeout, so faking both puts them
+// on one clock — the ordering a test scripts can't be reordered by machine load.
+async function collectOnVirtualClock(gen: AsyncGenerator<FacilitatorStreamEvent>, ms: number): Promise<FacilitatorStreamEvent[]> {
+  vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+  try {
+    const events = collect(gen);
+    await vi.advanceTimersByTimeAsync(ms);
+    return await events;
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
 function userMessage(text: string): Message {
   return { role: 'user', content: [{ type: 'text', text }] };
 }
@@ -322,7 +336,10 @@ describe('never-executed dispatches are still recorded', () => {
     h.scripts = [toolRound(['search_quran', 'search_hadith']), textRound('Best-effort synthesis.')];
 
     // softDeadline = +20ms; the first (slow, 60ms) tool pushes the second past it.
-    const events = await collect(runFacilitator([userMessage('q')], undefined, { budgetMs: 2000, reserveMs: 1980 }));
+    const events = await collectOnVirtualClock(
+      runFacilitator([userMessage('q')], undefined, { budgetMs: 2000, reserveMs: 1980 }),
+      2000
+    );
     const done = terminal(events);
     expect(done.type).toBe('done');
     const p = pairs(done.toolCalls!);

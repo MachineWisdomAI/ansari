@@ -172,6 +172,20 @@ async function collect(gen: AsyncGenerator<Event>): Promise<Event[]> {
   return events;
 }
 
+// Runs a budgeted request on a virtual clock (issue #292): runFacilitator's deadlines
+// read Date.now() and the scripted delays wait on setTimeout, so faking both puts them
+// on one clock — the ordering a test scripts can't be reordered by machine load.
+async function collectOnVirtualClock(gen: AsyncGenerator<Event>, ms: number): Promise<Event[]> {
+  vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+  try {
+    const events = collect(gen);
+    await vi.advanceTimersByTimeAsync(ms);
+    return await events;
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
 function userMessage(text: string): Message {
   return { role: 'user', content: [{ type: 'text', text }] };
 }
@@ -348,8 +362,9 @@ describe('Inkling rescue on terminal Gemini errors (issue #79)', () => {
     h.scripts = [errorRound('genuine LLM failure')];
     h.inklingScripts = [textRound('should never be reached')];
 
-    const events = await collect(
-      runFacilitator([userMessage('q')], undefined, { budgetMs: 300, reserveMs: 150 }) as AsyncGenerator<Event>
+    const events = await collectOnVirtualClock(
+      runFacilitator([userMessage('q')], undefined, { budgetMs: 300, reserveMs: 150 }) as AsyncGenerator<Event>,
+      300
     );
     const types = events.map((e) => e.type);
 

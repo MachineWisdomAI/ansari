@@ -44,6 +44,8 @@ export async function createThreadSnapshot(
     .from(messages)
     .where(eq(messages.threadId, threadId))
     // Same thread order as findMessagesByThread, id breaking created_at ties (spec 168).
+    // id is a random uuid, so a tie is broken deterministically but NOT in insertion
+    // order; production timestamps are microsecond and don't tie in practice (#292).
     .orderBy(messages.createdAt, messages.id);
 
   // Citable sources are derived once, now, and copied into the snapshot

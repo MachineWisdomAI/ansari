@@ -21,3 +21,16 @@ Constraints from architect: keep DDL per file, minimal edits in pglite setup blo
 - No `beforeAll` hook timeout (10s) in 8 loaded runs on this 14-core box. The #290 reporter saw whole-file reds (hook-shaped) on their machine. So the deadline that trips here is the 5s TEST default, not (only) the hook default.
 
 Root cause, mechanisms 1+2: vitest defaults (5s test / 10s hook) applied to bodies and hooks whose cost is CPU-bound and scales with machine load (pglite WASM cold start + migrations, ESLint cold config + tree lint, bcrypt). Fix plan: config-level testTimeout + hookTimeout in apps/api/vitest.config.ts with a comment naming #292/#290. No shared DB, no DDL edits.
+
+## Fix (2026-10-15)
+
+- M1+M2: `apps/api/vitest.config.ts` testTimeout 30_000 / hookTimeout 30_000, comment names #292/#290. No DDL touched, no shared DB.
+- M3: thread-get-contract seeds explicit increasing `createdAt` (`at(n)`, same helper as documents-endpoints); the spec-168 assertion now checks role order + documents only on the assistant message. shares.ts comment: uuid tie-break is not insertion order.
+- M4: fake Date+setTimeout+clearTimeout via a per-file `collectOnVirtualClock` helper (advanceTimersByTimeAsync) in facilitator-empty-final, -toolcalls, -inkling-rung, -budget (the 300/150 cases). Fake timers worked; no widening needed. facilitator-budget's wall `elapsed < 600` became vacuous on a virtual clock, so it now asserts the agent's own `extra.elapsedMs <= 300` (virtual). model-provenance left alone (soft deadline at t=0).
+
+### Evidence
+- thread-get-contract alone, idle: before 12/30 red → after 0/30; tie restored (both at(1)) → 18/30 red (:205 and :272).
+- Virtual clock is live, not vacuous: round 1 at 160ms → `length of 3 but got 2` 3/3; synthesis overrunning by 100ms → `expected 400 ≤ 300`; slow tool 10ms → budget_skipped assertion red.
+- Full suite under 28 busy loops / 14 cores: before 5/5 red → after 10/10 green.
+- Negative (old 5s/10s restored, everything else fixed, same load): 3/3 red — eslint tree-lint, grant-admin, parity full-journal (`Test timed out in 5000ms`) AND `tests/api.test.ts` whole file `Hook timed out in 10000ms` (the #290 hook mechanism, finally reproduced here).
+- turbo run test --filter ansari-api --force (.env.ci loaded), 28 busy loops: 10/10 green.

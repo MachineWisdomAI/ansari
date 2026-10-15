@@ -141,6 +141,20 @@ async function collect(gen: AsyncGenerator<Event>): Promise<Event[]> {
   return events;
 }
 
+// Runs a budgeted request on a virtual clock (issue #292): runFacilitator's deadlines
+// read Date.now() and the scripted delays wait on setTimeout, so faking both puts them
+// on one clock — the ordering a test scripts can't be reordered by machine load.
+async function collectOnVirtualClock(gen: AsyncGenerator<Event>, ms: number): Promise<Event[]> {
+  vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+  try {
+    const events = collect(gen);
+    await vi.advanceTimersByTimeAsync(ms);
+    return await events;
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
 function userMessage(text: string): Message {
   return { role: 'user', content: [{ type: 'text', text }] };
 }
@@ -184,8 +198,9 @@ describe('runFacilitator request-time budget — Phase 2 (Spec 49)', () => {
     h.toolDelayMs = 200; // iteration 1 tool run pushes the clock past the soft deadline
     h.scripts = [toolRound(['search_quran']), textRound('Synthesized answer.')];
 
-    const events = await collect(
+    const events = await collectOnVirtualClock(
       runFacilitator([userMessage('q')], undefined, { budgetMs: 300, reserveMs: 150 }) as AsyncGenerator<Event>,
+      600
     );
     const types = events.map((e) => e.type);
 
@@ -233,8 +248,9 @@ describe('runFacilitator request-time budget — Phase 2 (Spec 49)', () => {
     h.toolDelayMs = 200; // the first tool run crosses the soft deadline mid-fan-out
     h.scripts = [toolRound(['search_quran', 'search_hadith']), textRound('Synth.')];
 
-    const events = await collect(
+    const events = await collectOnVirtualClock(
       runFacilitator([userMessage('q')], undefined, { budgetMs: 300, reserveMs: 150 }) as AsyncGenerator<Event>,
+      600
     );
 
     const toolResults = events.filter((e) => e.type === 'tool_result');
@@ -251,8 +267,9 @@ describe('runFacilitator request-time budget — Phase 2 (Spec 49)', () => {
     h.toolDelayMs = 200;
     h.scripts = [toolRound(['search_quran']), textRound('')]; // synthesis yields empty
 
-    const events = await collect(
+    const events = await collectOnVirtualClock(
       runFacilitator([userMessage('q')], undefined, { budgetMs: 300, reserveMs: 150 }) as AsyncGenerator<Event>,
+      600
     );
     const types = events.map((e) => e.type);
 
@@ -275,8 +292,9 @@ describe('runFacilitator request-time budget — Phase 2 (Spec 49)', () => {
       textRound('Recovered synthesis.'),
     ];
 
-    const events = await collect(
+    const events = await collectOnVirtualClock(
       runFacilitator([userMessage('q')], undefined, { budgetMs: 300, reserveMs: 150 }) as AsyncGenerator<Event>,
+      600
     );
     const types = events.map((e) => e.type);
 
@@ -317,21 +335,20 @@ describe('runFacilitator request-time budget — Phase 2 (Spec 49)', () => {
     // then throws — exercising the exception path and the whole-request timing bound.
     h.scripts = [toolRound(['search_quran']), hangHonoringTimeout()];
 
-    const start = Date.now();
-    const events = await collect(
+    const events = await collectOnVirtualClock(
       runFacilitator([userMessage('q')], undefined, { budgetMs: 300, reserveMs: 150 }) as AsyncGenerator<Event>,
+      600
     );
-    const elapsed = Date.now() - start;
     const types = events.map((e) => e.type);
 
     expect(types).toContain('error');
     expect(types).not.toContain('done');
     expect(events.find((e) => e.type === 'error')?.data).toMatch(/taking longer than expected/i);
-    // The terminal event lands within the budget window (gathering ~soft deadline + synthesis
-    // bounded to the reserve), not Gemini's 60s/3-min defaults.
-    expect(elapsed).toBeLessThan(300 + 300);
     expect(Sentry.captureMessage).toHaveBeenCalledTimes(1); // short-circuit logged, terminalPath 'error'
     const extra = (Sentry.captureMessage as ReturnType<typeof vi.fn>).mock.calls[0][1].extra;
     expect(extra.terminalPath).toBe('error');
+    // The terminal event lands within the budget (gathering past the soft deadline + synthesis
+    // bounded to the reserve), not Gemini's 60s/3-min defaults. Measured on the virtual clock.
+    expect(extra.elapsedMs).toBeLessThanOrEqual(300);
   });
 });
