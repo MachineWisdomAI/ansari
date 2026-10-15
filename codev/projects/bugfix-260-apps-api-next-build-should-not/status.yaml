@@ -1,7 +1,7 @@
 id: bugfix-260
 title: apps-api-next-build-should-not
 protocol: bugfix
-phase: fix
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-10-15T00:09:54.437Z'
-updated_at: '2026-10-15T00:20:37.281Z'
+updated_at: '2026-10-15T00:21:02.832Z'
