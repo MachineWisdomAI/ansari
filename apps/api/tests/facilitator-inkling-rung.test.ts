@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 /**
  * Inkling final fallback rung + terminal-error rescue + forced-primary mode —
@@ -179,12 +179,19 @@ async function collectOnVirtualClock(gen: AsyncGenerator<Event>, ms: number): Pr
   vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
   try {
     const events = collect(gen);
+    events.catch(() => {}); // surfaced by the await below, not as an unhandled rejection
     await vi.advanceTimersByTimeAsync(ms);
     return await events;
   } finally {
     vi.useRealTimers();
   }
 }
+
+// A request that never settles fails at the test timeout before the finally above
+// runs; restore real timers here so it can't leak into the next test's real sleeps.
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 function userMessage(text: string): Message {
   return { role: 'user', content: [{ type: 'text', text }] };

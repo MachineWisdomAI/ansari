@@ -34,3 +34,8 @@ Root cause, mechanisms 1+2: vitest defaults (5s test / 10s hook) applied to bodi
 - Full suite under 28 busy loops / 14 cores: before 5/5 red → after 10/10 green.
 - Negative (old 5s/10s restored, everything else fixed, same load): 3/3 red — eslint tree-lint, grant-admin, parity full-journal (`Test timed out in 5000ms`) AND `tests/api.test.ts` whole file `Hook timed out in 10000ms` (the #290 hook mechanism, finally reproduced here).
 - turbo run test --filter ansari-api --force (.env.ci loaded), 28 busy loops: 10/10 green.
+
+## PR #301 + CMAP (2026-10-15)
+- CMAP: gemini APPROVE, codex APPROVE, claude APPROVE (first dispatch failed: consult couldn't auto-detect the project, "Multiple projects found"; re-ran with --issue 292 --project-id bugfix-292).
+- Applied claude's non-blocking notes: (1) my shares.ts comment wrongly said production doesn't tie — mcp-complete inserts several messages in ONE transaction, so they share now() and tie (threads.ts:136 already said so); comment corrected. Possible follow-up for the architect: deterministic production order for one-transaction multi-message writes. (2) afterEach(useRealTimers) in the 4 facilitator files — a request that never settles dies at the test timeout before the helper's finally runs. (3) helper's collect() promise marked handled so an early rejection surfaces at the await. (4) dropped the per-case 20_000 in eslint-env-guard and migration-schema-parity (tighter than the new 30 s global) and updated their stale "5 s default" comments.
+- Not taken: slowTestThreshold (reviewer's optional idea; out of scope).
