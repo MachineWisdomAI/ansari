@@ -343,9 +343,23 @@ the configured algorithm, rejects `none` and every other algorithm, and requires
 `exp`. When `apps/auth` is down, tokens already issued still verify from the cache, so existing
 users keep working until their JWT expires. Sign-in and refresh do need `apps/auth`.
 
-**Admin plugin endpoints are now public on `apps/auth`**: set-role, ban, list-users, impersonate.
-They are restricted to `role = 'admin'` by the plugin. **Impersonation is disabled** (through
-`disabledPaths`) unless the owner explicitly asks for it, and a test pins that.
+**The whole admin HTTP surface on `apps/auth` is disabled** (security review, 2026-10-15).
+
+- **Why.** With `apps/auth` public, the admin plugin would expose impersonation and 13 more
+  endpoints behind a single admin session:
+  - set-user-password, set-role, create-user, remove-user, update-user
+  - ban-user, unban-user
+  - list-users, get-user, list-user-sessions
+  - revoke-user-session(s), has-permission
+
+  A stolen admin token, or XSS on the frontend, would then mean takeover of any account. Nothing
+  needs these endpoints, because roles come from the role script.
+- **The plugin stays.** It is kept only for its `role` column (and the related columns).
+- **`disabledPaths` alone is not enough.** It matches only the exact normalized path
+  (`dist/api/index.mjs:166-168`). So `apps/auth` also blocks the admin prefix case-insensitively in
+  an Express middleware placed **before** `toNodeHandler`, and it covers trailing-slash and
+  percent-encoded variants.
+- **Re-enabling.** The owner can re-enable specific endpoints later, by explicit decision.
 
 **`trustedOrigins` matters again.** `apps/frontend` on the web now talks to `apps/auth` directly.
 Its web origin is allowlisted, `trustedOrigins` is still not treated as a boundary for custom
@@ -490,7 +504,7 @@ block a release.
 
 | This project | Reference phases | Production-safe while legacy JWT serves? |
 |---|---|---|
-| **PR A: Prepare** | 0, 1 and the code half of 2. **Database:** the **additive** migration (generated; condition 1) with `auth.jwks`, and retirement of the `packages/auth` journal. **`apps/auth`:** `createAuth()` config (UUIDs, `auth` schema, dual verify, `bearer()`, `jwt()`, `admin()` with impersonation disabled, rate limiting and client IP, the authenticated internal hop), its Dockerfile and Railway service, deployed **dark**. **`apps/api`:** the JWKS verifier (unwired), the compatibility layer as an HTTP client of `apps/auth` (unwired), the admin script and assert, the CORS fix, contract tests. **Cutover:** the cutover SQL, **staged and rehearsed outside the journal** | **Yes.** The `auth` schema is additive (empty tables beside `public.users`). `apps/auth` runs with no public sign-in. The new `apps/api` code is not wired to production routes. PR A can merge and promote normally. |
+| **PR A: Prepare** | 0, 1 and the code half of 2. **Database:** the **additive** migration (generated; condition 1) with `auth.jwks`, and retirement of the `packages/auth` journal. **`apps/auth`:** `createAuth()` config (UUIDs, `auth` schema, dual verify, `bearer()`, `jwt()`, `admin()` kept for its columns with its whole HTTP surface blocked, rate limiting and client IP, the authenticated internal hop), its Dockerfile and Railway service, deployed **dark**. **`apps/api`:** the JWKS verifier (unwired), the compatibility layer as an HTTP client of `apps/auth` (unwired), the admin script and assert, the CORS fix, contract tests. **Cutover:** the cutover SQL, **staged and rehearsed outside the journal** | **Yes.** The `auth` schema is additive (empty tables beside `public.users`). `apps/auth` runs with no public sign-in. The new `apps/api` code is not wired to production routes. PR A can merge and promote normally. |
 | Rehearsal (production-data clone) | 2 | Runs from PR B's branch on a clone of production, taken after PR A's migration was applied, with `apps/auth` and `apps/api` both pointed at the clone. Does not touch production. |
 | **PR B: Cutover** | 3, plus the code half of 4 | **No.** Merged to `develop` immediately before the window and promoted **in** the window. It holds the cutover migration (generated last in the journal; schema freeze from merge to window close), the owner's `DEPLOYED_THROUGH` bump, the `RELEASE.md` exception, the pglite DDL move, the route switch to JWT verification, the `users` model → `auth.users`, the `apps/frontend` switch to `apps/auth` (agreed with the app architect), and removal of the legacy JWT code, `tokens`, `session_version`, `is_admin`, `grant-admin.ts` and the `JWT_*` config. |
 | Out of this project (follow-up issues) | 4 triggers, 5 | Drop `users_legacy` (14 days + parity + sign-off). Remove the layer (its trigger). |
@@ -617,8 +631,16 @@ rollback deadline passing.
   regularly is never logged out at the 30-day mark.
 - [ ] After cutover no legacy HS256 JWT code exists. `tokens`, `session_version`, `is_admin` and
   `grant-admin.ts` are gone from code and schema. `apps/api` has no `better-auth` dependency.
-- [ ] Impersonation is disabled on `apps/auth` (`disabledPaths`), and a test pins it. Other admin
-  plugin endpoints require `role = 'admin'`.
+- [ ] **No admin plugin endpoint answers on `apps/auth`.** Every admin path, impersonation
+  included, is listed in `disabledPaths` **and** blocked by an Express middleware placed before
+  `toNodeHandler`, which matches the admin prefix case-insensitively. Tests cover:
+  - exact paths, case variants, trailing slashes and percent-encoded variants
+  - a **regression test that enumerates the admin plugin's endpoints from the installed package
+    and fails if any of them answers** with anything other than the block response, even with a
+    valid admin session
+
+  The plugin stays configured for its `role` column. Re-enabling an endpoint requires an explicit
+  owner decision.
 
 **JWT issuance and verification**
 
@@ -861,6 +883,7 @@ decided rate limits apply to every production sign-in, because all of them pass 
 | Users in `public.users` | All auth tables in the `auth` schema. `users_legacy` is unread |
 | (new) | Client IP comes from `X-Real-IP` only. The layer-to-`apps/auth` hop forwards it only with the internal credential |
 | (new) | Sign-in, sign-up, reset and session logic live only in `apps/auth`. The `/v2/users/*` layer is an HTTP client of it |
+| (new) | The admin plugin's HTTP endpoints are blocked on `apps/auth` (the plugin is used for `role` only). Roles change only through the role script |
 
 ## Assumptions
 
@@ -1051,7 +1074,9 @@ at the window.
 27. Removing the bcrypt branch, or `revokeSessionsOnPasswordReset`, makes a named test fail. The
     builder demonstrates this once and records it in the review.
 28. A credentialed CORS request from a disallowed origin to `apps/auth` or `apps/api` gets no allow
-    response. A request to the impersonation endpoint fails because the path is disabled.
+    response. With a valid admin session, every admin plugin endpoint (`/admin/set-role`,
+    `/ADMIN/set-role`, `/admin/set-role/`, `/%61dmin/set-role`, impersonation included) gets the
+    block response.
 29. A raw session token from `/v2/users/login` mints a JWT at `apps/auth`. Turning on
     `requireSignature: true` makes that test fail.
 30. The JWT payload contains exactly the pinned claims, and no email, names, `system_key` or role.
@@ -1084,7 +1109,7 @@ at the window.
 | Rate limit collapses into one global login bucket (edge or internal hop) | Medium without the fix | High | `X-Real-IP` only; authenticated forwarded IP on the hop; multi-entry XFF and two-client tests; empirical edge verification |
 | Internal credential leaked | Low | Medium | It only selects a rate-limit key and reaches internal-only endpoints; held in two service environments; rotated with them; never logged |
 | Railway changes `X-Real-IP` semantics later | Low | Medium | Documented header; re-verify on any Railway networking change; an arch-critical fact makes the dependency visible |
-| Admin plugin endpoints abused | Low | High | Admin-only by plugin; impersonation disabled and pinned |
+| Admin HTTP surface abused (stolen admin token or frontend XSS leads to account takeover) | Low | Critical | Whole admin surface blocked: `disabledPaths` plus a case-insensitive prefix middleware before `toNodeHandler`; variant tests; enumerating regression test |
 | `apps/frontend` client change slips or breaks in the window | Medium | High | Agreed with the app architect up front; rehearsed; web rollback by redeploy; native release timing decided (I-6) |
 | Cutover code merged early freezes releases | Medium under one PR | High | Two-PR split; PR A is production-safe by construction |
 | FK repoint or `DROP tokens` fails mid-window | Low | High | One transaction with precondition guards; rehearsed on a clone |
