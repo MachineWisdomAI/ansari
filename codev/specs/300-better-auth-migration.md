@@ -502,40 +502,96 @@ Waleed review is dropped by the owner's decision.
 **Decision.** The `auth` schema lives in the existing Postgres database for this project. The
 long-term plan is to move the auth tables into their own database. This project does not do the
 split, but it must not make the split harder. The aim is that the split later is a data move plus
-connection-string changes, not a rewrite.
+connection-string changes, not a rewrite. (Rules amended by the security review of 388371b.)
 
 **Split-readiness rules (requirements of this project):**
 
-1. **Separate database logins now.** `apps/auth` connects with its own Postgres role, which owns
-   the `auth` schema. `apps/api` connects with a role that can only `SELECT` the auth columns it
-   needs (`auth.users`: `id`, `role`, existence; `auth.session` only if the per-request session
-   check is chosen). It has no access to `auth.account` (password hashes), `auth.verification` or
-   `auth.jwks`. `apps/auth` has no access to `public`. A test or boot check proves each grant
-   boundary. At the split, each role's connection string points at its own database.
-2. **No SQL joins between `auth` and `public` tables.** Today no `apps/api` query joins `users` to
+1. **Three database principals, not two.**
+   - A **migrator** role owns both schemas (`public` and `auth`), in today's database and in both
+     databases after the split. It alone runs DDL: the journal, the admin-role script and the
+     read-only audits.
+   - The **`apps/auth` runtime** role has `SELECT, INSERT, UPDATE, DELETE` on `auth.*` and nothing
+     on `public`. It runs no DDL.
+   - The **`apps/api` runtime** role has its existing DML on `public` and only the reads in rule 3
+     on `auth`. It runs no DDL.
+   - At the split, each runtime role's connection string points at its own database.
+2. **Roles and grants are provisioning, not migrations.** Role creation and `GRANT`s stay **out of
+   the drizzle journal**: they are cluster-level, they would tie the journal to role names, and
+   they would break test 11 (fresh database through the full journal) and the pglite setup. They
+   live in a reviewed provisioning SQL file under the operator scripts (`apps/api/scripts/`), which
+   uses `ALTER DEFAULT PRIVILEGES FOR ROLE <migrator> IN SCHEMA auth` so tables added later inherit
+   the `apps/auth` grants without a new `GRANT`. Deploy order, written into `RELEASE.md`:
+   **roles SQL → migration → grants → boot**.
+3. **`apps/api`'s reads on `auth` are exactly these.**
+   - `auth.users`: `SELECT` on the **whole table**. It holds no secrets, and the accessor needs
+     `id`, `email`, `name`, `created_at`, `system_key` and `role` for `/v2/users/me`, the
+     `ADMIN_EMAILS` boot assertion, system accounts and the admin user counts.
+   - `auth.session`: **column-level** `SELECT (id, user_id, expires_at)` only, **never `token`**.
+     The session token is a bearer secret; a compromised `apps/api` must not be able to read one
+     and mint requests at `apps/auth` with it. This grant exists only if the per-request session
+     check is chosen.
+   - **No grants** on `auth.account` (password hashes), `auth.verification` or `auth.jwks`.
+4. **The boundary is proved two ways.**
+   - **Test, on a real database engine, with every role.** It creates the three roles, runs the
+     provisioning SQL, and uses `SET ROLE` to prove each allowed read and each denial (`42501`).
+     pglite 0.5.4 (the installed version) supports this: a probe on 2026-10-16 showed
+     `CREATE ROLE`, column-level `GRANT`, `ALTER DEFAULT PRIVILEGES` and `SET ROLE` all work, and
+     `SELECT token FROM auth.session`, `SELECT * FROM auth.account` and runtime-role
+     `CREATE TABLE` all fail with `42501`. If that stops holding, the test moves to a Postgres
+     service in CI rather than being skipped.
+   - **A loud production boot check in `apps/api`**, under the same gate as the admin startup check
+     (`shouldRunAdminStartupCheck`: production Node server, not `next build`). It runs
+     `SELECT 1 FROM auth.account LIMIT 0` and `SELECT token FROM auth.session LIMIT 0`. Each **must
+     fail with `42501`**; a success, or any other error, is a boot failure with a message naming the
+     grant. `apps/auth` gets the equivalent check on `public`. Outside production the check does
+     not run; that is the gate, not a silent skip, and the test above covers dev and CI.
+5. **No SQL joins between `auth` and `public` tables.** Today no `apps/api` query joins `users` to
    app tables except through `tokens`, which is dropped (`lib/db/users.ts:227,283`). A source-scan
    test, negative-tested against a known-bad line and a near-miss, keeps it that way.
-3. **One accessor for identity reads in `apps/api`.** Every read of `auth.*` (admin `role`, user
-   existence, system accounts by `system_key`, the admin user counts in `lib/db/stats.ts`) goes
-   through one module. At the split, that module becomes an HTTP call to `apps/auth` or a read on
-   the auth database, and nothing else changes. It uses bugfix-260's lazy pool accessor.
-4. **App tables store only the user id.** `threads`, `preferences` and `feedback` keep `user_id`
+6. **One accessor for identity reads in `apps/api`.** Every read of `auth.*` (admin `role`, user
+   existence, system accounts by `system_key`, the admin user counts in `lib/db/stats.ts`, the
+   `ADMIN_EMAILS` assertion) goes through one module. At the split, that module becomes an HTTP call
+   to `apps/auth` or a read on the auth database, and nothing else changes. It uses bugfix-260's
+   lazy pool accessor.
+7. **App tables store only the user id.** `threads`, `preferences` and `feedback` keep `user_id`
    and copy no email, name or role from `auth.users`. Anything displayed about a user is read
    through the accessor.
-5. **Foreign keys stay for now; behaviour does not depend on them.** The FKs from `threads`,
+8. **Foreign keys stay for now; behaviour does not depend on them.** The FKs from `threads`,
    `preferences` and `feedback` to `auth.users` keep integrity while there is one database, and
-   are dropped at the split. So account deletion is explicit: the layer deletes the user's app
-   data in `apps/api`, then deletes the user through `apps/auth`'s internal endpoint, and the
-   cascade is only a backstop. A test runs the deletion path with the FKs removed and finds no
-   orphaned rows. A failure between the two steps is retried, and leaves a user without data, never
-   data without a user.
-6. **Auth migrations touch only the `auth` schema.** The additive migration and every later auth
+   are dropped at the split. Account deletion is therefore explicit, in this order:
+   1. `apps/api` verifies the JWT.
+   2. It refuses `DELETE me` for a **system account** (`system_key IS NOT NULL`) **before deleting
+      anything**.
+   3. It deletes the user's app data. This step is **idempotent**, so a retry after a partial
+      failure is safe.
+   4. It deletes the user through `apps/auth`'s internal endpoint. The FK cascade is only a
+      backstop.
+
+   A failure between steps 3 and 4 leaves a user without data, never data without a user, and the
+   user's retry completes it. A test runs the path with the FKs removed and finds no orphaned rows;
+   a test shows a system account cannot delete itself and keeps all its data.
+9. **Auth migrations touch only the `auth` schema.** The additive migration and every later auth
    migration contain no `public` DDL. The cutover migration is the one exception and runs once. At
    the split, the auth DDL moves to its own journal.
-7. **Per-request database reads are counted as a split cost.** Each read from `apps/api` into
-   `auth.*` on every request (admin `role`, user existence, and the session check if chosen)
-   becomes a cross-database or HTTP call after the split. The plan keeps them behind the accessor
-   so caching can be added there.
+10. **Per-request reads are a split cost, and are not cached here.** Each read from `apps/api` into
+    `auth.*` on every request (admin `role`, user existence, and the session check if chosen)
+    becomes a cross-database or HTTP call after the split. **This project adds no cache to the
+    accessor.** Any later cache must be bounded in time and must **never** cover session existence
+    or user existence, because caching those would extend the revocation window past the JWT
+    lifetime (I-7).
+
+**Environment per service** (names proposed; the plan finalizes them, and the main architect
+reviews them):
+
+| Principal | Database credential | Other new variables |
+|---|---|---|
+| migrator | operator-held URL for the migrator role, used for `psql` applies, the provisioning SQL, the role script and audits; **never set in any service's environment** | none |
+| `apps/auth` | its own `DATABASE_URL` (the `apps/auth` runtime role) | the internal credential (proposed `AUTH_INTERNAL_SECRET`), JWT `iss`/`aud` (proposed `AUTH_JWT_ISSUER`, `AUTH_JWT_AUDIENCE`), plus the existing `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `CORS_ORIGIN` |
+| `apps/api` | its existing `DATABASE_URL`, re-pointed to the `apps/api` runtime role | `apps/auth`'s internal base URL (proposed `AUTH_INTERNAL_URL`, for the layer and the JWKS), `AUTH_JWT_ISSUER`, `AUTH_JWT_AUDIENCE`, `AUTH_INTERNAL_SECRET`. PR B removes `JWT_SECRET`, `ACCESS_TOKEN_EXPIRY_HOURS`, `REFRESH_TOKEN_EXPIRY_HOURS` |
+
+`DATABASE_URL` keeps one name with a different value per Railway service, so `turbo.json` gains no
+database variable. Every new name is added to `globalEnv` by the four-way rule. At the split, only
+the `apps/auth` `DATABASE_URL` and the `apps/api` accessor's connection change.
 
 **What the split itself will need (out of scope, recorded for that project):** a data copy of
 `auth.*` during a short maintenance window, dropping the cross-schema FKs, a separate backup and
@@ -761,7 +817,7 @@ rollback deadline passing.
   internal-only `apps/auth` endpoint that requires the internal credential and deletes the user
   through Better Auth's internal adapter. `auth.api.deleteUser` is not used, because it 404s unless
   enabled and enforces `freshAge`. The layer deletes the user's app data first, explicitly, so the
-  cascade is only a backstop (split-readiness rule 5). Afterwards the session is dead and the
+  cascade is only a backstop (split-readiness rule 8). Afterwards the session is dead and the
   user's threads, preferences and feedback are gone.
 - [ ] Password reset:
   - The emailed link has the legacy shape `${FRONTEND_URL}/reset-password?token=<token>`.
@@ -843,6 +899,9 @@ rollback deadline passing.
 - [ ] The rehearsal of the full runbook runs on a clone of production data, never a database
   production uses. It passes all audits, then boots PR B's `apps/api` and `apps/auth` against the
   rehearsed database and passes the smoke tests.
+- [ ] PR A amends `RELEASE.md` with the provisioning step and the deploy order **roles SQL →
+  migration → grants → boot**, ahead of the dark `apps/auth` deploy and `apps/api`'s re-pointed
+  `DATABASE_URL`.
 - [ ] PR B amends `RELEASE.md`:
   - it names the cutover migration as the one exception to the backward-compatible rule, applied
     only in the offline window
@@ -1079,9 +1138,18 @@ at the window.
 9. `DELETE /v2/users/me` with a session 25 hours old succeeds. The session is dead, the layer's
    explicit delete removes threads, preferences and feedback (the same test passes with the FKs
    dropped), and the user's unexpired JWT gets 401 on data routes.
-9a. Split readiness: `apps/api`'s database role cannot read `auth.account`, `auth.verification` or
-   `auth.jwks`; `apps/auth`'s role cannot read `public`; the source scan finds no join between
-   `auth` and `public` tables and fails on a planted one.
+9a. Split readiness, under `SET ROLE` on each runtime role:
+   - `apps/api`'s role reads all of `auth.users` and `auth.session (id, user_id, expires_at)`
+   - `SELECT token FROM auth.session` is denied (`42501`) for `apps/api`'s role
+   - `apps/api`'s role is denied on `auth.account`, `auth.verification` and `auth.jwks`
+   - `apps/auth`'s role is denied on every `public` table
+   - neither runtime role can run DDL; a table the migrator creates later in `auth` is usable by
+     `apps/auth`'s role without a new grant
+   - the production boot check fails boot when a denied read succeeds
+   - the source scan finds no join between `auth` and `public` tables and fails on a planted one
+9b. A system account's `DELETE /v2/users/me` is refused before any data is deleted; all its threads,
+   preferences and feedback remain. Re-running the app-data delete after a simulated failure
+   before the `apps/auth` call completes the deletion with no error.
 10. Re-running the backfill inserts zero `account` rows. The cutover migration run against a
     non-empty `auth.users` aborts with no changes.
 11. A fresh empty database migrated through the full journal produces the post-cutover schema, and
