@@ -38,3 +38,4 @@
 - Owner: guests migrated as-is (no filter); informational rehearsal audit; follow-up issue for
   guest cleanup (feedback retention, shared links).
 - Security review 166761a: whole admin HTTP surface blocked on apps/auth (disabledPaths is exact-match only, api/index.mjs:166-168 → also a case-insensitive prefix middleware before toNodeHandler); plugin kept for role column. Pending owner via security: per-request session-id check in apps/api (would close the 15m window) — not changed yet.
+- FYI (main via security): builder-bugfix-260 is making the apps/api db pool lazy (apps/api/lib/db/index.ts only). Plan: use its db accessor for auth.users/auth.session reads, don't reshape lib/db/index.ts, expect a small rebase.
