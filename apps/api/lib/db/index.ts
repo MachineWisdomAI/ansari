@@ -1,4 +1,4 @@
-import { drizzle } from 'drizzle-orm/node-postgres';
+import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import * as schema from '@/db/schema';
 import { config } from '@/lib/config';
@@ -21,8 +21,33 @@ function getPool(): Pool {
   return pool;
 }
 
-// Create drizzle instance with schema
-export const db = drizzle(getPool(), { schema });
+type Database = NodePgDatabase<typeof schema> & { $client: Pool };
+
+let instance: Database | null = null;
+
+function getDb(): Database {
+  if (!instance) {
+    instance = drizzle(getPool(), { schema });
+  }
+  return instance;
+}
+
+// Drizzle instance with schema, created on first use rather than at import
+// (issue #260). `next build` imports route modules to collect page data; an
+// eager pool here read `config.database.url` at load, which Zod-validates the
+// whole env, so the build demanded every runtime secret. Validation is not
+// weakened: the first real access still runs getEnv() and throws on a bad env,
+// and src/instrumentation.ts touches the database at server boot.
+export const db: Database = new Proxy({} as Database, {
+  get(_target, prop) {
+    const real = getDb();
+    const value = Reflect.get(real, prop, real);
+    return typeof value === 'function' ? value.bind(real) : value;
+  },
+  has(_target, prop) {
+    return Reflect.has(getDb(), prop);
+  },
+});
 
 // A database executor: either the module-level `db` or a transaction handle
 // passed to `db.transaction(async (tx) => ...)`. DB helpers accept this so a
@@ -38,5 +63,6 @@ export async function closeDb() {
   if (pool) {
     await pool.end();
     pool = null;
+    instance = null;
   }
 }

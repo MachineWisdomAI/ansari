@@ -19,9 +19,10 @@ repo root. Root tasks (`pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`,
 To target this app specifically, use `pnpm api <script>` from the root, or run
 the script from inside `apps/api/`.
 
-`pnpm build`/`pnpm test` for this app need the env loaded the way CI loads it —
+`pnpm test` for this app needs the env loaded the way CI loads it —
 `set -a && . ./apps/api/.env.ci && set +a` — because Turborepo's strict env mode
-only forwards variables declared in the root `turbo.json`.
+only forwards variables declared in the root `turbo.json`. `pnpm build` needs no
+env: nothing reads the config at import time (the db handle is lazy, #260).
 
 ```bash
 pnpm install          # at the REPO ROOT (Node >= 22; pnpm via corepack)

@@ -32,9 +32,9 @@ RUN pnpm install --frozen-lockfile --filter ansari-api
 
 COPY apps/api apps/api
 
-# next build requires a validly-shaped env (lib/config.ts Zod-validates on
-# first config access). The committed .env.ci provides deliberately fake values — the
-# same contract CI builds with. Nothing here reaches the runtime env.
+# next build needs no env since #260 (nothing reads lib/config.ts at import).
+# The committed .env.ci, deliberately fake values, is still loaded so the image
+# builds under the same env CI does. Nothing here reaches the runtime env.
 RUN set -a && . ./apps/api/.env.ci && set +a && pnpm --filter ansari-api build
 
 ENV NODE_ENV=production
