@@ -13,7 +13,7 @@ See CONTRIBUTING.md for the full guidelines.
 
 ## Checks
 
-All four must pass locally (run from `apps/api/`, with the dummy env in `apps/api/.env.ci`):
+All four must pass locally (run from `apps/api/`; `pnpm test` needs the dummy env in `apps/api/.env.ci` loaded):
 
 - [ ] `pnpm lint`
 - [ ] `pnpm typecheck`

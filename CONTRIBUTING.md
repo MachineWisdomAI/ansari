@@ -79,17 +79,18 @@ Turbo prints which packages each task ran in, so the scope is always visible
 rather than implied. A second identical run is a cache hit.
 
 CI runs the same tasks (with `test:coverage` for the api) using the dummy env in
-`apps/api/.env.ci` — no secrets needed. To reproduce a CI run exactly, load that
-env the way CI does before building or testing the api:
+`apps/api/.env.ci` — no secrets needed. `pnpm build` needs no env at all. The
+api test suite does: load that env the way CI does before testing the api:
 
 ```bash
 set -a && . ./apps/api/.env.ci && set +a
-pnpm build
+pnpm test
 ```
 
-Without it the api build fails with `Environment validation failed`: `apps/api`
-Zod-validates its configuration, and Turborepo's strict env mode only forwards
-variables declared in `turbo.json`.
+Without it the api tests fail with `Environment validation failed`: `apps/api`
+Zod-validates its configuration on first use, and Turborepo's strict env mode
+only forwards variables declared in `turbo.json`. The build never touches the
+config, so it passes either way (the database handle is created lazily, #260).
 
 You can still target one package directly — `pnpm api lint`, `pnpm frontend web`,
 `pnpm api db:migrate` — which is the right thing for scripts Turbo does not model.
@@ -130,9 +131,9 @@ papercuts:
 - Commit the generated `codev/projects/<id>/status.yaml` and
   `codev/state/<id>_thread.md` with your PR. They are expected, not noise:
   builder thread files are versioned on purpose.
-- In a fresh worktree, porch's `build` check needs the dummy env loaded first —
-  `set -a && . ./apps/api/.env.ci && set +a` — until
-  [#260](https://github.com/iaser-ai/ansari/issues/260) lands.
+- In a fresh worktree, porch's `build` check passes with no env loaded
+  ([#260](https://github.com/iaser-ai/ansari/issues/260)). Running the api tests
+  still needs the dummy env first: `set -a && . ./apps/api/.env.ci && set +a`.
 - Porch gate approvals recorded in your fork are your own state, not maintainer
   approval. Maintainers review and merge (with merge commits, never squash).
 - Sync your fork's `develop` with upstream before branching. A stale base means

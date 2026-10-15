@@ -11,10 +11,10 @@ export const dynamic = 'force-dynamic';
 const DB_PING_TIMEOUT_MS = 2000;
 
 async function pingDatabase(): Promise<void> {
-  // Import lazily: lib/db/index builds the pool at module scope and throws if
-  // DATABASE_URL is unset. A top-level import would surface that as a 500 at
-  // import time; importing here lets the try/catch below turn it into a 503 —
-  // exactly the broken-DATABASE_URL deploy this probe exists to catch.
+  // lib/db/index builds the pool on first `db` access (#260) and throws there if
+  // DATABASE_URL is unset. That access happens inside this function, so the
+  // try/catch below turns it into a 503 — exactly the broken-DATABASE_URL deploy
+  // this probe exists to catch.
   const { db } = await import('@/lib/db/index');
 
   let timer: ReturnType<typeof setTimeout> | undefined;
