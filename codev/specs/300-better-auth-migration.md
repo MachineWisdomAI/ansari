@@ -130,9 +130,10 @@ Verified on this branch, `develop` at `2eb3fdc` plus the porch init commit.
   `apps/api` journal only (`DEPLOYED_THROUGH = '0008_model_provenance'`). It never reads
   `packages/auth/drizzle`.
 
-**Migration framework:** the "ported SQL migration framework" that the reference plan defers to
-(Waleed, "location and idempotency helpers") **does not exist anywhere in the repo**. A search finds
-no idempotency helpers and no legacy auth migration script.
+**Migration framework:** the reference plan defers the SQL to a "ported migration framework"
+(attributed to Waleed). It **does not exist anywhere in the repo**, and the owner confirmed none is
+needed: Waleed is not involved in auth, and the cutover is a plain `INSERT … SELECT` from the old
+tables to the new ones while the system is in maintenance mode.
 
 ## Desired State
 
@@ -386,8 +387,9 @@ below. The window's read-only audits and the admin-role script live next to the 
 scripts under `apps/api/scripts/`.
 
 **Departure from the reference plan.** The reference plan offered `packages/auth/drizzle/` or
-`scripts/migrations/better-auth-cutover/`, pending a "ported framework" from Waleed. That framework
-does not exist in the repo. A single journal is chosen for these reasons:
+`scripts/migrations/better-auth-cutover/`, pending a "ported framework" coordinated with Waleed. The
+owner ruled that out (no framework; Waleed is not involved in auth). A single journal is chosen for
+these reasons:
 
 - **The FK repoint forces it.** After cutover, `threads`, `preferences` and `feedback` reference
   `auth.users`. The auth DDL and the cutover depend on `apps/api`'s tables, and two journals would
@@ -491,10 +493,9 @@ itself:
 
 **Reviewers.** The main architect reviews every hunk touching the journal, its numbering and
 `DEPLOYED_THROUGH`, as well as lockfile, `turbo.json` and CI hunks. Adding `@ansari/auth` (schema only)
-and a JOSE verification library to `apps/api` changes the lockfile in PR A. **Waleed** is the named reviewer for the migration SQL.
-He is asked on issue #300, before spec-approval and pending the owner's OK, whether the legacy
-framework exists anywhere and whether he objects to the single journal. His answer can change this
-spec. The migration SQL is High tier. Open Question C-1 tracks these sign-offs.
+and a JOSE verification library to `apps/api` changes the lockfile in PR A. The migration SQL is
+High tier and is reviewed by the main architect and the security architect. The reference plan's
+Waleed review is dropped by the owner's decision.
 
 ### Phasing (resolves an issue "must be resolved" item; proposal — owner decides at spec-approval)
 
@@ -962,8 +963,9 @@ at the window.
 
 - **C-1: Migration SQL location.** This spec places the `auth` DDL and the cutover migration in the
   single `apps/api/drizzle/` journal, and retires `packages/auth/drizzle/`. The main architect agreed
-  under seven conditions, all included above. **Waleed** reviews the migration SQL, and has been
-  asked on issue #300, pending the owner's OK.
+  under seven conditions, all included above. **Resolved:** the owner confirmed no external
+  migration framework is needed and Waleed is not a reviewer; the cutover is a plain
+  `INSERT … SELECT` in the offline window.
 - **C-2: Two PRs (owner, at spec-approval).** May this project ship PR A (prepare) and PR B
   (cutover) instead of the porch default of one PR? The reasons, including why a feature flag
   cannot replace PR B, are in Phasing.
