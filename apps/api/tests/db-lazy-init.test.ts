@@ -48,4 +48,12 @@ describe('lib/db/index lazy initialisation', () => {
     expect(db.select().from).toBeTypeOf('function');
     await closeDb();
   });
+
+  it('rejects writes instead of silently dropping them on the facade', async () => {
+    const { db } = await import('@/lib/db/index');
+
+    expect(() => {
+      (db as unknown as Record<string, unknown>).select = () => null;
+    }).toThrow(/read-only facade/);
+  });
 });

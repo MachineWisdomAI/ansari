@@ -37,7 +37,9 @@ function getDb(): Database {
 // eager pool here read `config.database.url` at load, which Zod-validates the
 // whole env, so the build demanded every runtime secret. Validation is not
 // weakened: the first real access still runs getEnv() and throws on a bad env,
-// and src/instrumentation.ts touches the database at server boot.
+// and src/instrumentation.ts reads config at production server boot (querying
+// the database when ADMIN_EMAILS is set). The facade is read-only: writes throw
+// rather than landing on the empty target and vanishing.
 export const db: Database = new Proxy({} as Database, {
   get(_target, prop) {
     const real = getDb();
@@ -46,6 +48,9 @@ export const db: Database = new Proxy({} as Database, {
   },
   has(_target, prop) {
     return Reflect.has(getDb(), prop);
+  },
+  set(_target, prop) {
+    throw new TypeError(`db is a lazy read-only facade; cannot set ${String(prop)}`);
   },
 });
 

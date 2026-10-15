@@ -40,3 +40,26 @@ passes with only the db change.
 apps/api AGENTS.md and CLAUDE.md (twins), the PR template, the Dockerfile comment, and three
 lessons-learned entries. I left the Dockerfile's `.env.ci` load in place on purpose, since it
 is the deploy path and keeping it is harmless. Only its comment now says it is optional.
+
+## 2026-10-15 — PR #302, CMAP round 1
+
+CMAP verdicts: gemini APPROVE, codex COMMENT, claude APPROVE.
+
+**Acted on:**
+- Two inaccurate comments. `health/route.ts` still said the pool was built at module scope.
+  `db/index.ts` overstated instrumentation: it reads config at production boot and queries
+  the DB only when `ADMIN_EMAILS` is set.
+- A `set` trap on the Proxy, so writes to `db` throw instead of silently vanishing. Pinned
+  by a third test case.
+- An automated guard for the symptom. In `ci.yml` the api Build step now runs BEFORE the
+  dummy env is loaded. Checked locally with CI's exact command
+  (`env -i … turbo run build --filter ansari-api... --force`): exit 0 with the fix, exit 1
+  with `Environment validation failed` on the eager pool from develop.
+
+**Noted, not changed:**
+- The Proxy does not trap `getPrototypeOf`, so `db instanceof PgDatabase` is false. Nothing
+  here checks that, but #300 (Better Auth) may hand `db` to a library that type-checks it.
+- After `closeDb()`, the next access builds a fresh pool instead of throwing. That is
+  harmless at process exit.
+
+Full suite: 85 files, 876 passed.
