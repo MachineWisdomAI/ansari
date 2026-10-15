@@ -38,10 +38,9 @@ describe('no-restricted-properties env guard', () => {
       const errors = await ruleErrors(`export const v = process.env.${envVar};\n`, filePath);
       expect(errors).toHaveLength(1);
       expect(errors[0]).toContain('lib/config.ts');
-    },
-    // The first lint call cold-loads the project ESLint config and plugins:
-    // well under 5 s normally, but past vitest's 5 s default under CPU load.
-    20_000
+    }
+    // The first lint call cold-loads the project ESLint config and plugins — past
+    // 5 s under CPU load; the suite-wide testTimeout in vitest.config.ts covers it.
   );
 
   it('flags getEnv() sidesteps outside lib/config.ts', async () => {

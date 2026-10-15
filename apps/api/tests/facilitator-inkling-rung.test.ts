@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 /**
  * Inkling final fallback rung + terminal-error rescue + forced-primary mode —
@@ -171,6 +171,38 @@ async function collect(gen: AsyncGenerator<Event>): Promise<Event[]> {
   for await (const e of gen) events.push(e);
   return events;
 }
+
+// Runs a budgeted request on a virtual clock (issue #292): runFacilitator's deadlines
+// read Date.now() and the scripted delays wait on setTimeout, so faking both puts them
+// on one clock — the ordering a test scripts can't be reordered by machine load.
+// `ms` must cover the whole scripted request: one still running after `ms` of virtual
+// time fails here, loudly, instead of hanging to the test timeout. `elapsedMs` is the
+// virtual time the request took, measured here — independent of what the agent reports.
+async function collectOnVirtualClock(
+  gen: AsyncGenerator<Event>,
+  ms: number
+): Promise<{ events: Event[]; elapsedMs: number }> {
+  vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+  try {
+    const startedAt = Date.now();
+    let elapsedMs: number | undefined;
+    const events = collect(gen).finally(() => {
+      elapsedMs = Date.now() - startedAt;
+    });
+    events.catch(() => {}); // surfaced by the await below, not as an unhandled rejection
+    await vi.advanceTimersByTimeAsync(ms);
+    if (elapsedMs === undefined) throw new Error(`request still running after ${ms} ms of virtual time`);
+    return { events: await events, elapsedMs };
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
+// A request that never settles fails at the test timeout before the finally above
+// runs; restore real timers here so it can't leak into the next test's real sleeps.
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 function userMessage(text: string): Message {
   return { role: 'user', content: [{ type: 'text', text }] };
@@ -348,8 +380,9 @@ describe('Inkling rescue on terminal Gemini errors (issue #79)', () => {
     h.scripts = [errorRound('genuine LLM failure')];
     h.inklingScripts = [textRound('should never be reached')];
 
-    const events = await collect(
-      runFacilitator([userMessage('q')], undefined, { budgetMs: 300, reserveMs: 150 }) as AsyncGenerator<Event>
+    const { events } = await collectOnVirtualClock(
+      runFacilitator([userMessage('q')], undefined, { budgetMs: 300, reserveMs: 150 }) as AsyncGenerator<Event>,
+      300
     );
     const types = events.map((e) => e.type);
 

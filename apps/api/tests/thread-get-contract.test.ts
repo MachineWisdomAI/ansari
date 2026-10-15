@@ -48,6 +48,10 @@ let client: PGlite;
 
 const USER_ID = '11111111-1111-1111-1111-111111111111';
 const THREAD_ID = '22222222-2222-2222-2222-222222222222';
+// Explicit, strictly increasing created_at for every multi-message seed (issue #292):
+// pglite's now() has millisecond resolution, two back-to-back inserts can tie, and
+// the ORDER BY created_at, id tie-break is a random uuid — not insertion order.
+const at = (s: number) => new Date(Date.UTC(2026, 8, 1, 12, 0, s));
 
 const RECORDS: ToolCallRecord[] = [
   { type: 'tool_use', id: 'tool_1_1_aaaaa', name: 'search_quran', input: { query: 'الصبر' } },
@@ -144,10 +148,11 @@ const ctx = { params: Promise.resolve({ id: THREAD_ID }) };
 const getReq = () => new NextRequest(`http://localhost/api/v2/threads/${THREAD_ID}`, { method: 'GET' });
 
 async function seedConversation() {
-  await createMessage({ threadId: THREAD_ID, role: 'user', content: [{ type: 'text', text: 'What is sabr?' }] });
+  await createMessage({ threadId: THREAD_ID, role: 'user', content: [{ type: 'text', text: 'What is sabr?' }], createdAt: at(1) });
   await createMessage({
     threadId: THREAD_ID,
     role: 'assistant',
+    createdAt: at(2),
     content: [{ type: 'text', text: 'Sabr is patience.' }],
     agentName: 'facilitator',
     rawPayload: { role: 'model', parts: [{ text: 'Sabr is patience.' }] },
@@ -242,10 +247,11 @@ describe('with records that DO derive documents (spec 168)', () => {
   ];
 
   it('thread GET keeps today\'s exact keys and no tool/provenance/citations key; the snapshot too', async () => {
-    await createMessage({ threadId: THREAD_ID, role: 'user', content: [{ type: 'text', text: 'What is sabr?' }] });
+    await createMessage({ threadId: THREAD_ID, role: 'user', content: [{ type: 'text', text: 'What is sabr?' }], createdAt: at(1) });
     await createMessage({
       threadId: THREAD_ID,
       role: 'assistant',
+      createdAt: at(2),
       content: [{ type: 'text', text: 'Sabr is patience.' }],
       agentName: 'facilitator',
       toolCalls: CITABLE,
@@ -263,7 +269,10 @@ describe('with records that DO derive documents (spec 168)', () => {
     const share = await createThreadSnapshot(THREAD_ID, USER_ID);
     const snap = JSON.stringify(share!.content);
     // Not vacuous: the snapshot really does carry the derived document…
+    expect(share!.content.messages.map((m) => m.role)).toEqual(['user', 'assistant']);
     expect(share!.content.messages[1].documents).toHaveLength(1);
+    // …on the assistant message only, never the user message.
+    expect(share!.content.messages[0]).not.toHaveProperty('documents');
     // …and still no record key.
     expect(snap).not.toMatch(TOOL_KEY_PATTERN);
     expect(snap).not.toMatch(PROVENANCE_KEY_PATTERN);
