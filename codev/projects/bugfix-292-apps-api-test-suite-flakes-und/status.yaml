@@ -1,7 +1,7 @@
 id: bugfix-292
 title: apps-api-test-suite-flakes-und
 protocol: bugfix
-phase: pr
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -13,5 +13,5 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-10-14T23:55:24.797Z'
-updated_at: '2026-10-15T22:57:02.415Z'
+updated_at: '2026-10-15T22:57:04.633Z'
 pr_ready_for_human: false
