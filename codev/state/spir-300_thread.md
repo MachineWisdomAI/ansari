@@ -24,3 +24,16 @@
   scaffold-drop guard, "byte-compatible" wording) — all applied. Security: IP fallback counts
   failed attempts only per email, accepted 60s-window lockout risk, list-walk alert.
 - Security amendment pre-approval: email lower(trim()) copy + in-tx collision guard + pre-window case audit (owner decides collisions) + mixed-case test; bearer requireSignature pinned unset (released clients hold raw tokens).
+
+## 2026-10-15 — owner decisions at spec-approval
+- Owner: Better Auth runs as its own service `apps/auth` (never inside `apps/api`); `apps/api`
+  verifies JWTs via `apps/auth`'s JWKS (overrides the issue's "bearer plugin" decided item);
+  `/v2/users/*` stays on `apps/api` as an HTTP client of `apps/auth`; `apps/frontend` signs in at
+  `apps/auth` from cutover.
+- Spec reworked: revocation window = JWT lifetime (≤15m, accepted cost); admin role read from DB per
+  request; `definePayload` limited to sub + session id (default payload is the whole user object);
+  `apps/auth` deployed dark pre-window (else sign-ups break the cutover guard); authenticated
+  api→auth hop carrying the client IP (else the layer's egress IP becomes one global bucket);
+  impersonation disabled; one DB-backed limiter covers every sign-in.
+- Owner: guests migrated as-is (no filter); informational rehearsal audit; follow-up issue for
+  guest cleanup (feedback retention, shared links).
