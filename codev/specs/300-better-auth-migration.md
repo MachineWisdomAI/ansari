@@ -179,13 +179,22 @@ After the cutover:
      once more.
 7. **`apps/frontend` signs in directly against `apps/auth`** with a Better Auth client from the
    cutover, and sends the JWT to `apps/api`. This change is agreed with the app architect first.
-8. **Admins are identified by the admin plugin's `role`**, assigned by a script that replaces
-   `grant-admin.ts`. Admin is never an email match. `ADMIN_EMAILS` keeps only its reservation role
+8. **Admins are identified by the admin plugin's `role`**, assigned by `apps/api/scripts/grant-admin.ts`,
+   which PR B **rewrites** (same name, one script) to set `auth.users.role` and which runs as the
+   migrator. Admin is never an email match. `ADMIN_EMAILS` keeps only its reservation role
    and the boot assertion, rewritten against `role`. **Admin routes on `apps/api` read `role` from
    `auth.users` on each request** rather than trusting a claim, so a demotion takes effect
    immediately.
 9. **System accounts are identified by `system_key`** (a server-only additional field). They have no
    `credential` account row and cannot sign in or reset a password.
+   - **They are provisioned as the migrator, never at runtime.** Today `getOrCreateSystemUser`
+     (`apps/api/lib/db/users.ts:54`) inserts them lazily, which the `SELECT`-only grant on
+     `auth.users` breaks. The cutover's `INSERT … SELECT` carries the existing `ai-skill` and
+     `leaderboard` rows. Any environment that lacks them (a fresh dev database, a test fixture, the
+     later split database) gets them from an operator script run as the migrator, which keeps
+     today's guard that refuses an address already held by a non-system row.
+   - **The runtime path is find-only** (PR B). A missing system account is a loud error naming the
+     key and the script to run, never a silent insert. `apps/api` gets no `INSERT` on `auth.users`.
 10. **Rate limits are configured as decided:** sign-in 5/60s, sign-up 3/60s, database storage,
     `enabled: true`.
     - They are enforced by `apps/auth`'s Better Auth router, and are keyed by the **real client
@@ -383,8 +392,8 @@ cutover lands.
 **Decision: one migration journal, in `apps/api/drizzle/`.** The main architect, who owns that
 journal, its numbering and the `DEPLOYED_THROUGH` contract, agreed on issue #300 (comment of
 2026-10-14 03:40Z) under seven conditions. Each one is a requirement of this spec and is listed
-below. The window's read-only audits and the admin-role script live next to the existing operator
-scripts under `apps/api/scripts/`.
+below. The window's read-only audits and `grant-admin.ts` (the role script) live with the existing
+operator scripts under `apps/api/scripts/`.
 
 **Departure from the reference plan.** The reference plan offered `packages/auth/drizzle/` or
 `scripts/migrations/better-auth-cutover/`, pending a "ported framework" coordinated with Waleed. The
@@ -515,13 +524,34 @@ connection-string changes, not a rewrite. (Rules amended by the security review 
    - The **`apps/api` runtime** role has its existing DML on `public` and only the reads in rule 3
      on `auth`. It runs no DDL.
    - At the split, each runtime role's connection string points at its own database.
+   - **The existing owner becomes the migrator.** Railway's default user is expected to own every
+     `public` table today (the owner confirms with `\dt public.*` and `\du` on staging and
+     production). It is **not** re-owned: `ALTER … OWNER` on production tables is avoidable risk.
+     The two runtime roles are created beside it. So **today's `apps/api` `DATABASE_URL` is the
+     migrator credential**.
+   - **Re-point release step** (PR A, its own step, separate from and ahead of the cutover, on
+     staging first with a soak, then production): `apps/api`'s `DATABASE_URL` moves to the runtime
+     role. The step **ends with the migrator URL removed from every service environment and the
+     migrator password rotated**, because it has lived in a service environment. Rollback before
+     rotation is restoring the old URL in Railway, with no code change.
+   - **No runtime code path falls back to the migrator URL.** No service reads a second database
+     variable, and no default or fallback connection string exists in code.
 2. **Roles and grants are provisioning, not migrations.** Role creation and `GRANT`s stay **out of
    the drizzle journal**: they are cluster-level, they would tie the journal to role names, and
    they would break test 11 (fresh database through the full journal) and the pglite setup. They
    live in a reviewed provisioning SQL file under the operator scripts (`apps/api/scripts/`), which
-   uses `ALTER DEFAULT PRIVILEGES FOR ROLE <migrator> IN SCHEMA auth` so tables added later inherit
-   the `apps/auth` grants without a new `GRANT`. Deploy order, written into `RELEASE.md`:
-   **roles SQL → migration → grants → boot**.
+   sets default privileges **in both schemas**, so a table added by a later migration is usable
+   without a new `GRANT`:
+   - `ALTER DEFAULT PRIVILEGES FOR ROLE <migrator> IN SCHEMA auth GRANT SELECT, INSERT, UPDATE,
+     DELETE ON TABLES TO <auth runtime>` (and the same on sequences)
+   - `ALTER DEFAULT PRIVILEGES FOR ROLE <migrator> IN SCHEMA public GRANT SELECT, INSERT, UPDATE,
+     DELETE ON TABLES TO <api runtime>` (and the same on sequences)
+
+   Without the `public` line, the first later migration that adds a table gives a runtime `42501`,
+   which is the #165 outage class. Deploy order, written into `RELEASE.md`: **roles SQL → migration →
+   grants → boot**. Every `psql` apply in `RELEASE.md`, its smoke test and `CONTRIBUTING.md` uses the
+   **operator-held migrator URL**, not `$DATABASE_URL`, which after the re-point is a runtime role
+   that cannot run DDL. The provisioning SQL is High tier and reviewed by the main architect.
 3. **`apps/api`'s reads on `auth` are exactly these.**
    - `auth.users`: `SELECT` on the **whole table**. It holds no secrets, and the accessor needs
      `id`, `email`, `name`, `created_at`, `system_key` and `role` for `/v2/users/me`, the
@@ -538,13 +568,28 @@ connection-string changes, not a rewrite. (Rules amended by the security review 
      `CREATE ROLE`, column-level `GRANT`, `ALTER DEFAULT PRIVILEGES` and `SET ROLE` all work, and
      `SELECT token FROM auth.session`, `SELECT * FROM auth.account` and runtime-role
      `CREATE TABLE` all fail with `42501`. If that stops holding, the test moves to a Postgres
-     service in CI rather than being skipped.
-   - **A loud production boot check in `apps/api`**, under the same gate as the admin startup check
-     (`shouldRunAdminStartupCheck`: production Node server, not `next build`). It runs
+     service in CI rather than being skipped. The test also proves:
+     - a table the migrator creates after provisioning, in `public` and in `auth`, is usable by
+       the matching runtime role, with a negative case that omits the default privileges and gets
+       `42501`
+     - **the cross-schema cascade**: deleting an `auth.users` row as the `apps/auth` role cascades
+       into `public.threads`, `preferences` and `feedback` with no `42501`, although that role has
+       no `public` grants (Postgres runs referential actions as the referencing table's owner)
+   - **A loud boot check in `apps/api`, on staging and production**, under the same gate as the
+     admin startup check (`shouldRunAdminStartupCheck`: `NODE_ENV=production`, Node runtime, not
+     `next build`). Staging must run it, because staging is where the grants are rehearsed. The
+     `apps/api` image sets `ENV NODE_ENV=production` (`apps/api/Dockerfile:40`) and staging runs the
+     same image; the plan confirms staging's Railway variables do not override it, and the new
+     `apps/auth` Dockerfile sets it too. It runs
      `SELECT 1 FROM auth.account LIMIT 0` and `SELECT token FROM auth.session LIMIT 0`. Each **must
      fail with `42501`**; a success, or any other error, is a boot failure with a message naming the
      grant. `apps/auth` gets the equivalent check on `public`. Outside production the check does
      not run; that is the gate, not a silent skip, and the test above covers dev and CI.
+   - **Gating, stated explicitly.** Roles exist only where the provisioning SQL has run: staging and
+     production. **Local dev and CI keep one owner `DATABASE_URL`**, and contributors never create
+     roles; `CONTRIBUTING.md` says so. In dev and CI the boot check does not run, and the pglite
+     `SET ROLE` test is the proof of the boundary. A fresh dev database gets the system accounts
+     from the operator script (rule 9 of Desired State).
 5. **No SQL joins between `auth` and `public` tables.** Today no `apps/api` query joins `users` to
    app tables except through `tokens`, which is dropped (`lib/db/users.ts:227,283`). A source-scan
    test, negative-tested against a known-bad line and a near-miss, keeps it that way.
@@ -590,7 +635,11 @@ reviews them):
 | `apps/api` | its existing `DATABASE_URL`, re-pointed to the `apps/api` runtime role | `apps/auth`'s internal base URL (proposed `AUTH_INTERNAL_URL`, for the layer and the JWKS), `AUTH_JWT_ISSUER`, `AUTH_JWT_AUDIENCE`, `AUTH_INTERNAL_SECRET`. PR B removes `JWT_SECRET`, `ACCESS_TOKEN_EXPIRY_HOURS`, `REFRESH_TOKEN_EXPIRY_HOURS` |
 
 `DATABASE_URL` keeps one name with a different value per Railway service, so `turbo.json` gains no
-database variable. Every new name is added to `globalEnv` by the four-way rule. At the split, only
+database variable. The four new names (`AUTH_INTERNAL_SECRET`, `AUTH_INTERNAL_URL`,
+`AUTH_JWT_ISSUER`, `AUTH_JWT_AUDIENCE`) go into `globalEnv` (approved by the main architect;
+runtime-only names are listed there too, as `JWT_SECRET` is). `AUTH_INTERNAL_SECRET` is a secret: a
+Zod minimum length, never logged, and the placeholder-not-a-real-* convention in `.env.ci`. The
+migrator URL is not an environment variable of any service and is not in `turbo.json`. At the split, only
 the `apps/auth` `DATABASE_URL` and the `apps/api` accessor's connection change.
 
 **What the split itself will need (out of scope, recorded for that project):** a data copy of
@@ -608,7 +657,7 @@ block a release.
 |---|---|---|
 | **PR A: Prepare** | 0, 1 and the code half of 2. **Database:** the **additive** migration (generated; condition 1) with `auth.jwks`, and retirement of the `packages/auth` journal. **`apps/auth`:** `createAuth()` config (UUIDs, `auth` schema, dual verify, `bearer()`, `jwt()`, `admin()` kept for its columns with its whole HTTP surface blocked, rate limiting and client IP, the authenticated internal hop), its Dockerfile and Railway service, deployed **dark**. **`apps/api`:** the JWKS verifier (unwired), the compatibility layer as an HTTP client of `apps/auth` (unwired), the admin script and assert, the CORS fix, contract tests. **Cutover:** the cutover SQL, **staged and rehearsed outside the journal** | **Yes.** The `auth` schema is additive (empty tables beside `public.users`). `apps/auth` runs with no public sign-in. The new `apps/api` code is not wired to production routes. PR A can merge and promote normally. |
 | Rehearsal (production-data clone) | 2 | Runs from PR B's branch on a clone of production, taken after PR A's migration was applied, with `apps/auth` and `apps/api` both pointed at the clone. Does not touch production. |
-| **PR B: Cutover** | 3, plus the code half of 4 | **No.** Merged to `develop` immediately before the window and promoted **in** the window. It holds the cutover migration (generated last in the journal; schema freeze from merge to window close), the owner's `DEPLOYED_THROUGH` bump, the `RELEASE.md` exception, the pglite DDL move, the route switch to JWT verification, the `users` model → `auth.users`, the `apps/frontend` switch to `apps/auth` (agreed with the app architect), and removal of the legacy JWT code, `tokens`, `session_version`, `is_admin`, `grant-admin.ts` and the `JWT_*` config. |
+| **PR B: Cutover** | 3, plus the code half of 4 | **No.** Merged to `develop` immediately before the window and promoted **in** the window. It holds the cutover migration (generated last in the journal; schema freeze from merge to window close), the owner's `DEPLOYED_THROUGH` bump, the `RELEASE.md` exception, the pglite DDL move, the route switch to JWT verification, the `users` model → `auth.users`, the `apps/frontend` switch to `apps/auth` (agreed with the app architect), and removal of the legacy JWT code, `tokens`, `session_version`, `is_admin` and the `JWT_*` config (with the three `JWT_*` names leaving `globalEnv` and the Zod schema), the rewrite of `grant-admin.ts` to set `role`, and the find-only system-account path. |
 | Out of this project (follow-up issues) | 4 triggers, 5 | Drop `users_legacy` (14 days + parity + sign-off). Remove the layer (its trigger). |
 
 **Why a feature flag cannot replace PR B.** The obvious alternative is to merge the cutover code
@@ -731,8 +780,8 @@ rollback deadline passing.
 - [ ] Session lifetime is 30 days and is refreshed after 1 day, pinned by a test. Exchanging a
   session for a JWT slides its expiry once `updateAge` has passed, so a client that refreshes
   regularly is never logged out at the 30-day mark.
-- [ ] After cutover no legacy HS256 JWT code exists. `tokens`, `session_version`, `is_admin` and
-  `grant-admin.ts` are gone from code and schema. `apps/api` has no `better-auth` dependency.
+- [ ] After cutover no legacy HS256 JWT code exists. `tokens`, `session_version` and `is_admin` are
+  gone from code and schema, and `grant-admin.ts` is rewritten to set `role`, not removed. `apps/api` has no `better-auth` dependency.
 - [ ] **No admin plugin endpoint answers on `apps/auth`.** Every admin path, impersonation
   included, is listed in `disabledPaths` **and** blocked by an Express middleware placed before
   `toNodeHandler`, which matches the admin prefix case-insensitively. Tests cover:
@@ -901,7 +950,11 @@ rollback deadline passing.
   rehearsed database and passes the smoke tests.
 - [ ] PR A amends `RELEASE.md` with the provisioning step and the deploy order **roles SQL →
   migration → grants → boot**, ahead of the dark `apps/auth` deploy and `apps/api`'s re-pointed
-  `DATABASE_URL`.
+  `DATABASE_URL`. Every `psql` apply, the smoke test and the admin bootstrap step use the
+  operator-held migrator URL; `CONTRIBUTING.md` states that dev and CI use one owner URL.
+- [ ] The **re-point** is its own release step, staging first with a soak, then production. It ends
+  with the migrator URL in no service environment (checked on every Railway service) and the
+  migrator password rotated. A source scan finds no fallback connection string in runtime code.
 - [ ] PR B amends `RELEASE.md`:
   - it names the cutover migration as the one exception to the backward-compatible rule, applied
     only in the offline window
@@ -1150,6 +1203,13 @@ at the window.
 9b. A system account's `DELETE /v2/users/me` is refused before any data is deleted; all its threads,
    preferences and feedback remain. Re-running the app-data delete after a simulated failure
    before the `apps/auth` call completes the deletion with no error.
+9c. Provisioning, in pglite under `SET ROLE`: a table the migrator creates after provisioning in
+   `public` and in `auth` is usable by the matching runtime role, and fails with `42501` when the
+   default privileges are omitted. Deleting an `auth.users` row as the `apps/auth` role cascades
+   into `public.threads`, `preferences` and `feedback` without `42501`.
+9d. With the system accounts absent, an `ai-skill` or `leaderboard` request fails loudly with an
+   error naming the key and the provisioning script, and no row is inserted. The provisioning
+   script, run as the migrator, creates both, and refuses an address held by a non-system row.
 10. Re-running the backfill inserts zero `account` rows. The cutover migration run against a
     non-empty `auth.users` aborts with no changes.
 11. A fresh empty database migrated through the full journal produces the post-cutover schema, and
