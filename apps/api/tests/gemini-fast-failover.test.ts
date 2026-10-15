@@ -207,7 +207,7 @@ describe('429 fast-failover (issue #44)', () => {
     const fallbackTries = sdk.modelsTried.filter((m) => m === 'gemini-fallback').length;
     expect(fallbackTries).toBe(3); // FALLBACK_MAX_RETRIES (2) + 1
     expect(sdk.establishCalls).toBe(4);
-  }, 15000);
+  });
 
   it('callGeminiStreaming fast-fails over on a 429 too', async () => {
     sdk.scripts = [

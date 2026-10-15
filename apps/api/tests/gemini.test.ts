@@ -402,5 +402,5 @@ describe('Transient 429 recovery (retry + model fallback)', () => {
     expect(sdk.modelsTried.at(-1)).toBe('gemini-fallback');
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('falling back'));
     warn.mockRestore();
-  }, 15000);
+  });
 });

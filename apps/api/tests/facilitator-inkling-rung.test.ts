@@ -175,13 +175,24 @@ async function collect(gen: AsyncGenerator<Event>): Promise<Event[]> {
 // Runs a budgeted request on a virtual clock (issue #292): runFacilitator's deadlines
 // read Date.now() and the scripted delays wait on setTimeout, so faking both puts them
 // on one clock — the ordering a test scripts can't be reordered by machine load.
-async function collectOnVirtualClock(gen: AsyncGenerator<Event>, ms: number): Promise<Event[]> {
+// `ms` must cover the whole scripted request: one still running after `ms` of virtual
+// time fails here, loudly, instead of hanging to the test timeout. `elapsedMs` is the
+// virtual time the request took, measured here — independent of what the agent reports.
+async function collectOnVirtualClock(
+  gen: AsyncGenerator<Event>,
+  ms: number
+): Promise<{ events: Event[]; elapsedMs: number }> {
   vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
   try {
-    const events = collect(gen);
+    const startedAt = Date.now();
+    let elapsedMs: number | undefined;
+    const events = collect(gen).finally(() => {
+      elapsedMs = Date.now() - startedAt;
+    });
     events.catch(() => {}); // surfaced by the await below, not as an unhandled rejection
     await vi.advanceTimersByTimeAsync(ms);
-    return await events;
+    if (elapsedMs === undefined) throw new Error(`request still running after ${ms} ms of virtual time`);
+    return { events: await events, elapsedMs };
   } finally {
     vi.useRealTimers();
   }
@@ -369,7 +380,7 @@ describe('Inkling rescue on terminal Gemini errors (issue #79)', () => {
     h.scripts = [errorRound('genuine LLM failure')];
     h.inklingScripts = [textRound('should never be reached')];
 
-    const events = await collectOnVirtualClock(
+    const { events } = await collectOnVirtualClock(
       runFacilitator([userMessage('q')], undefined, { budgetMs: 300, reserveMs: 150 }) as AsyncGenerator<Event>,
       300
     );
