@@ -41,3 +41,4 @@
 - FYI (main via security): builder-bugfix-260 is making the apps/api db pool lazy (apps/api/lib/db/index.ts only). Plan: use its db accessor for auth.users/auth.session reads, don't reshape lib/db/index.ts, expect a small rebase.
 
 - 2026-10-16: Owner: Waleed is not involved in auth; no migration framework needed — cutover is a plain INSERT … SELECT from old to new tables in maintenance mode. Removed Waleed as reviewer, C-1 resolved. No comment to Waleed was ever posted on #300.
+- 2026-10-16: Owner: one database now, auth tables split to a separate DB later. Added split-readiness rules to spec (separate DB roles/grants, no auth↔public joins, single identity accessor in apps/api, app tables store only user_id, explicit delete with FK as backstop, auth-only migrations). DB roles mean a new env/connection for apps/auth and changed grants — main architect owns env/Railway.

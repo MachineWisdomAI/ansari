@@ -497,6 +497,51 @@ and a JOSE verification library to `apps/api` changes the lockfile in PR A. The 
 High tier and is reviewed by the main architect and the security architect. The reference plan's
 Waleed review is dropped by the owner's decision.
 
+### One database now, a separate auth database later (owner decision, 2026-10-16)
+
+**Decision.** The `auth` schema lives in the existing Postgres database for this project. The
+long-term plan is to move the auth tables into their own database. This project does not do the
+split, but it must not make the split harder. The aim is that the split later is a data move plus
+connection-string changes, not a rewrite.
+
+**Split-readiness rules (requirements of this project):**
+
+1. **Separate database logins now.** `apps/auth` connects with its own Postgres role, which owns
+   the `auth` schema. `apps/api` connects with a role that can only `SELECT` the auth columns it
+   needs (`auth.users`: `id`, `role`, existence; `auth.session` only if the per-request session
+   check is chosen). It has no access to `auth.account` (password hashes), `auth.verification` or
+   `auth.jwks`. `apps/auth` has no access to `public`. A test or boot check proves each grant
+   boundary. At the split, each role's connection string points at its own database.
+2. **No SQL joins between `auth` and `public` tables.** Today no `apps/api` query joins `users` to
+   app tables except through `tokens`, which is dropped (`lib/db/users.ts:227,283`). A source-scan
+   test, negative-tested against a known-bad line and a near-miss, keeps it that way.
+3. **One accessor for identity reads in `apps/api`.** Every read of `auth.*` (admin `role`, user
+   existence, system accounts by `system_key`, the admin user counts in `lib/db/stats.ts`) goes
+   through one module. At the split, that module becomes an HTTP call to `apps/auth` or a read on
+   the auth database, and nothing else changes. It uses bugfix-260's lazy pool accessor.
+4. **App tables store only the user id.** `threads`, `preferences` and `feedback` keep `user_id`
+   and copy no email, name or role from `auth.users`. Anything displayed about a user is read
+   through the accessor.
+5. **Foreign keys stay for now; behaviour does not depend on them.** The FKs from `threads`,
+   `preferences` and `feedback` to `auth.users` keep integrity while there is one database, and
+   are dropped at the split. So account deletion is explicit: the layer deletes the user's app
+   data in `apps/api`, then deletes the user through `apps/auth`'s internal endpoint, and the
+   cascade is only a backstop. A test runs the deletion path with the FKs removed and finds no
+   orphaned rows. A failure between the two steps is retried, and leaves a user without data, never
+   data without a user.
+6. **Auth migrations touch only the `auth` schema.** The additive migration and every later auth
+   migration contain no `public` DDL. The cutover migration is the one exception and runs once. At
+   the split, the auth DDL moves to its own journal.
+7. **Per-request database reads are counted as a split cost.** Each read from `apps/api` into
+   `auth.*` on every request (admin `role`, user existence, and the session check if chosen)
+   becomes a cross-database or HTTP call after the split. The plan keeps them behind the accessor
+   so caching can be added there.
+
+**What the split itself will need (out of scope, recorded for that project):** a data copy of
+`auth.*` during a short maintenance window, dropping the cross-schema FKs, a separate backup and
+point-in-time recovery for each database (they can no longer be restored to one consistent
+moment), and the user counts in admin stats served by `apps/auth`.
+
 ### Phasing (resolves an issue "must be resolved" item; proposal — owner decides at spec-approval)
 
 The reference plan's Phases 0–5 map onto this project as **two PRs** inside one SPIR project.
@@ -715,8 +760,9 @@ rollback deadline passing.
 - [ ] `DELETE me` succeeds with a session created more than 24 hours earlier. It goes through an
   internal-only `apps/auth` endpoint that requires the internal credential and deletes the user
   through Better Auth's internal adapter. `auth.api.deleteUser` is not used, because it 404s unless
-  enabled and enforces `freshAge`. Afterwards the session is dead and the user's threads are gone
-  (cascade).
+  enabled and enforces `freshAge`. The layer deletes the user's app data first, explicitly, so the
+  cascade is only a backstop (split-readiness rule 5). Afterwards the session is dead and the
+  user's threads, preferences and feedback are gone.
 - [ ] Password reset:
   - The emailed link has the legacy shape `${FRONTEND_URL}/reset-password?token=<token>`.
   - Unknown emails get the identical response.
@@ -1030,8 +1076,12 @@ at the window.
    derived `name` (local-part, or `'User'`). `first_name` and `last_name` copy as null, and
    `login`'s response matches today's handling of null names.
 8. A password longer than 72 bytes on a bcrypt hash verifies exactly as it does today, truncated.
-9. `DELETE /v2/users/me` with a session 25 hours old succeeds. The session is dead, cascades remove
-   threads, preferences and feedback, and the user's unexpired JWT gets 401 on data routes.
+9. `DELETE /v2/users/me` with a session 25 hours old succeeds. The session is dead, the layer's
+   explicit delete removes threads, preferences and feedback (the same test passes with the FKs
+   dropped), and the user's unexpired JWT gets 401 on data routes.
+9a. Split readiness: `apps/api`'s database role cannot read `auth.account`, `auth.verification` or
+   `auth.jwks`; `apps/auth`'s role cannot read `public`; the source scan finds no join between
+   `auth` and `public` tables and fails on a planted one.
 10. Re-running the backfill inserts zero `account` rows. The cutover migration run against a
     non-empty `auth.users` aborts with no changes.
 11. A fresh empty database migrated through the full journal produces the post-cutover schema, and
