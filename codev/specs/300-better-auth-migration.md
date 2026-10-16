@@ -123,8 +123,18 @@ Verified on this branch, `develop` at `2eb3fdc` plus the porch init commit.
 - **`apps/frontend`**: also uses `/v2/users/*` (`lib/auth/api.ts`). Its refresh on 401 is
   single-flight, and it stores tokens in SecureStore on native and `localStorage` on web. It
   contains **no** Better Auth client.
+- **Legacy web frontend** (`legacy/frontend-web`): also a `/v2/users/*` client with JWT bearer and
+  refresh (`src/services/ApiService.ts`, `src/store/slices/authSlice.ts`). The plan confirms
+  whether it is still deployed; if it is, the frozen contract covers it like the mobile build.
 - **Admin analytics page** (`apps/api/src/app/admin/analytics/page.tsx`): posts to
   `/v2/users/login` and reads `access_token`.
+- **Machine callers, not users:**
+  - `/api/v1/chat/completions` (the leaderboard): `Authorization: Bearer <LEADERBOARD_API_KEY>`,
+    checked in the route with a constant-time compare (`route.ts:91-131`), acting as the
+    `leaderboard` system account.
+  - `/api/v2/mcp-complete` (the AI skill): no credential, IP rate-limited, acting as the `ai-skill`
+    system account.
+  - `X-Ansari-Client` is attribution only (`lib/attribution.ts`), never authentication.
 - `prototypes/ansari-expo`, which the reference documents name as a client, **does not exist** on
   this branch.
 
@@ -652,7 +662,7 @@ backfill inserts nothing, because of the unique `(user_id, provider_id)`.
 
 | Service | Database credential | Other variables |
 |---|---|---|
-| `apps/auth` | `DATABASE_URL` = **auth database**, Railway default account | `AUTH_INTERNAL_SECRET`, `AUTH_JWT_ISSUER`, `AUTH_JWT_AUDIENCE`, `ADMIN_EMAILS` (moved), plus the existing `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `CORS_ORIGIN` |
+| `apps/auth` | `DATABASE_URL` = **auth database**, Railway default account | `AUTH_INTERNAL_SECRET`, `AUTH_JWT_ISSUER`, `AUTH_JWT_AUDIENCE`, `ADMIN_EMAILS` (moved), `RESEND_API_KEY` and `FRONTEND_URL` (reset emails are now sent by `apps/auth`, with the same sender and legacy link shape as `apps/api/lib/email.ts`), plus the existing `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `CORS_ORIGIN` |
 | `apps/api` | `DATABASE_URL` = **app database**, Railway default account (unchanged) | `AUTH_INTERNAL_URL`, `AUTH_JWT_ISSUER`, `AUTH_JWT_AUDIENCE`, `AUTH_INTERNAL_SECRET`. The cutover PR removes `JWT_SECRET`, `ACCESS_TOKEN_EXPIRY_HOURS`, `REFRESH_TOKEN_EXPIRY_HOURS` and `ADMIN_EMAILS` |
 
 For the copy, the operator's Railway shell holds both databases' URLs as `APP_DATABASE_URL` and
@@ -930,6 +940,12 @@ rollback deadline passing, and the contract PR's release.
   - the released mobile flow: login, then a bearer call, then a 401 when the JWT expires, then
     refresh, then a retry
   - the admin analytics login
+  - `legacy/frontend-web`'s login and refresh, if it is still deployed
+- [ ] **Machine callers are unchanged and cannot be confused with users.** The leaderboard key and
+  a user JWT share the `Authorization: Bearer` header, so tests pin both directions: on
+  `/api/v1/chat/completions`, a valid user JWT gets 401 and the key is never parsed as a JWT; on
+  every JWT-verified route, the leaderboard key gets 401. No global middleware applies JWT
+  verification to `/api/v1/*` or `/api/v2/mcp-complete`.
 
 **`apps/frontend` and `apps/auth` deployment**
 
