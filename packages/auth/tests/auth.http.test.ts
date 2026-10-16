@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import type { PGlite } from '@electric-sql/pglite';
+import { betterAuth } from 'better-auth';
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 
 import { createAuth, type Auth, type Db } from '../src/index';
@@ -86,6 +87,42 @@ describe('trusted origins carry the frontend Expo scheme', () => {
   it('accepts a sign-in bearing the ansarichat:// origin over HTTP', async () => {
     const res = await auth.handler(signInReq(BASE, 'ansarichat://'));
     expect(res.status).toBe(200);
+  });
+});
+
+// #266: better-auth skips the origin check under NODE_ENV=test unless
+// `advanced.disableOriginCheck` is set (dist/context/create-context.mjs:211),
+// so an origin test passed whatever the config said. createAuth() now sets it to
+// false explicitly, and these requests are rejected for real.
+describe('a cookie-bearing request from an untrusted origin is rejected (#266)', () => {
+  function signOutReq(origin: string): Request {
+    return new Request(`${BASE}/api/auth/sign-out`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        origin,
+        cookie: 'better-auth.session_token=anything',
+      },
+      body: '{}',
+    });
+  }
+
+  it('rejects a wrong origin with 403 INVALID_ORIGIN', async () => {
+    const res = await auth.handler(signOutReq('https://evil.example'));
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { code?: string }).code).toBe('INVALID_ORIGIN');
+  });
+
+  it('accepts the configured web origin', async () => {
+    expect((await auth.handler(signOutReq(BASE))).status).not.toBe(403);
+  });
+
+  it('negative control: with the check bypassed, the same wrong origin passes', async () => {
+    const bypassed = betterAuth({
+      ...auth.options,
+      advanced: { ...auth.options.advanced, disableOriginCheck: true },
+    });
+    expect((await bypassed.handler(signOutReq('https://evil.example'))).status).not.toBe(403);
   });
 });
 

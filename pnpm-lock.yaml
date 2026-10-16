@@ -151,6 +151,9 @@ importers:
       '@ansari/auth':
         specifier: workspace:*
         version: link:../../packages/auth
+      '@sentry/node':
+        specifier: ^10.69.0
+        version: 10.69.0(@opentelemetry/core@2.10.0(@opentelemetry/api@1.9.1))
       bcrypt:
         specifier: ^6.0.0
         version: 6.0.0
@@ -197,6 +200,9 @@ importers:
       typescript-eslint:
         specifier: 'catalog:'
         version: 8.70.1(eslint@9.39.5(jiti@2.7.0))(typescript@6.0.3)
+      vitest:
+        specifier: ^4.1.11
+        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@25.9.5)(@vitest/coverage-v8@4.1.11)(jsdom@26.1.0)(vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.11)(yaml@2.9.1))
 
   apps/frontend:
     dependencies:

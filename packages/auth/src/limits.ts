@@ -58,6 +58,25 @@ export const FALLBACK_SIGN_UP_GLOBAL: LimitRule = { window: MINUTE, max: 30 };
 /** `email` mode: list-walk alert when this many distinct emails hit a per-email limit in the window. */
 export const LIST_WALK_ALERT = { window: 10 * MINUTE, distinctEmails: 20 } as const;
 
+/** The longest window above. better-auth's pruner keeps rows at least this long. */
+export const LONGEST_WINDOW = Math.max(
+  ...[
+    DEFAULT_RULE,
+    SIGN_IN,
+    SIGN_UP,
+    RESET_REQUEST_BURST,
+    RESET_REQUEST_PER_IP,
+    RESET_REQUEST_PER_EMAIL,
+    RESET_CONSUME,
+    TOKEN_EXCHANGE,
+    INTERNAL_ENDPOINT,
+    FALLBACK_SIGN_IN_PER_EMAIL,
+    FALLBACK_SIGN_UP_PER_EMAIL,
+    FALLBACK_SIGN_UP_GLOBAL,
+    LIST_WALK_ALERT,
+  ].map((rule) => rule.window)
+);
+
 /**
  * better-auth router rules, keyed by the path the router sees (basePath
  * stripped). Every path is listed explicitly, so none falls back to

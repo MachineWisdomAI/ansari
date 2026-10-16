@@ -1,0 +1,19 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    // The apps/auth suites build their pglite database from packages/auth's
+    // journal and reuse its test helpers. Neither is in this package's task
+    // hash by default (globalDependencies carries packages/auth/src only), so
+    // without these inputs a warm cache would replay apps/auth's tests after
+    // the schema or the helpers changed.
+    "test": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env.ci",
+        "$TURBO_ROOT$/packages/auth/drizzle/**",
+        "$TURBO_ROOT$/packages/auth/tests/helpers/**"
+      ]
+    }
+  }
+}

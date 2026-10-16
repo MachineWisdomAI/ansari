@@ -301,7 +301,8 @@ describe('no email is sent, and profile-changing routes stay off', () => {
       bearer: token,
       body: { newEmail: 'moved@example.com' },
     });
-    expect(res.status).toBe(400);
+    // disabledPaths answers first (404); changeEmail is also off underneath.
+    expect(res.status).toBe(404);
     expect(await userRow('keepmail@example.com')).toBeDefined();
     expect(await userRow('moved@example.com')).toBeUndefined();
   });

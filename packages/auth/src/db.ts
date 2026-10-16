@@ -9,6 +9,7 @@
 // node-postgres' `drizzle(connectionString)` creates the pool lazily, so this
 // module can be constructed without opening a connection; the first query is
 // what connects.
+import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 
 import { getEnv } from './env';
@@ -19,3 +20,8 @@ export function createDb() {
 }
 
 export type Db = ReturnType<typeof createDb>;
+
+/** `select 1` on the auth database; throws when it cannot answer. */
+export async function pingDatabase(db: Db): Promise<void> {
+  await db.execute(sql`select 1`);
+}

@@ -2,9 +2,10 @@
 // Each behaviour is also proven over HTTP in the sibling suites; this file pins
 // the settings themselves, so a removal names the setting that moved.
 import type { PGlite } from '@electric-sql/pglite';
+import { admin } from 'better-auth/plugins';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { createAuth, JWT_EXPIRATION, type Auth } from '../../src/index';
+import { BLOCKED_AUTH_PATHS, createAuth, JWT_EXPIRATION, type Auth } from '../../src/index';
 import { hashPassword, verifyPassword } from '../../src/password';
 import {
   drizzleFor,
@@ -61,13 +62,28 @@ describe('createAuth() options', () => {
     expect(auth.options.user?.deleteUser?.enabled).toBe(false);
   });
 
-  it('runs exactly expo, bearer, jwt and admin', () => {
+  it('runs exactly expo, bearer, jwt, admin and the rate-limit retention rule', () => {
     expect((auth.options.plugins as PluginLike[]).map((p) => p.id).sort()).toEqual([
       'admin',
+      'ansari-rate-limit-retention',
       'bearer',
       'expo',
       'jwt',
     ]);
+  });
+
+  it('disables every admin endpoint, change-email and update-user on the router', () => {
+    const adminPaths = Object.values(admin().endpoints).map((e) => e.path);
+    expect(adminPaths).toContain('/admin/impersonate-user');
+    expect(adminPaths).toContain('/admin/set-role');
+    expect(auth.options.disabledPaths).toEqual(
+      expect.arrayContaining([...adminPaths, '/change-email', '/update-user'])
+    );
+    expect(BLOCKED_AUTH_PATHS).toEqual([...adminPaths, '/change-email', '/update-user']);
+  });
+
+  it('runs the origin check under NODE_ENV=test too (#266)', () => {
+    expect(auth.options.advanced?.disableOriginCheck).toBe(false);
   });
 
   it('leaves bearer requireSignature unset', () => {

@@ -14,7 +14,7 @@ import { z } from 'zod';
 
 import { createDb, type Db } from './db';
 import { getEnv, type AuthEnv } from './env';
-import { DEFAULT_RULE, ROUTER_RULES } from './limits';
+import { DEFAULT_RULE, LONGEST_WINDOW, ROUTER_RULES } from './limits';
 import { deriveName } from './name';
 import { subscribeToNewsletter } from './newsletter';
 import {
@@ -27,8 +27,12 @@ import { isReservedAddress, normalizeEmail } from './reserved';
 import * as schema from './schema';
 
 export * as schema from './schema';
-export { createDb, type Db } from './db';
+export { createDb, pingDatabase, type Db } from './db';
 export { getEnv, resetEnvCache, type AuthEnv } from './env';
+export * as limits from './limits';
+export { consumeWindow, keysSeenSince, peekWindow, touchKey, type WindowState } from './rate-limit-store';
+export { normalizeEmail } from './reserved';
+export { CLIENT_HEADER } from '@ansari/types/attribution';
 
 const DAY = 24 * 60 * 60;
 
@@ -44,6 +48,30 @@ export const EMAIL_TAKEN_MESSAGE = 'An account with this email already exists';
 
 /** The legacy reset failure, for a missing, unknown, expired or used token. */
 export const INVALID_RESET_TOKEN_MESSAGE = 'Invalid or expired reset token';
+
+/**
+ * better-auth's own 429, for apps/auth's limiters. Built here so the error is
+ * an instance of the better-auth copy that runs the router (apps/auth resolves
+ * a second copy, whose APIError the router would not recognize).
+ */
+export function tooManyRequests(retryAfterSeconds: number): APIError {
+  return new APIError(
+    'TOO_MANY_REQUESTS',
+    { message: 'Too many requests. Please try again later.' },
+    { 'X-Retry-After': String(retryAfterSeconds) }
+  );
+}
+
+/**
+ * True when an endpoint's result (`ctx.context.returned` in an after hook) is
+ * an error response. Duck-typed on `statusCode`, so it holds for better-call's
+ * base APIError as well as better-auth's subclass.
+ */
+export function isAuthError(value: unknown): boolean {
+  if (!(value instanceof Error) || !('statusCode' in value)) return false;
+  const status = (value as { statusCode: unknown }).statusCode;
+  return typeof status === 'number' && status >= 400;
+}
 
 function emailTaken(): APIError {
   return new APIError('CONFLICT', { message: EMAIL_TAKEN_MESSAGE, code: 'USER_ALREADY_EXISTS' });
@@ -75,13 +103,64 @@ function registeredVia(headers: Headers | undefined, url: string | undefined): s
   return parseClientId(headers?.get(CLIENT_HEADER) ?? null, srcParam).clientId;
 }
 
+/** The context better-auth hands a `hooks.before` / `hooks.after` middleware. */
+export type AuthHookContext = Parameters<Parameters<typeof createAuthMiddleware>[0]>[0];
+
+/**
+ * apps/auth's perimeter hooks (its per-email and reset limiters). `before` runs
+ * first in `hooks.before`, ahead of every guard here, so a limit counts every
+ * request; it may throw an APIError. `after` runs first in `hooks.after`.
+ */
+export type AuthExtensions = {
+  before?: (ctx: AuthHookContext) => Promise<void>;
+  after?: (ctx: AuthHookContext) => Promise<void>;
+};
+
+/**
+ * Router paths that never answer: the whole admin plugin surface, and the two
+ * profile-changing routes (spec 300). The plugin stays only for its `role` and
+ * ban columns. better-auth matches `disabledPaths` exactly, so apps/auth also
+ * blocks every variant of these paths before its handler.
+ */
+export const ADMIN_PATHS: readonly string[] = Object.values(admin().endpoints).map(
+  (endpoint) => endpoint.path
+);
+export const BLOCKED_AUTH_PATHS: readonly string[] = [
+  ...ADMIN_PATHS,
+  '/change-email',
+  '/update-user',
+];
+
+/**
+ * The router rules for a rate-limit mode (plan P-3). In `email` mode the
+ * client IP is not trusted, so sign-in and sign-up carry no per-IP rule at all:
+ * apps/auth's per-email fallback limits them instead, and a misattributed IP
+ * can never become a global login cap.
+ */
+export function routerRules(mode: AuthEnv['AUTH_RATE_LIMIT_MODE']) {
+  if (mode === 'ip') return { ...ROUTER_RULES };
+  return { ...ROUTER_RULES, '/sign-in/email': false as const, '/sign-up/email': false as const };
+}
+
+/**
+ * better-auth prunes `rate_limit` rows older than the longest window it knows
+ * of. apps/auth's own rows live in the same table with longer windows (the
+ * per-email reset cap is an hour), so this rule, which matches no path, makes
+ * the pruner keep every row for the longest window in limits.ts.
+ */
+const rateLimitRetention = {
+  id: 'ansari-rate-limit-retention' as const,
+  rateLimit: [{ pathMatcher: () => false, window: LONGEST_WINDOW, max: 1 }],
+};
+
 /**
  * Build a configured Better Auth instance.
  *
  * @param db - optional Drizzle client. Defaults to the package's own
  *   node-postgres client. Injectable so tests can pass a throwaway database.
+ * @param extensions - apps/auth's perimeter hooks; none in library tests.
  */
-export function createAuth(db: Db = createDb()) {
+export function createAuth(db: Db = createDb(), extensions: AuthExtensions = {}) {
   const env: AuthEnv = getEnv();
 
   // A browser SILENTLY DISCARDS a `Secure` cookie sent over plain HTTP, so
@@ -95,13 +174,14 @@ export function createAuth(db: Db = createDb()) {
       provider: 'pg',
       schema,
     }),
-    // CORS_ORIGIN is the web origin; the rest are the Expo app's origins. The
+    // CORS_ORIGIN is the web origins; the rest are the Expo app's origins. The
     // custom scheme MUST match apps/frontend/app.json (`"scheme": "ansarichat"`,
     // the legacy store app's scheme, kept by its successor — #262)
     // — a native request carries `expo-origin: ansarichat://…`, and a mismatch
     // fails origin validation in production. `exp://` is Expo Go; the
     // `http://localhost:8081` is Metro's web/dev origin.
-    trustedOrigins: [env.CORS_ORIGIN, 'ansarichat://', 'exp://', 'http://localhost:8081'],
+    trustedOrigins: [...env.CORS_ORIGIN, 'ansarichat://', 'exp://', 'http://localhost:8081'],
+    disabledPaths: [...BLOCKED_AUTH_PATHS],
     // The user model is `auth.users` (schema.ts). Ids are UUIDs, generated by
     // the database default, so a migrated user keeps the UUID their app data
     // already references.
@@ -148,16 +228,18 @@ export function createAuth(db: Db = createDb()) {
       storage: 'database',
       window: DEFAULT_RULE.window,
       max: DEFAULT_RULE.max,
-      customRules: { ...ROUTER_RULES },
+      customRules: routerRules(env.AUTH_RATE_LIMIT_MODE),
     },
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
+        await extensions.before?.(ctx);
         if (ctx.path === '/sign-up/email') return signUpGuard(ctx.body, ctx.context, env);
         if (ctx.path === '/reset-password') {
           return resetGuard(asBody(ctx.body), ctx.query, ctx.context);
         }
       }),
       after: createAuthMiddleware(async (ctx) => {
+        await extensions.after?.(ctx);
         if (ctx.path !== '/sign-up/email') return;
         if (asBody(ctx.body).register_to_mail_list !== true) return;
         const user = ctx.context.newSession?.user as
@@ -210,6 +292,9 @@ export function createAuth(db: Db = createDb()) {
       // overwrites it. X-Forwarded-For is never read, and trustedProxies stays
       // unset, because Railway publishes no stable proxy ranges.
       ipAddress: { ipAddressHeaders: ['x-real-ip'] },
+      // Explicit, so NODE_ENV=test runs the same origin check as production
+      // (better-auth skips it under test when this is unset, #266).
+      disableOriginCheck: false,
       defaultCookieAttributes: {
         // sameSite:'none' lets the session cookie ride cross-origin requests
         // from the Expo app / a web client on a different origin. But the cookie
@@ -242,6 +327,7 @@ export function createAuth(db: Db = createDb()) {
       // Kept for its `role` and ban columns; its HTTP surface is blocked in
       // apps/auth (spec 300).
       admin(),
+      rateLimitRetention,
     ],
   });
 }

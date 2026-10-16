@@ -18,7 +18,17 @@ const envSchema = z.object({
     .string()
     .min(32, 'BETTER_AUTH_SECRET must be at least 32 characters'),
   BETTER_AUTH_URL: z.string().url('BETTER_AUTH_URL must be a valid URL'),
-  CORS_ORIGIN: z.string().url('CORS_ORIGIN must be a valid URL'),
+  // Comma-separated exact web origins (apps/frontend's), for CORS and
+  // trustedOrigins. One origin is a list of one.
+  CORS_ORIGIN: z
+    .string()
+    .transform((raw) =>
+      raw
+        .split(',')
+        .map((o) => o.trim())
+        .filter((o) => o.length > 0)
+    )
+    .pipe(z.array(z.url('CORS_ORIGIN must be a comma list of URLs')).min(1)),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
 
   // JWT claims (spec 300). `iss` is this service's public origin
@@ -52,6 +62,12 @@ const envSchema = z.object({
   AUTH_RATE_LIMIT_MODE: z.enum(['ip', 'email']).default('email'),
   // Optional newsletter integration; unset disables the opt-in subscribe.
   MARKETMAKER_URL: z.string().url('MARKETMAKER_URL must be a valid URL').optional(),
+  // apps/auth's two listeners (plan P-1): PORT is the public domain's;
+  // INTERNAL_PORT is reachable on Railway's private network only.
+  PORT: z.coerce.number().int().min(1).max(65535).default(3100),
+  INTERNAL_PORT: z.coerce.number().int().min(1).max(65535).default(3101),
+  // apps/auth's Sentry project (the list-walk alert). Unset disables sending.
+  SENTRY_DSN: z.string().url('SENTRY_DSN must be a valid URL').optional(),
 });
 
 export type AuthEnv = z.output<typeof envSchema>;
@@ -76,7 +92,7 @@ export function getEnv(): AuthEnv {
       `@ansari/auth env validation failed for: ${vars}. ` +
         `Set these before running the auth service — see apps/auth/.env.example ` +
         `(BETTER_AUTH_SECRET and AUTH_INTERNAL_SECRET must be >= 32 chars, RESEND_API_KEY >= 20; ` +
-        `BETTER_AUTH_URL, CORS_ORIGIN, AUTH_JWT_ISSUER and FRONTEND_URL must be URLs).`
+        `BETTER_AUTH_URL, AUTH_JWT_ISSUER and FRONTEND_URL must be URLs; CORS_ORIGIN a comma list of URLs).`
     );
   }
 
