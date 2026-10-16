@@ -25,6 +25,19 @@ cutover (2026-10-16). None is pinned by the contract; each has a test in
 5. **System-account `DELETE /v2/users/me`** answers 403 `{detail: 'System accounts cannot be
    deleted'}` before anything is touched ("Two databases" rule 5, step 1).
 
+## Lessons for the lessons-learned pass
+
+- **A rule that exists only in production needs a production-mode test** (phase 8, found by the
+  Codex consult; security asked for it to be recorded). apps/auth refuses any `/api/auth/*`
+  request with no usable client IP, but only when `NODE_ENV=production`. Every suite ran apps/auth
+  in test mode, so all of them passed while apps/api's JWKS fetch, which carries no end-user IP,
+  would have been refused in production and every switched route would have answered 401 on the
+  first cold-cache request. The fix served the internal JWKS ahead of that rule; the permanent
+  guard is a suite that runs the whole legacy cycle against a production-mode apps/auth from a
+  cold JWKS cache (`apps/api/tests/auth/layer.test.ts`, "against apps/auth in production mode"),
+  plus production-mode JWKS cases in `apps/auth/tests/client-ip.test.ts`. Removing the fix makes
+  both fail.
+
 ## Deviations recorded during implementation
 
 See `codev/state/spir-300_thread.md` (one section per phase) for the full list with reasons. The
