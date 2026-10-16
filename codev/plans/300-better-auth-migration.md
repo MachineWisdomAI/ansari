@@ -1069,6 +1069,20 @@ and `apps/api`.
 **remain after cutover**, because the released mobile app depends on them. Removing the layer is
 a follow-up gated on I-3, as the spec says.
 
+**Status (2026-10-17): both merged into `builder/spir-300`, each with a merge commit, after the
+app architect's real-path run and approval on the PR.**
+
+| Follow-on | PR | Approved at | Merge commit | What the review added |
+|---|---|---|---|---|
+| Phase 10 | #309 | 1ff6a87 | 8f26a5e | Atomic, single-flight guest provisioning; `refresh()` guarded against a principal change; the legacy refresh token deleted on upgrade |
+| 10b (#304) | #311 | 00626e8 | 440796b | The reset pages are public (no guest is minted by a link); the web token leaves the URL in the app entry before expo-router loads; a successful reset reconciles this device's session; an iOS boot fix (the strip runs on the web only) |
+| 10c (#306) | #312 | 9111d68 | 7d999ef | Any 2xx is success; the DELETE skips the refresh wrapper, is single-flight, and a 401 ends the session honestly; "could not confirm" copy; `/delete-account` is public |
+
+The runbook's step 1 precondition for #304 and #306 is met. #307 (the share page) is on
+`develop` and in `builder/spir-300` through the merge of `develop` (0fdfdd6). #305's remaining
+items (the production build guard, which must cover `EXPO_PUBLIC_AUTH_URL`, and the Railway web
+service switch) are the app and main architects'.
+
 ### Phase 11: apps/auth deployment: Dockerfile, Railway service, CI and env
 
 **Dependencies**: Phase 5. **Main-architect hunks throughout.**
