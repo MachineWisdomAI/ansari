@@ -194,3 +194,12 @@
   - reset strength-before-token → 2 fail; reset strength removed → 1
   - registered_via, name injection, newsletter, generateId, modelName, changeEmail, deleteUser, sendOnSignUp, admin → each caught
 - Limitation: `expirationTime` and `updateAge` equal better-auth's defaults (15m, 1d), so deleting them changes nothing observable. The tests pin the VALUES (a changed value fails), and the options test pins the explicit settings.
+- Security (06:40Z): do NOT write apps/auth's env example or CI env files blind; they stay for phase 11. The keys to ADD there, with placeholders (names and constraints come from `packages/auth/src/env.ts`):
+  - `AUTH_JWT_ISSUER=http://localhost:3100` (URL; prod `https://auth.askansari.ai`, staging `https://auth-staging.askansari.ai`)
+  - `AUTH_JWT_AUDIENCE=ansari-api` (non-empty; must equal the audience apps/api verifies)
+  - `AUTH_INTERNAL_SECRET=change-me-internal-secret-32-chars-min` (at least 32 chars; the same value goes in apps/api)
+  - `RESEND_API_KEY=re_placeholder_key_20_chars` (at least 20 chars)
+  - `FRONTEND_URL=http://localhost:8081` (URL; the base of the reset link)
+  - `ADMIN_EMAILS=` (optional, comma-separated; empty is valid)
+  - `AUTH_RATE_LIMIT_MODE=email` (`ip` | `email`; defaults to `email` when unset)
+  - `MARKETMAKER_URL=` (optional URL; when unset, newsletter subscribe is disabled)
