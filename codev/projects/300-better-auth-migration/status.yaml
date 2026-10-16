@@ -35,14 +35,14 @@ plan_phases:
     status: complete
   - id: phase_11
     title: 'apps/auth deployment: Dockerfile, Railway service, CI and env'
-    status: in_progress
+    status: complete
   - id: phase_12
     title: 'Cutover tooling: copy, audits, rollback SQL and runbooks'
-    status: pending
+    status: in_progress
   - id: phase_13
     title: 'Staging verification: edge check, unmodified clients, full rehearsal'
     status: pending
-current_plan_phase: phase_11
+current_plan_phase: phase_12
 gates:
   spec-approval:
     status: approved
@@ -56,8 +56,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 2
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1
@@ -180,7 +180,7 @@ history:
         file: >-
           /Users/amrmohamed/repos/iaser/ansari/.builders/spir-300/codev/projects/300-better-auth-migration/300-phase_11-iter1-gemini.txt
 started_at: '2026-10-14T03:31:15.359Z'
-updated_at: '2026-10-16T19:33:37.610Z'
+updated_at: '2026-10-16T19:34:58.361Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-10-16T00:28:28.599Z'
@@ -215,6 +215,8 @@ context_refreshes:
   - boundary: plan-phase:phase_11
     at: '2026-10-16T11:09:59.744Z'
     acknowledged_at: '2026-10-16T11:10:29.309Z'
+  - boundary: plan-phase:phase_12
+    at: '2026-10-16T19:34:58.361Z'
 force_advanced:
   phase: phase_7
   iteration: 3
