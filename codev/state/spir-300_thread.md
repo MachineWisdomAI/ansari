@@ -62,3 +62,14 @@
 - Plan decisions the spec delegated: P-1 layer hop over the private network (AUTH_INTERNAL_URL) with the credential, plus a production 400 for requests with no IP source, so nothing reaches better-auth's shared no-trusted-ip bucket; P-2 limit numbers proposed (reset 5/15min per IP and 3/60min per hashed email; fallback ceiling max(30/min, 10× B-1 peak); list-walk alert ≥20 distinct emails in 10 min), pending production baselines B-1 to B-4; P-5 runbooks in docs/cutover/, operator SQL in apps/auth/scripts/cutover/.
 - Gate questions: G-1 build the IP fallback now behind AUTH_RATE_LIMIT_MODE (default email); G-2 the production domains can only be probed in the window, without shipping code early; G-3 a fourth internal endpoint, revoke-sessions, for legacy logout (the layer holds only the JWT); G-4 the numbers.
 - Verified on 1.7.7: GET /api/auth/token slides the session (getSessionFromCtx → getSession refresh, session.mjs:179-207,246-263). The legacy mobile client retries a 401 once with no single-flight guard, so the layer's refresh must never rotate the session token (it doesn't).
+- 2026-10-16: Plan consult iter1: Codex REQUEST_CHANGES, Gemini COMMENT. All points accepted (11608c4).
+  - Phase 7 now only builds the verifier (no route rewiring); phase 8 switches every route plus the layer in one commit (otherwise HS256 login + JWT routes).
+  - G-2 needs an owner spec amendment.
+  - The apps/frontend, apps/auth and packages/auth deps are assigned to phases.
+  - Ban via apps/auth/scripts/ban-user.ts, plus a table-driven revocation-window test (logout/reset/ban/delete).
+  - revoke-sessions is specified in phase 5.
+  - The reservation includes ADMIN_EMAILS; apps/auth hooks keep 409-before-400 on sign-up and token-before-strength on reset.
+  - CORS allows X-Ansari-Client; the newsletter moves to an apps/auth sign-up hook.
+  - Copy SQL: provider_id/gen_random_uuid/ON CONFLICT.
+  - G-5: guest-on-cold-launch vs the 3/60s sign-up limit.
+  At the plan-approval gate.
