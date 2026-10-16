@@ -56,9 +56,25 @@ function gatedFetch(cooldownMs: number, onSuccess: () => void): typeof fetch {
     if (now - lastAttempt < cooldownMs) throw new Error('JWKS fetch cooling down');
     lastAttempt = now;
     const response = await fetch(input, init);
-    if (response.status === 200) onSuccess();
+    if (response.status === 200 && isJwksLike(await response.clone().json().catch(() => null))) {
+      onSuccess();
+    }
     return response;
   };
+}
+
+/**
+ * jose's own shape check before it installs a fetched set (`jwks/local.js`
+ * `isJWKSLike`): a 200 whose body fails it is a failed refresh, and must not
+ * extend the stale grace.
+ */
+function isJwksLike(body: unknown): boolean {
+  if (!body || typeof body !== 'object') return false;
+  const { keys } = body as { keys?: unknown };
+  return (
+    Array.isArray(keys) &&
+    keys.every((k) => typeof k === 'object' && k !== null && !Array.isArray(k))
+  );
 }
 
 /**

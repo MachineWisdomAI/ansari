@@ -69,25 +69,33 @@ export interface JwksServer {
   requests: number;
   /** The keys served, in order. */
   keys: SigningKey[];
-  /** Answer 500 instead of the key set. */
+  /** Answer 500 (with the key set as its body). */
   failing: boolean;
+  /** Answer 200 with this body instead of the key set. */
+  malformedBody: string | null;
   stop(): Promise<void>;
 }
 
 export async function startJwksServer(initial: SigningKey[]): Promise<JwksServer> {
-  const state = { requests: 0, keys: [...initial], failing: false };
+  const state = { requests: 0, keys: [...initial], failing: false, malformedBody: null as string | null };
   const handler = (req: IncomingMessage, res: ServerResponse) => {
     state.requests += 1;
     if (req.headers['x-ansari-internal-auth'] !== INTERNAL_SECRET) {
       res.writeHead(401).end();
       return;
     }
-    if (req.url !== '/api/auth/jwks' || state.failing) {
-      res.writeHead(state.failing ? 500 : 404).end();
+    const keySet = JSON.stringify({ keys: state.keys.map((k) => k.publicJwk) });
+    if (state.failing) {
+      // A valid key set under a 500: only the status says the refresh failed.
+      res.writeHead(500, { 'content-type': 'application/json' }).end(keySet);
+      return;
+    }
+    if (req.url !== '/api/auth/jwks') {
+      res.writeHead(404).end();
       return;
     }
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ keys: state.keys.map((k) => k.publicJwk) }));
+    res.end(state.malformedBody ?? keySet);
   };
   const server: Server = createServer(handler);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -105,6 +113,12 @@ export async function startJwksServer(initial: SigningKey[]): Promise<JwksServer
     },
     set failing(value: boolean) {
       state.failing = value;
+    },
+    get malformedBody() {
+      return state.malformedBody;
+    },
+    set malformedBody(value: string | null) {
+      state.malformedBody = value;
     },
     async stop() {
       server.closeAllConnections();

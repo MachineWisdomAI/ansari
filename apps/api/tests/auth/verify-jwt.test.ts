@@ -269,6 +269,21 @@ describe('scenario 18: apps/auth stopped', () => {
     expect(await verifyAccessToken(await signToken({ key }))).toBeNull();
   });
 
+  it('a 200 with a malformed body is a failed refresh and does not extend the grace', async () => {
+    for (const body of ['not json', '{"keys":"x"}', '{"keys":[1]}', 'null']) {
+      setApiEnv(jwks.url);
+      jwks.malformedBody = null;
+      const start = jwks.requests;
+      await warmUp();
+      jwks.malformedBody = body;
+      advance(JWKS_CACHE_MAX_AGE_MS + 1_000);
+      expect(await verifyAccessToken(await signToken({ key }))).not.toBeNull();
+      expect(jwks.requests).toBe(start + 2);
+      advance(JWKS_STALE_GRACE_MS);
+      expect(await verifyAccessToken(await signToken({ key }))).toBeNull();
+    }
+  });
+
   it('an unknown kid during an outage is still refused', async () => {
     await warmUp();
     await jwks.stop();
