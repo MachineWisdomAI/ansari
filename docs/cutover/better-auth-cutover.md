@@ -19,8 +19,10 @@ export APP_DATABASE_URL='<app database URL>'   # typed into this ssh session onl
 The image carries `psql`, the cutover scripts, both migration journals and the operator
 scripts, at the commit the service was deployed from (step 6). Nothing here runs on a laptop:
 `railway shell` on a laptop injects the same Railway variables, so the scripts refuse to run
-anywhere without the image's marker (`/etc/ansari-auth-image`). `APP_DATABASE_URL` is never set
-on a service and never written to a file; it ends with the ssh session.
+anywhere without the image's marker (`/etc/ansari-auth-image`). A local `docker run` of the
+image would also have the marker (an accepted residual): these steps run **only** through
+`railway ssh` into the auth service. `APP_DATABASE_URL` is never set on a service and never
+written to a file; it ends with the ssh session.
 
 **`psql`.** Every `psql` that applies a migration is `psql -X -v ON_ERROR_STOP=1 --single-transaction -f <file>`:
 with both flags, a failed statement stops the run **and** rolls back everything before it. The

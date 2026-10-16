@@ -17,15 +17,15 @@ set +o history 2>/dev/null || true
 
 die() { echo "copy.sh: $*" >&2; exit 2; }
 
-[ -n "${APP_DATABASE_URL:-}" ] || die "APP_DATABASE_URL is unset"
-[ -n "${AUTH_DATABASE_URL:-}" ] || die "AUTH_DATABASE_URL is unset"
-[ "$APP_DATABASE_URL" != "$AUTH_DATABASE_URL" ] || die "APP_DATABASE_URL and AUTH_DATABASE_URL are the same database"
 # Only inside the auth image (apps/auth/Dockerfile bakes the marker), reached
 # by `railway ssh` into the auth service: never on an operator machine.
 # `railway shell` on a laptop injects the same Railway variables, so no
 # environment variable can prove where this runs.
 [ -f /etc/ansari-auth-image ] \
   || die "refusing to run outside the auth image (no /etc/ansari-auth-image; run it from 'railway ssh' into the auth service, never from a laptop)"
+[ -n "${APP_DATABASE_URL:-}" ] || die "APP_DATABASE_URL is unset"
+[ -n "${AUTH_DATABASE_URL:-}" ] || die "AUTH_DATABASE_URL is unset"
+[ "$APP_DATABASE_URL" != "$AUTH_DATABASE_URL" ] || die "APP_DATABASE_URL and AUTH_DATABASE_URL are the same database"
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 psql_app() { psql "$APP_DATABASE_URL" -X -q -v ON_ERROR_STOP=1 "$@"; }

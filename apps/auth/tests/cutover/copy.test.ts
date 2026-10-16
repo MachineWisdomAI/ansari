@@ -332,6 +332,42 @@ describe('the preflight', () => {
   });
 });
 
+describe('the preflight sees every collision 0011 would abort on', () => {
+  /** A query from the preflight, by the heading of its section. */
+  function preflightQuery(heading: string): string {
+    const sql = readFileSync(script('00-preflight-app.sql'), 'utf8');
+    const section = sql.slice(sql.indexOf(heading));
+    const start = section.indexOf('SELECT');
+    return section.slice(start, section.indexOf(';', start) + 1);
+  }
+
+  it('a system row and a user row sharing a normalized email are reported, as 0011 aborts on them', async () => {
+    await seed(app, [
+      { id: id(1), email: 'Leaderboard@Example.com' },
+      { id: id(2), email: 'leaderboard@example.com', hash: 'nologin', systemKey: 'leaderboard' },
+      { id: id(3), email: 'alone@example.com' },
+    ]);
+    const collisions = await app.query<{ ids: string[]; system_keys: string[] }>(
+      preflightQuery('== Collisions')
+    );
+    expect(collisions.rows).toHaveLength(1);
+    expect(collisions.rows[0]?.ids).toEqual([id(1), id(2)]);
+    expect(collisions.rows[0]?.system_keys).toEqual(['-', 'leaderboard']);
+    // The window migration does abort on exactly this pair.
+    const migration = readFileSync(resolve(APP_DRIZZLE, '0011_better_auth_window.sql'), 'utf8');
+    await expect(app.exec(migration.split('--> statement-breakpoint').join('\n'))).rejects.toThrow();
+  });
+
+  it('the case audit counts a system row whose email is not normalized', async () => {
+    await seed(app, [{ id: id(2), email: ' Leaderboard@example.com', hash: 'nologin', systemKey: 'leaderboard' }]);
+    const audit = await app.query<{ not_normalized: string; of_which_system: string }>(
+      preflightQuery('== Case audit')
+    );
+    expect(Number(audit.rows[0]?.not_normalized)).toBe(1);
+    expect(Number(audit.rows[0]?.of_which_system)).toBe(1);
+  });
+});
+
 describe('after the copy', () => {
   it('scenario 16: the approved admin list is granted; a legacy admin left off it is not', async () => {
     await seed(app, [
@@ -450,20 +486,35 @@ describe('copy.sh and complete-tombstones.sh refuse to run unguarded', () => {
     expect(dockerfile).toMatch(/RUN touch \/etc\/ansari-auth-image/);
   });
 
-  it.each(['copy.sh', 'complete-tombstones.sh'])('%s: a missing URL', (name) => {
-    const result = run(name, { APP_DATABASE_URL: 'postgresql://app/x' });
-    expect(result.status).toBe(2);
-    expect(result.stderr).toMatch(/AUTH_DATABASE_URL is unset/);
-  });
+  it.each(['copy.sh', 'complete-tombstones.sh'])(
+    '%s: location is checked FIRST: a laptop run with bad URLs fails on location',
+    (name) => {
+      for (const env of [
+        { APP_DATABASE_URL: 'postgresql://app/x' },
+        { APP_DATABASE_URL: 'postgresql://same/db', AUTH_DATABASE_URL: 'postgresql://same/db' },
+        {},
+      ]) {
+        const result = run(name, env);
+        expect(result.status).toBe(2);
+        expect(result.stderr).toMatch(/outside the auth image/);
+      }
+    }
+  );
 
-  it.each(['copy.sh', 'complete-tombstones.sh'])('%s: the same database twice', (name) => {
-    const result = run(name, {
-      APP_DATABASE_URL: 'postgresql://same/db',
-      AUTH_DATABASE_URL: 'postgresql://same/db',
-    });
-    expect(result.status).toBe(2);
-    expect(result.stderr).toMatch(/the same database/);
-  });
+  it.each(['copy.sh', 'complete-tombstones.sh'])(
+    '%s: after the location, the URLs: both set, and different (in that order)',
+    (name) => {
+      const source = readFileSync(script(name), 'utf8');
+      const marker = source.indexOf('[ -f /etc/ansari-auth-image ]');
+      const app = source.indexOf('[ -n "${APP_DATABASE_URL:-}" ] || die "APP_DATABASE_URL is unset"');
+      const auth = source.indexOf('[ -n "${AUTH_DATABASE_URL:-}" ] || die "AUTH_DATABASE_URL is unset"');
+      const differ = source.indexOf('[ "$APP_DATABASE_URL" != "$AUTH_DATABASE_URL" ] || die');
+      const firstPsql = source.search(/\bpsql[_ ]/);
+      expect(marker).toBeGreaterThan(0);
+      expect([marker, app, auth, differ].every((i, k, all) => i > 0 && (k === 0 || i > (all[k - 1] as number)))).toBe(true);
+      expect(differ).toBeLessThan(firstPsql);
+    }
+  );
 
   it('copy.sh prints counts and checksums only: no echo of a URL or row data', () => {
     const source = readFileSync(script('copy.sh'), 'utf8');

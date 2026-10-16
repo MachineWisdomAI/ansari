@@ -12,7 +12,10 @@ file says what each piece is.
 password hashes never transit an operator machine. `copy.sh` and `complete-tombstones.sh`
 refuse to run anywhere without the image's marker, `/etc/ansari-auth-image`: a laptop
 `railway shell` injects the same Railway variables, so no variable can prove where a script
-runs. `AUTH_DATABASE_URL` is the service's own `DATABASE_URL`; `APP_DATABASE_URL` is typed into
+runs. **Accepted residual:** a local `docker run` of the image also has the marker, so the
+scripts would run there; the rule that covers it is the runbook's, not the code's: these steps
+run only through `railway ssh` into the auth service. `AUTH_DATABASE_URL` is the service's own
+`DATABASE_URL`; `APP_DATABASE_URL` is typed into
 the ssh session only: never set on a Railway service, never added to `turbo.json`, never
 written to a file. The source scans exclude this directory by path, because it is the one
 place both databases are named.

@@ -5,15 +5,17 @@
 \set ON_ERROR_STOP on
 BEGIN TRANSACTION READ ONLY;
 
-\echo '== Case audit: non-system rows whose email is not lower(trim(email)) (normalized by the copy)'
-SELECT count(*) AS not_normalized
+\echo '== Case audit: rows whose email is not lower(trim(email)) (all rows: 0011 normalizes every one; the copy normalizes the non-system ones)'
+SELECT count(*) AS not_normalized,
+       count(*) FILTER (WHERE system_key IS NOT NULL) AS of_which_system
 FROM public.users
-WHERE system_key IS NULL AND email <> lower(trim(email));
+WHERE email <> lower(trim(email));
 
-\echo '== Collisions: non-system rows sharing a normalized email (the copy and 0011 ABORT on any; decide each before the window)'
-SELECT count(*) AS rows_in_group, array_agg(id ORDER BY created_at, id) AS ids
+\echo '== Collisions: rows sharing a normalized email, system rows included (0011 ABORTS on any; the copy on any among non-system rows; decide each before the window)'
+SELECT count(*) AS rows_in_group,
+       array_agg(id ORDER BY created_at, id) AS ids,
+       array_agg(coalesce(system_key, '-') ORDER BY created_at, id) AS system_keys
 FROM public.users
-WHERE system_key IS NULL
 GROUP BY lower(trim(email))
 HAVING count(*) > 1
 ORDER BY 1 DESC;
