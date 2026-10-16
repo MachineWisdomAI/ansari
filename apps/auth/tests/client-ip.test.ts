@@ -251,14 +251,25 @@ describe('verifyInternalCredential', () => {
   });
 });
 
-describe('ipBucket groups like better-auth', () => {
+describe('ipBucket groups exactly like better-auth', () => {
   it.each([
     ['203.0.113.5', '203.0.113.5'],
     ['::ffff:203.0.113.5', '203.0.113.5'],
-    ['2001:db8:1:2:3:4:5:6', '2001:0db8:0001:0002::/64'],
-    ['2001:db8:1:2::9', '2001:0db8:0001:0002::/64'],
-    ['2001:db8::1', '2001:0db8:0000:0000::/64'],
+    ['::FFFF:203.0.113.5', '203.0.113.5'],
+    ['::ffff:cb00:7105', '203.0.113.5'],
+    ['0:0:0:0:0:ffff:cb00:7105', '203.0.113.5'],
+    ['::ffff:cb00:7106', '203.0.113.6'],
+    ['2001:db8:1:2:3:4:5:6', '2001:0db8:0001:0002:0000:0000:0000:0000'],
+    ['2001:DB8:1:2::9', '2001:0db8:0001:0002:0000:0000:0000:0000'],
+    ['2001:db8::1', '2001:0db8:0000:0000:0000:0000:0000:0000'],
   ])('%s → %s', (ip, bucket) => {
     expect(ipBucket(ip)).toBe(bucket);
   });
+  it.each(['::ffff:cb00:7107', '::ffff:203.0.113.8', '2001:db8:9:9::1', '203.0.113.9'])(
+    "%s lands in the same bucket better-auth's router computes",
+    async (ip) => {
+      await failedSignIn(service.publicUrl, ip);
+      expect(await rateLimitKeys(service)).toContain(`${ipBucket(ip)}|/sign-in/email`);
+    }
+  );
 });

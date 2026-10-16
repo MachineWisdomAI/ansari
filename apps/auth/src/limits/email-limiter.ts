@@ -2,8 +2,10 @@
 // `extensions`), on `auth.rate_limit` so every instance shares one budget.
 //
 // Both modes:
-//   - `/request-password-reset`: per client IP and per normalized email, every
-//     request counted, an unknown email included, the same 429 for both.
+//   - `/request-password-reset`: a per-IP burst, a per-IP cap and a per-email
+//     cap, every request counted against all three (the router has no rule for
+//     this path, so nothing refuses a request before it is counted), an unknown
+//     email included, the same 429 for both.
 // `email` mode only (AUTH_RATE_LIMIT_MODE, plan P-3; the router then has no
 // per-IP sign-in or sign-up rule):
 //   - `/sign-in/email`: per email, FAILED attempts only. The fifth failure in a
@@ -47,6 +49,7 @@ export function emailHash(email: string): string {
 
 export const emailKey = (email: string, path: string) => `email:${emailHash(email)}|${path}`;
 export const ipKey = (ip: string, path: string) => `ip:${ipBucket(ip)}|${path}`;
+export const ipBurstKey = (ip: string, path: string) => `ip-burst:${ipBucket(ip)}|${path}`;
 export const globalKey = (path: string) => `global|${path}`;
 
 export type PerimeterOptions = {
@@ -97,13 +100,16 @@ export function createPerimeterHooks(options: PerimeterOptions): AuthExtensions 
     const ip = ipOf(ctx);
     const email = emailOf(ctx);
     // Count against both before deciding, so each refusal still costs budget.
-    const results = await Promise.all([
+    const [burst, perIp, perEmail] = await Promise.all([
+      ip ? consumeWindow(db, ipBurstKey(ip, RESET_REQUEST), limits.RESET_REQUEST_BURST, at) : null,
       ip ? consumeWindow(db, ipKey(ip, RESET_REQUEST), limits.RESET_REQUEST_PER_IP, at) : null,
       email
         ? consumeWindow(db, emailKey(email, RESET_REQUEST), limits.RESET_REQUEST_PER_EMAIL, at)
         : null,
     ]);
-    const [perIp, perEmail] = results;
+    if (burst && burst.count > limits.RESET_REQUEST_BURST.max) {
+      throw tooManyRequests(burst.retryAfter);
+    }
     if (perIp && perIp.count > limits.RESET_REQUEST_PER_IP.max) {
       throw tooManyRequests(perIp.retryAfter);
     }

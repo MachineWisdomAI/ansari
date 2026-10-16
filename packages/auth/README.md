@@ -37,7 +37,7 @@ Every number lives in `src/limits.ts`. Two writers share `auth.rate_limit`:
 
 - better-auth's router, with keys shaped `<ip>|<path>`
 - apps/auth's own limiters, through `src/rate-limit-store.ts`, with prefixed keys
-  (`email:`, `ip:`, `global|`, `walk:`, `alert|`) and fixed windows
+  (`email:`, `ip:`, `ip-burst:`, `global|`, `walk:`, `alert|`) and fixed windows
 
 **better-auth deletes every row older than the longest window it knows about**
 (`deleteExpiredRows` in `dist/api/rate-limiter/index.mjs`). The apps/auth limiters are not

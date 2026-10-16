@@ -21,7 +21,12 @@ export const SIGN_IN: LimitRule = { window: MINUTE, max: 5 };
 /** Sign-up, per client IP, every request (issue decision; guests are sign-ups). */
 export const SIGN_UP: LimitRule = { window: MINUTE, max: 3 };
 
-/** Reset request on better-auth's router, per client IP: its built-in burst cap, kept. */
+/**
+ * Reset request burst, per client IP: better-auth's built-in rule, kept, but
+ * enforced by apps/auth's limiter instead of the router. The router rejects
+ * before any hook runs, so a request it refused would never count toward the
+ * per-IP and per-email reset budgets, which must count every request.
+ */
 export const RESET_REQUEST_BURST: LimitRule = { window: MINUTE, max: 3 };
 
 /** Reset request, per client IP, every request (apps/auth limiter). */
@@ -82,10 +87,12 @@ export const LONGEST_WINDOW = Math.max(
  * stripped). Every path is listed explicitly, so none falls back to
  * better-auth's built-in special rules (sign-in/sign-up are 3 per 10 s there).
  */
-export const ROUTER_RULES: Readonly<Record<string, LimitRule>> = {
+export const ROUTER_RULES: Readonly<Record<string, LimitRule | false>> = {
   '/sign-in/email': SIGN_IN,
   '/sign-up/email': SIGN_UP,
-  '/request-password-reset': RESET_REQUEST_BURST,
+  // `false`, not absent: absent would fall back to better-auth's built-in
+  // 3/60 s rule on the router. apps/auth enforces RESET_REQUEST_BURST itself.
+  '/request-password-reset': false,
   '/reset-password': RESET_CONSUME,
   '/token': TOKEN_EXCHANGE,
   '/get-session': TOKEN_EXCHANGE,

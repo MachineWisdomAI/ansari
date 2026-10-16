@@ -7,7 +7,7 @@ import * as Sentry from '@sentry/node';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { LIST_WALK_MESSAGE, type ListWalkAlert } from '../src/alerts';
-import { emailHash, emailKey, ipKey } from '../src/limits/email-limiter';
+import { emailHash, emailKey, ipBurstKey, ipKey } from '../src/limits/email-limiter';
 import {
   rateLimitRow,
   send,
@@ -90,6 +90,39 @@ describe.each(['ip', 'email'] as const)('reset requests (%s mode)', (mode) => {
     );
     advance(limits.RESET_REQUEST_PER_IP.window);
     expect((await requestReset(service, 'walker-after@example.com', ip)).status).not.toBe(429);
+  });
+
+  it(`a request refused by the ${limits.RESET_REQUEST_BURST.max}/min burst still counts toward the IP cap`, async () => {
+    advance(3600);
+    const ip = '203.0.113.160';
+    const total = limits.RESET_REQUEST_PER_IP.max;
+    const statuses: number[] = [];
+    for (let i = 0; i < total; i++) {
+      statuses.push((await requestReset(service, `burst-${i}@example.com`, ip)).status);
+    }
+    expect(statuses.filter((s) => s === 429)).toHaveLength(total - limits.RESET_REQUEST_BURST.max);
+    expect((await rateLimitRow(service, ipKey(ip, '/request-password-reset')))?.count).toBe(total);
+    expect((await rateLimitRow(service, ipBurstKey(ip, '/request-password-reset')))?.count).toBe(total);
+    advance(61); // the burst window is over; the 15-minute cap is not
+    expect((await requestReset(service, 'burst-after@example.com', ip)).status).toBe(429);
+  });
+
+  it('a request refused by the burst still counts toward the email cap', async () => {
+    advance(3600);
+    const email = 'burst-victim@example.com';
+    const ip = '203.0.113.161';
+    for (let i = 0; i < limits.RESET_REQUEST_BURST.max; i++) {
+      await requestReset(service, `filler-${i}@example.com`, ip);
+    }
+    expect((await requestReset(service, email, ip)).status).toBe(429); // burst
+    for (let i = 1; i < limits.RESET_REQUEST_PER_EMAIL.max; i++) {
+      expect((await requestReset(service, email, `203.0.113.${170 + i}`)).status).not.toBe(429);
+    }
+    expect((await requestReset(service, email, '203.0.113.179')).status).toBe(429);
+  });
+
+  it("better-auth's router has no rule of its own for the path", () => {
+    expect(service.auth.options.rateLimit?.customRules?.['/request-password-reset']).toBe(false);
   });
 
   it('no key holds a raw email', async () => {

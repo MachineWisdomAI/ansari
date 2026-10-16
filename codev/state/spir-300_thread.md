@@ -234,3 +234,8 @@
   - Phase 7: the JWKS fetch sends `X-Ansari-Internal-Auth` through jose `createRemoteJWKSet`'s `headers` option, and a test proves the fetch is refused without it.
   - Phase 8: the Origin the layer sends is apps/api's OWN origin. It goes in `trustedOrigins` ONLY, never in the CORS allowlist (`CORS_ORIGIN`). A test pins that a browser request from that origin gets no CORS allow headers.
   - (a), done now: the pruning fact is in packages/auth/README.md ("Rate limits share one table, and better-auth prunes it").
+- Main (07:07Z, via security) APPROVED phase 4's lockfile and apps/auth/turbo.json. frozen-lockfile was verified on a clean checkout. Standing rule: use frozen installs. A non-frozen install re-keys unrelated better-auth snapshots without changing any version, and that churn is committed alone, never inside a phase commit.
+- Phase 4 consult iter1: Codex REQUEST_CHANGES with two issues, both accepted and fixed. Gemini's report was cut off before its verdict line and raises no issue. Fixes:
+  - (1) Reset requests: the router's 3/60 s burst refused requests BEFORE the hook, so those requests never counted toward the IP and email caps. The router rule is now `false`, and apps/auth enforces the burst itself on an `ip-burst:` key, counting every request against all three windows.
+  - (2) `ipBucket` is a faithful port of better-auth's `normalizeIP` (hex IPv4-mapped forms, eight-group /64). A parity test checks it against the router's own keys.
+  Both are mutation-checked. Response file: codev/projects/300-better-auth-migration/300-phase_4-iter1-rebuttals.md.

@@ -5,7 +5,7 @@
 //
 // Rows written here use `last_request` as the START of the current window, so a
 // window is anchored at its first request and never slides. Their keys carry a
-// prefix (`email:`, `ip:`, `global|`, `walk:`, `alert|`) that better-auth's own
+// prefix (`email:`, `ip:`, `ip-burst:`, `global|`, `walk:`, `alert|`) that better-auth's own
 // keys (`<ip>|<path>`) never start with.
 import { and, gt, like, sql } from 'drizzle-orm';
 
