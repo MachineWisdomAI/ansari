@@ -218,7 +218,7 @@ After the cutover:
     - Two kinds of request close that window: admin authorization, which asks `apps/auth` (item 8),
       and any request whose `sub` has no `public.users` row or is tombstoned (deletion).
 12. **Sessions** last 30 days and are refreshed daily (`expiresIn` 30d, `updateAge` 1d), as the
-    issue decided. Better Auth 1.7.7's own defaults are 7 days (`internal-adapter.mjs:23`) and 1 day
+    issue decided and the owner confirmed on 2026-10-16. Better Auth 1.7.7's own defaults are 7 days (`internal-adapter.mjs:23`) and 1 day
     (`create-context.mjs:147`). The session is what keeps a user signed in: the client exchanges it
     for a fresh JWT whenever the JWT expires, and each exchange after `updateAge` slides the
     session's expiry forward. A user is asked to sign in again only after 30 days without using the
@@ -334,7 +334,9 @@ fixes the gap this spec found: `apps/auth` has no Dockerfile and no Railway serv
 project adds:
 
 - A Dockerfile and a Railway service for `apps/auth`. Both are main-architect hunks.
-- **Its own public domain**, chosen by the owner (Open Question I-5).
+- **Its own public domain** (owner, I-5): **`auth.askansari.ai`** in production and
+  **`auth-staging.askansari.ai`** in staging. Each environment's JWT `iss` is that origin, and the
+  edge check covers both domains.
 - Production config through `@ansari/auth` `getEnv()`, with any new variables added to `turbo.json`
   `globalEnv` by the four-way rule.
 
@@ -822,7 +824,8 @@ rollback deadline passing.
 **JWT issuance and verification**
 
 - [ ] `apps/auth` issues EdDSA JWTs with:
-  - an explicit `iss` (the `apps/auth` origin) and an explicit `aud` (the `apps/api` audience)
+  - an explicit `iss` (the `apps/auth` origin: `https://auth.askansari.ai`, or
+    `https://auth-staging.askansari.ai` in staging) and an explicit `aud` (the `apps/api` audience)
   - a lifetime of **15 minutes**, Better Auth's default (owner), pinned by a test
   - a payload restricted by `definePayload` to `sub` (user UUID) and the session id
 
@@ -1190,8 +1193,10 @@ This was the first draft's proposal.
   released build versions? This affects only the follow-up issue.
 - **I-4: Cutover timing.** Who is the operator, and what is the window? This is needed for the
   runbook.
-- **I-5: `apps/auth` domain** (owner and main architect), for example `auth.askansari.ai`. Should
-  `apps/api` reach it over that domain or over Railway's private network?
+- **I-5 (resolved, owner, 2026-10-16):** `auth.askansari.ai` (production) and
+  `auth-staging.askansari.ai` (staging). `apps/api` reaches the profile, role and delete endpoints
+  over Railway's private network (security). The transport of the layer's sign-in hop, which
+  forwards the client IP with the internal credential, is chosen in the plan.
 - **I-6: `apps/frontend` change and release timing** (app architect).
   - The web build ships in the window.
   - If a native `apps/frontend` build pointed at `apps/auth` is released to the stores, a snapshot
