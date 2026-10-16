@@ -1,0 +1,139 @@
+import * as Sentry from '@sentry/nextjs';
+import { and, eq, isNull, sql } from 'drizzle-orm';
+import { db } from '@/lib/db/index';
+import { findUserById, isUniqueViolation } from '@/lib/db/users';
+import { deletedUsers, users, type User } from '@/db/schema';
+import { isSystemAddress } from '@/lib/auth/system-accounts';
+import {
+  AuthServiceUnavailableError,
+  deleteAuthUser,
+  getAuthProfile,
+} from '@/lib/auth-service/client';
+import { safeErrorMeta } from '@/lib/log';
+
+/**
+ * A verified JWT's `sub` → the user's `public.users` row (spec 300, "Two
+ * databases" rules 2, 3 and 5), in this order:
+ *
+ * 1. A tombstone: the account was deleted. Retry the auth-side delete if it is
+ *    still owed, then refuse. A tombstoned id is never re-created.
+ * 2. A row: the user.
+ * 3. No row: the user signed up directly at apps/auth (or a layer insert
+ *    failed). Fetch the profile over the internal endpoint and insert the row
+ *    with the same id, `ON CONFLICT (id) DO NOTHING`, so concurrent first
+ *    requests create one row. An email on the reserved system domain, or one
+ *    another row already holds (a system row included), is refused with no row
+ *    written, an ids-only log and a Sentry alert.
+ * 4. apps/auth does not know the id: refuse.
+ *
+ * `unavailable` means apps/auth could not answer step 3; callers fail closed.
+ */
+export type ResolveResult =
+  | { kind: 'user'; user: User }
+  | { kind: 'refused' }
+  | { kind: 'unavailable' };
+
+const REFUSED: ResolveResult = { kind: 'refused' };
+
+type RefusalReason = 'reserved-domain' | 'system-email' | 'email-conflict';
+
+/** Ids only: the email that collided is personal data and never logged. */
+function alertRefusal(reason: RefusalReason, sub: string, holderId: string | null): ResolveResult {
+  const ids = { sub, holderId };
+  console.warn(`app row refused (${reason})`, ids);
+  Sentry.captureMessage(`auth user has no app row: ${reason}`, {
+    level: 'error',
+    tags: { reason },
+    extra: ids,
+  });
+  return REFUSED;
+}
+
+/**
+ * Finish a delete whose auth half failed (rule 5). Best effort: the request is
+ * refused either way, and the next request carrying this `sub`, a retry of
+ * `DELETE me`, or the operator's completion script tries again.
+ */
+async function completePendingDelete(sub: string, jwt: string): Promise<void> {
+  try {
+    await deleteAuthUser(sub, jwt);
+    await db
+      .update(deletedUsers)
+      .set({ authDeletedAt: new Date() })
+      .where(and(eq(deletedUsers.id, sub), isNull(deletedUsers.authDeletedAt)));
+  } catch (err) {
+    const status = err instanceof AuthServiceUnavailableError ? err.status : null;
+    console.warn('pending auth delete not completed', { sub, status, ...safeErrorMeta(err) });
+  }
+}
+
+/** Who holds `email` in `public.users`, if anyone. */
+async function emailHolder(email: string) {
+  const rows = await db
+    .select({ id: users.id, systemKey: users.systemKey })
+    .from(users)
+    .where(eq(users.email, email))
+    .limit(1);
+  return rows[0];
+}
+
+/**
+ * The refusal for an email that is taken, or null when it is free (or held by
+ * this very id, which a concurrent first request has just inserted).
+ */
+async function refusalForHolder(email: string, sub: string): Promise<ResolveResult | null> {
+  const holder = await emailHolder(email);
+  if (!holder || holder.id === sub) return null;
+  return alertRefusal(holder.systemKey ? 'system-email' : 'email-conflict', sub, holder.id);
+}
+
+export async function resolveUser(sub: string, jwt: string): Promise<ResolveResult> {
+  const [tombstone] = await db
+    .select()
+    .from(deletedUsers)
+    .where(eq(deletedUsers.id, sub))
+    .limit(1);
+  if (tombstone) {
+    if (!tombstone.authDeletedAt) await completePendingDelete(sub, jwt);
+    return REFUSED;
+  }
+
+  const existing = await findUserById(sub);
+  if (existing) return { kind: 'user', user: existing };
+
+  let profile;
+  try {
+    profile = await getAuthProfile(sub);
+  } catch (err) {
+    if (err instanceof AuthServiceUnavailableError) {
+      console.warn('profile fetch failed', { sub, status: err.status });
+      return { kind: 'unavailable' };
+    }
+    throw err;
+  }
+  if (!profile) return REFUSED;
+
+  const email = profile.email.trim().toLowerCase();
+  if (isSystemAddress(email)) return alertRefusal('reserved-domain', sub, null);
+  const taken = await refusalForHolder(email, sub);
+  if (taken) return taken;
+
+  // `password_hash` stays NULL: the credential lives in the auth database
+  // (0011 drops its NOT NULL). The tombstone check in the same statement keeps
+  // a concurrent delete from being undone.
+  try {
+    await db.execute(sql`
+      INSERT INTO ${users} (id, email, first_name, last_name, registered_via)
+      SELECT ${sub}, ${email}, ${profile.first_name}, ${profile.last_name}, ${profile.registered_via}
+      WHERE NOT EXISTS (SELECT 1 FROM ${deletedUsers} WHERE id = ${sub})
+      ON CONFLICT (id) DO NOTHING
+    `);
+  } catch (err) {
+    if (!isUniqueViolation(err)) throw err;
+    // The email was taken between the check and the insert.
+    return (await refusalForHolder(email, sub)) ?? alertRefusal('email-conflict', sub, null);
+  }
+
+  const created = await findUserById(sub);
+  return created ? { kind: 'user', user: created } : REFUSED;
+}

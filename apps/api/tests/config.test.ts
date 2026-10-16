@@ -257,3 +257,72 @@ describe('primary backend switch (issue #95)', () => {
     expect(config.inkling.baseUrl).toBe('http://localhost:8000/v1/chat/completions');
   });
 });
+
+// Spec 300 phase 7: apps/auth's coordinates. Optional so the legacy path and
+// its tests run without them; required in production; `config.authService`
+// refuses to hand out a partial set.
+describe('apps/auth config', () => {
+  const AUTH_ENV: Record<string, string> = {
+    AUTH_INTERNAL_URL: 'http://auth.railway.internal:3101',
+    AUTH_JWT_ISSUER: 'https://auth.askansari.ai',
+    AUTH_JWT_AUDIENCE: 'ansari-api',
+    AUTH_INTERNAL_SECRET: 's'.repeat(32),
+  };
+  const setAuthEnv = (overrides: Record<string, string | undefined> = {}) => {
+    for (const [k, v] of Object.entries({ ...AUTH_ENV, ...overrides })) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    resetEnvCache();
+  };
+
+  it('exposes the four values through config.authService', () => {
+    setAuthEnv();
+    expect(config.authService).toEqual({
+      internalUrl: AUTH_ENV.AUTH_INTERNAL_URL,
+      jwtIssuer: AUTH_ENV.AUTH_JWT_ISSUER,
+      jwtAudience: AUTH_ENV.AUTH_JWT_AUDIENCE,
+      internalSecret: AUTH_ENV.AUTH_INTERNAL_SECRET,
+    });
+  });
+
+  it('outside production the env parses without them, and authService names what is missing', () => {
+    setAuthEnv({ AUTH_INTERNAL_URL: undefined, AUTH_INTERNAL_SECRET: undefined });
+    expect(() => getEnv()).not.toThrow();
+    expect(() => config.authService).toThrow(
+      'apps/auth is not configured: set AUTH_INTERNAL_URL, AUTH_INTERNAL_SECRET.'
+    );
+  });
+
+  it('in production each one is required', () => {
+    for (const name of Object.keys(AUTH_ENV)) {
+      setAuthEnv({ [name]: undefined });
+      process.env.NODE_ENV = 'production';
+      resetEnvCache();
+      expect(() => getEnv()).toThrow(`${name} is required in production`);
+    }
+    setAuthEnv();
+    process.env.NODE_ENV = 'production';
+    resetEnvCache();
+    expect(() => getEnv()).not.toThrow();
+  });
+
+  it('rejects a short AUTH_INTERNAL_SECRET and a non-URL issuer or internal URL', () => {
+    setAuthEnv({ AUTH_INTERNAL_SECRET: 's'.repeat(31) });
+    expect(() => getEnv()).toThrow(/AUTH_INTERNAL_SECRET must be at least 32 characters/);
+    setAuthEnv({ AUTH_JWT_ISSUER: 'auth.askansari.ai' });
+    expect(() => getEnv()).toThrow(/AUTH_JWT_ISSUER must be a valid URL/);
+    setAuthEnv({ AUTH_INTERNAL_URL: 'auth.railway.internal' });
+    expect(() => getEnv()).toThrow(/AUTH_INTERNAL_URL must be a valid URL/);
+  });
+
+  it('never puts a value in the error', () => {
+    setAuthEnv({ AUTH_INTERNAL_SECRET: 'short-secret-value' });
+    expect(() => getEnv()).toThrow();
+    try {
+      getEnv();
+    } catch (err) {
+      expect(String(err)).not.toContain('short-secret-value');
+    }
+  });
+});

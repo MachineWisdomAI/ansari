@@ -1,5 +1,12 @@
 import { z } from 'zod';
 
+const AUTH_SERVICE_VARS = [
+  'AUTH_INTERNAL_URL',
+  'AUTH_JWT_ISSUER',
+  'AUTH_JWT_AUDIENCE',
+  'AUTH_INTERNAL_SECRET',
+] as const;
+
 const envSchema = z.object({
   // Database
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
@@ -16,6 +23,19 @@ const envSchema = z.object({
     .int('REFRESH_TOKEN_EXPIRY_HOURS must be an integer')
     .positive('REFRESH_TOKEN_EXPIRY_HOURS must be greater than 0')
     .default(2160), // 90 days
+
+  // apps/auth (spec 300). apps/api verifies apps/auth's JWTs against its JWKS
+  // and calls its internal endpoints, both over the private-network listener
+  // at AUTH_INTERNAL_URL with the shared AUTH_INTERNAL_SECRET. Optional here so
+  // the legacy path and its tests run without them; required in production by
+  // the refinement below, and checked again by `config.authService`.
+  AUTH_INTERNAL_URL: z.string().url('AUTH_INTERNAL_URL must be a valid URL').optional(),
+  AUTH_JWT_ISSUER: z.string().url('AUTH_JWT_ISSUER must be a valid URL').optional(),
+  AUTH_JWT_AUDIENCE: z.string().min(1, 'AUTH_JWT_AUDIENCE must not be empty').optional(),
+  AUTH_INTERNAL_SECRET: z
+    .string()
+    .min(32, 'AUTH_INTERNAL_SECRET must be at least 32 characters')
+    .optional(),
 
   // AI - Facilitator (Gemini)
   // Either Vertex AI (preferred) or the public Gemini API must be configured.
@@ -120,6 +140,17 @@ const envSchema = z.object({
   // Optional
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
 }).superRefine((env, ctx) => {
+  if (env.NODE_ENV === 'production') {
+    for (const name of AUTH_SERVICE_VARS) {
+      if (!env[name]) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [name],
+          message: `${name} is required in production`,
+        });
+      }
+    }
+  }
   // Fail fast at first config access, not at first chat request: an inkling
   // primary with no credential would otherwise serve a server whose every
   // completion fails.
@@ -175,6 +206,25 @@ export const config = {
       jwtSecret: getEnv().JWT_SECRET,
       accessTokenExpiryHours: getEnv().ACCESS_TOKEN_EXPIRY_HOURS,
       refreshTokenExpiryHours: getEnv().REFRESH_TOKEN_EXPIRY_HOURS,
+    };
+  },
+
+  /**
+   * apps/auth, as apps/api reaches it (spec 300): the internal listener's
+   * origin, the JWT issuer and audience it pins, and the internal credential.
+   * Throws, naming only the missing variables, when any is unset.
+   */
+  get authService() {
+    const env = getEnv();
+    const missing = AUTH_SERVICE_VARS.filter((name) => !env[name]);
+    if (missing.length > 0) {
+      throw new Error(`apps/auth is not configured: set ${missing.join(', ')}.`);
+    }
+    return {
+      internalUrl: env.AUTH_INTERNAL_URL as string,
+      jwtIssuer: env.AUTH_JWT_ISSUER as string,
+      jwtAudience: env.AUTH_JWT_AUDIENCE as string,
+      internalSecret: env.AUTH_INTERNAL_SECRET as string,
     };
   },
 

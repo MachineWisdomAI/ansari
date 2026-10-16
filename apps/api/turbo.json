@@ -1,0 +1,22 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    // The spec 300 auth suites (tests/auth/) boot the real apps/auth in
+    // process, over a pglite database built from packages/auth's journal, and
+    // reuse both packages' test helpers. None of that is in this package's
+    // task hash by default (globalDependencies carries packages/auth/src only),
+    // so without these inputs a warm cache would replay apps/api's tests after
+    // apps/auth, its schema or the helpers changed.
+    "test": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env.ci",
+        "$TURBO_ROOT$/apps/auth/src/**",
+        "$TURBO_ROOT$/apps/auth/tests/helpers/**",
+        "$TURBO_ROOT$/packages/auth/drizzle/**",
+        "$TURBO_ROOT$/packages/auth/tests/helpers/**"
+      ]
+    }
+  }
+}
