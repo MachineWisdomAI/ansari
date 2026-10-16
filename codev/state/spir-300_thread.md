@@ -271,4 +271,4 @@
 - pglite is Postgres 18 here: NOT NULL shows up in pg_constraint as `users_password_hash_not_null`; the shape test excludes that one name.
 - Removal-fails demonstration (scratchpad `mutate6.py`): 20 of 20 caught. The first run missed "account not guarded" (the scaffold FK forces a user row beside any account row, so the user guard caught it); the per-table test now drops the scaffold FKs so each guard is proven alone, and session was added to the list.
 - MAIN hunk: migration numbering (0009 to 0011 + journal entries).
-- Checks: `npm run build` green; `npm test` green: @ansari/auth 162 + 1 skip, ansari-auth 151, api 950 + 3, frontend 624. api typecheck green.
+- Checks: `npm run build` green; `npm test` green: @ansari/auth 162 + 1 skip, ansari-auth 151, api 950 + 3, frontend 624. api typecheck green. The first `porch done` failed: porch runs the suite with no env, and the legacy-helpers test reached `config` through issueTokenPair. It now mocks `@/lib/config` as issue-token-pair.test.ts does.

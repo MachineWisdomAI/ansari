@@ -23,6 +23,17 @@ vi.mock('@/lib/db/index', () => ({
   closeDb: async () => {},
 }));
 
+// issueTokenPair reads the JWT settings; the suite must pass with no env set.
+vi.mock('@/lib/config', () => ({
+  config: {
+    auth: {
+      jwtSecret: 'window-migration-secret-at-least-32-characters',
+      accessTokenExpiryHours: 2,
+      refreshTokenExpiryHours: 2160,
+    },
+  },
+}));
+
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import * as schema from '@/db/schema';
