@@ -34,8 +34,8 @@ edge and proxy headers as staging).
 | `api-staging.askansari.ai` | phase 13 | | | | |
 | `auth-staging.askansari.ai` | phase 13 | | | | |
 | staging `*.up.railway.app` (backend, auth) | phase 13 | | | | |
-| `api.askansari.ai` | window step 14 | | | | passive check before the merge: |
-| `api-35.ansari.chat` | window step 14 | | | | passive check before the merge: |
-| `auth.askansari.ai` | window step 15 | | | | passive check before the merge: |
+| `api.askansari.ai` | window step 14 | | | | passive check before the merge (2026-10-17): NO CNAME to Railway; A 104.21.29.181, 172.67.149.151, AAAA 2606:4700:3033::6815:1db5, 2606:4700:3031::ac43:9597 (Cloudflare); `curl -sI`: `server: cloudflare`, `cf-ray`, then `x-railway-edge: sin1`. Cloudflare proxies in front of Railway's edge, so the `X-Real-IP` Railway stamps is a Cloudflare egress address, not the client: **fails distinctness unless resolved** (escalated to security) |
+| `api-35.ansari.chat` | window step 14 | | | | passive check before the merge (2026-10-17): CNAME `vyex12qb.up.railway.app.` → 69.46.46.35; `curl -sI`: `server: railway-hikari`, `x-railway-edge: sjc1`, no proxy headers; same edge as staging |
+| `auth.askansari.ai` | window step 15 | | | | passive check before the merge (2026-10-17): no DNS record yet (attached in window step 15); it must not be Cloudflare-proxied |
 
 **Verdict for production `AUTH_RATE_LIMIT_MODE`:** _(recorded by phase 13)_
