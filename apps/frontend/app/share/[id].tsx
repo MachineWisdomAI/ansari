@@ -60,28 +60,33 @@ export default function SharedThreadScreen() {
   // Held here rather than in the query cache: the cache is the viewer's,
   // and is wiped (in-flight requests cancelled) whenever their session is
   // restored or changes — which can happen while a share is loading.
+  // Each load is keyed by the share and the attempt, so a retry shows the
+  // loading state again rather than the failure it is replacing.
+  const [attempt, setAttempt] = useState(0);
+  const loadKey = `${shareId}#${attempt}`;
   const [result, setResult] = useState<
-    | { id: string; state: 'loaded'; data: ConversationDetail }
-    | { id: string; state: 'missing' | 'failed' }
+    | { key: string; state: 'loaded'; data: ConversationDetail }
+    | { key: string; state: 'missing' | 'failed' }
     | null
   >(null);
   useEffect(() => {
     let active = true;
+    const key = `${shareId}#${attempt}`;
     loadSharedThread(shareId).then(
-      (data) => active && setResult({ id: shareId, state: 'loaded', data }),
+      (data) => active && setResult({ key, state: 'loaded', data }),
       (error: unknown) =>
         active &&
         setResult({
-          id: shareId,
+          key,
           state: error instanceof ShareNotFoundError ? 'missing' : 'failed',
         }),
     );
     return () => {
       active = false;
     };
-  }, [shareId]);
+  }, [shareId, attempt]);
   const share =
-    result && result.id === shareId ? result : ({ state: 'loading' } as const);
+    result && result.key === loadKey ? result : ({ state: 'loading' } as const);
 
   // The sources apparatus, exactly as the thread opens it.
   const [sources, setSources] = useState<SourceRequest | null>(null);
@@ -162,6 +167,26 @@ export default function SharedThreadScreen() {
               ? 'This shared conversation doesn’t exist, or is no longer shared.'
               : 'This shared conversation didn’t load. Check your connection.'}
           </Text>
+          {!notFound && (
+            <PressableScale
+              onPress={() => setAttempt((n) => n + 1)}
+              accessibilityRole="button"
+              accessibilityLabel="Try loading this shared conversation again"
+              testID="share-retry"
+              style={(state) => [
+                styles.retryButton,
+                {
+                  borderColor: colors.border,
+                  ...rounded(RADIUS.pill),
+                  opacity: state.pressed ? 0.72 : isHovered(state) ? 0.85 : 1,
+                },
+              ]}
+            >
+              <Text style={[styles.continueText, { color: colors.foreground }]}>
+                Try again
+              </Text>
+            </PressableScale>
+          )}
           {continueButton}
         </View>
       ) : (
@@ -216,6 +241,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 22,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  retryButton: {
+    minHeight: 44,
+    paddingHorizontal: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
   },
   continueText: { fontSize: 14, fontFamily: fonts.bodySemiBold },
 });

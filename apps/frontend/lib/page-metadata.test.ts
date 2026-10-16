@@ -16,6 +16,7 @@ const TITLE_SOURCES = [
   'app/terms.tsx',
   'app/privacy.tsx',
   'app/chat/[id].tsx',
+  'app/share/[id].tsx',
   // Signing in is a sheet over the page now (`AuthSheet`), not a page,
   // so it leaves the tab's title alone and has none of its own.
 ];
@@ -46,6 +47,8 @@ describe('page titles', () => {
     const titles = TITLE_SOURCES.flatMap((f) => titleBlocks(read(f))).join('\n');
     expect(titles).toContain('Ansari · Ask about the Qur&apos;an and Sunnah');
     expect(titles).toContain('${threadTitle} · Ansari');
+    expect(titles).toContain('${title} · Ansari');
+    expect(titles).toContain('Shared conversation · Ansari');
     expect(titles).toContain('Terms of Service · Ansari');
     expect(titles).toContain('Privacy Policy · Ansari');
   });

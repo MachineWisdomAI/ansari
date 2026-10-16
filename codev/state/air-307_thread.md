@@ -19,3 +19,9 @@
 - Fixed (claude): the no-Authorization test now asserts 2 calls, so it can't pass vacuously.
 - Investigated (claude): could a native cold start from a link mint a guest before the route says `/share`? In the dev client, yes: it boots at `/` and forwards the link later, and a `register` showed on the proxy. In a release build, no. expo-router 57 builds the first state from the launch URL, synchronously on iOS via `Linking.getLinkingURL()`; on Android the navigator renders nothing until `getInitialURL` resolves. So the root layout's first path is already `/share/<id>`. I prototyped a launch-URL check, saw it was redundant, and backed it out. Not verified on a release build.
 - Not taken: `noindex`/OG meta for a public page (a product call the issue doesn't make). `accessibilityRole="link"` without an href, and `router.replace` making Back skip the share, are intended.
+
+## 2026-10-16 — architect review (2 required)
+
+- `app/share/[id].tsx` added to `TITLE_SOURCES` in `lib/page-metadata.test.ts`, plus its two title strings in the middle-dot assertion. Planting an em-dash in the share title fails both scans.
+- The "didn't load" state has a **Try again** (an attempt counter in the fetch effect's deps; loading shows again on retry). Not offered on not-found. Verified on a web build aimed at a dead :3000: failed state, then the proxy came up, Try again, and the thread loaded with sources and no auth.
+- Took the cheap layering follow-up: share schemas moved to `lib/api/wire-schemas.ts`, and `decodeSharedThread` to `lib/api/decode.ts`. Left `ApiError` and the barrel export alone.
