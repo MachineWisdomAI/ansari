@@ -35,6 +35,9 @@ export type ResolveResult =
 
 const REFUSED: ResolveResult = { kind: 'refused' };
 
+/** Rolls the first-use insert back when a delete committed while it ran. */
+class TombstonedDuringInsert extends Error {}
+
 type RefusalReason = 'reserved-domain' | 'system-email' | 'email-conflict';
 
 /** Ids only: the email that collided is personal data and never logged. */
@@ -119,16 +122,30 @@ export async function resolveUser(sub: string, jwt: string): Promise<ResolveResu
   if (taken) return taken;
 
   // `password_hash` stays NULL: the credential lives in the auth database
-  // (0011 drops its NOT NULL). The tombstone check in the same statement keeps
-  // a concurrent delete from being undone.
+  // (0011 drops its NOT NULL).
+  //
+  // A concurrent `DELETE me` must not be undone. A tombstone check inside the
+  // INSERT is not enough under READ COMMITTED: the INSERT can take its
+  // snapshot before the delete commits, wait on the row the delete removes,
+  // then insert after the tombstone is in. So the insert and a tombstone read
+  // share one transaction; the read is a new statement, sees any tombstone
+  // committed by then, and rolls the insert back.
   try {
-    await db.execute(sql`
-      INSERT INTO ${users} (id, email, first_name, last_name, registered_via)
-      SELECT ${sub}, ${email}, ${profile.first_name}, ${profile.last_name}, ${profile.registered_via}
-      WHERE NOT EXISTS (SELECT 1 FROM ${deletedUsers} WHERE id = ${sub})
-      ON CONFLICT (id) DO NOTHING
-    `);
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`
+        INSERT INTO ${users} (id, email, first_name, last_name, registered_via)
+        VALUES (${sub}, ${email}, ${profile.first_name}, ${profile.last_name}, ${profile.registered_via})
+        ON CONFLICT (id) DO NOTHING
+      `);
+      const [tombstoned] = await tx
+        .select({ id: deletedUsers.id })
+        .from(deletedUsers)
+        .where(eq(deletedUsers.id, sub))
+        .limit(1);
+      if (tombstoned) throw new TombstonedDuringInsert();
+    });
   } catch (err) {
+    if (err instanceof TombstonedDuringInsert) return REFUSED;
     if (!isUniqueViolation(err)) throw err;
     // The email was taken between the check and the insert.
     return (await refusalForHolder(email, sub)) ?? alertRefusal('email-conflict', sub, null);

@@ -297,6 +297,23 @@ describe('scenario 9a: tombstones', () => {
     }
   });
 
+  it('a delete that commits while the first-use insert runs: refused, no row survives', async () => {
+    // The real race needs two connections (the INSERT's NOT EXISTS snapshot
+    // predates the delete's commit); pglite has one. This trigger stands in
+    // for it: the tombstone appears after NOT EXISTS has passed and as the
+    // row lands, which is the state the race leaves behind.
+    await app.exec(`
+      CREATE FUNCTION plant_tombstone() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN INSERT INTO deleted_users (id) VALUES (NEW.id); RETURN NEW; END $$;
+      CREATE TRIGGER plant_tombstone AFTER INSERT ON users
+        FOR EACH ROW EXECUTE FUNCTION plant_tombstone();
+    `);
+    const id = await signUpDirect(nextEmail('race-delete'));
+
+    expect((await resolveUser(id, 'x')).kind).toBe('refused');
+    expect(await appUser(id)).toBeUndefined();
+  });
+
   it('the profile path never re-creates a tombstoned id', async () => {
     // The auth user still exists (say the operator has not run yet), and the
     // tombstone is marked done: nothing may bring the app row back.
