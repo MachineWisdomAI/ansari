@@ -38,11 +38,11 @@ plan_phases:
     status: complete
   - id: phase_12
     title: 'Cutover tooling: copy, audits, rollback SQL and runbooks'
-    status: in_progress
+    status: complete
   - id: phase_13
     title: 'Staging verification: edge check, unmodified clients, full rehearsal'
-    status: pending
-current_plan_phase: phase_12
+    status: in_progress
+current_plan_phase: phase_13
 gates:
   spec-approval:
     status: approved
@@ -56,8 +56,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 3
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1
@@ -216,7 +216,7 @@ history:
         file: >-
           /Users/amrmohamed/repos/iaser/ansari/.builders/spir-300/codev/projects/300-better-auth-migration/300-phase_12-iter3-gemini.txt
 started_at: '2026-10-14T03:31:15.359Z'
-updated_at: '2026-10-16T21:19:01.825Z'
+updated_at: '2026-10-16T21:19:03.487Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-10-16T00:28:28.599Z'
@@ -254,6 +254,8 @@ context_refreshes:
   - boundary: plan-phase:phase_12
     at: '2026-10-16T19:34:58.361Z'
     acknowledged_at: '2026-10-16T19:40:50.394Z'
+  - boundary: plan-phase:phase_13
+    at: '2026-10-16T21:19:03.487Z'
 force_advanced:
   phase: phase_12
   iteration: 3
