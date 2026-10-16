@@ -16,8 +16,8 @@ This spec defines WHAT and WHY. The plan defines HOW and WHEN.
 > **Owner decisions, 2026-10-16.** Better Auth has **its own database from the start**. Only
 > `apps/auth` can reach it. `apps/api` keeps the existing database, where `public.users` stays for
 > referential integrity with its auth-only columns removed. See "Two databases from the start".
-> Also: **one PR for the cutover** (C-2; a contract PR after the rollback deadline is pending the
-> owner's confirmation), merged at the window; **no database logins are provisioned**: each service
+> Also: **one PR for the cutover**, merged at the window, plus **a contract PR** in the first
+> release after the 24-hour rollback deadline (C-2); **no database logins are provisioned**: each service
 > uses its own database's Railway default account; the JWT lifetime is **Better Auth's default, 15
 > minutes**; `apps/api` uses **plain JWKS validation with no per-request session check** (I-7).
 >
@@ -675,7 +675,7 @@ security architect reviews everything. The migration and copy SQL are High tier.
 **Owner decision, 2026-10-16: one PR for the cutover.** The owner also decided that no database
 logins are provisioned, so the provisioning PR the main architect required is gone. The main
 architect's re-review (2026-10-16) still adds a **contract PR after the rollback deadline**,
-because the destructive drops must wait for it; **the owner confirms this at spec-approval (C-2).**
+because the destructive drops must wait for it; **the owner accepted it on 2026-10-16 (C-2).**
 No unmerged SQL touches a deployed database: every SQL applied to one is applied from `develop` at
 a commit recorded in the release notes.
 
@@ -684,7 +684,7 @@ a commit recorded in the release notes.
 | **1. Cutover PR, built on the branch** | 0 to 2 (code) | The `apps/auth` config (UUIDs, `auth` schema, dual verify, `bearer()`, `jwt()`, `admin()` kept for its columns with its whole HTTP surface blocked, `change-email` and `update-user` blocked, rate limiting and client IP, the internal hop and endpoints), its Dockerfile and service; the fresh `packages/auth` `0000`; the app migrations (scaffold cleanup, `public.deleted_users`, the window migration); the rollback SQL; the copy script and audits; the `apps/api` JWKS verification, app-row creation, tombstoned deletion, role calls and compatibility layer; the CORS fix; contract tests written first against today's implementation; removal of the legacy JWT code and the `JWT_*` config (and their `globalEnv` names), with `grant-admin.ts` and `ADMIN_EMAILS` moving to `apps/auth`; the `apps/frontend` switch to `apps/auth` (agreed with the app architect); `RELEASE.md` and `CONTRIBUTING.md` |
 | **Before the window** | 2 | Staging deployments from the branch: the empirical edge check, and the **rehearsal** (including a rollback rehearsal) on a clone of the production app database plus a fresh auth database. The empty production auth database is created on Railway, with backups or PITR on before the first real row (C-4). The branch is kept current with `develop`, the numbering is re-checked after every merge, and the rehearsal is re-run after the last rebase |
 | **The window** | 3 | Merge and promote the cutover PR with `apps/api` offline: the app database's snapshot or PITR mark, the auth database's baseline, the copy and its audits, the window migration, admin roles, deploy `apps/auth`, `apps/api` and `apps/frontend`, smoke tests, then `apps/auth`'s public domain |
-| **2. Contract PR** (the first release after the 24-hour deadline passes; pending the owner, C-2) | 4 | The contract migration: drop `password_hash`, `is_admin`, `session_version` and `tokens`, with its own `DEPLOYED_THROUGH` bump; the remaining pglite DDL; `RELEASE.md` names it as the one exception |
+| **2. Contract PR** (the first release after the 24-hour deadline passes; owner, C-2) | 4 | The contract migration: drop `password_hash`, `is_admin`, `session_version` and `tokens`, with its own `DEPLOYED_THROUGH` bump; the remaining pglite DDL; `RELEASE.md` names it as the one exception |
 | Out of this project (follow-up issues) | 4 triggers, 5 | Remove the layer (its trigger). A profile sync design before `change-email` or `update-user` is enabled |
 
 **Why the code switch cannot hide behind a feature flag.** The Drizzle schema in `apps/api` either
@@ -1133,7 +1133,7 @@ decided rate limits apply to every production sign-in, because all of them pass 
 ## Solution Approaches
 
 The owner settled hosting and the token model at the spec-approval gate on 2026-10-15. The
-approaches below record what was considered and why. The PR shape is one cutover PR (owner), with a contract PR after the rollback deadline pending the owner (C-2).
+approaches below record what was considered and why. The PR shape is the cutover PR plus a contract PR after the rollback deadline (owner, C-2).
 
 ### Approach 1: Separate `apps/auth` service, JWT/JWKS verification in `apps/api`, layer as an HTTP client (chosen by the owner)
 
@@ -1188,9 +1188,9 @@ This was the first draft's proposal.
   database. The main architect's seven conditions were written for a single journal and need
   re-review; the spec states which carry over. No external migration framework is needed and
   Waleed is not a reviewer (owner).
-- **C-2: PR shape (owner, at spec-approval).** The owner decided one PR for the cutover, and no
-  database logins (so no provisioning PR). The main architect's re-review adds a contract PR after
-  the rollback deadline, so that rollback stays a redeploy. Does the owner accept it? See Phasing.
+- **C-2 (resolved, owner, 2026-10-16):** the cutover PR, merged at the window, plus a contract PR
+  in the first release after the 24-hour rollback deadline. No database logins, so no
+  provisioning PR. See Phasing.
 - **C-4: The auth database on Railway** (owner and main architect). A new Railway Postgres service
   for `apps/auth` in staging and production, with snapshots or PITR, and its cost.
 - **C-3: Staging database.** `api-staging.askansari.ai` exists (plan 124). Does it have its own
