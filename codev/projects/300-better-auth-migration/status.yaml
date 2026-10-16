@@ -1,9 +1,48 @@
 id: '300'
 title: better-auth-migration
 protocol: spir
-phase: plan
-plan_phases: []
-current_plan_phase: null
+phase: implement
+plan_phases:
+  - id: phase_1
+    title: Legacy contract tests pinned against today's implementation
+    status: in_progress
+  - id: phase_2
+    title: Auth database schema, fresh journal and parity guard
+    status: pending
+  - id: phase_3
+    title: 'Better Auth configuration: UUIDs, dual verify, sessions, JWT, admin columns'
+    status: pending
+  - id: phase_4
+    title: 'apps/auth HTTP perimeter: blocked surfaces, client IP, rate limits, CORS'
+    status: pending
+  - id: phase_5
+    title: apps/auth internal endpoints, reset email, role script and boot assertion
+    status: pending
+  - id: phase_6
+    title: 'App database migrations: scaffold cleanup, tombstones, window migration'
+    status: pending
+  - id: phase_7
+    title: apps/api JWT verifier, user resolution and auth-service client
+    status: pending
+  - id: phase_8
+    title: Route switch and compatibility layer over apps/auth
+    status: pending
+  - id: phase_9
+    title: Legacy auth removal, CORS fix and source scans
+    status: pending
+  - id: phase_10
+    title: apps/frontend signs in at apps/auth
+    status: pending
+  - id: phase_11
+    title: 'apps/auth deployment: Dockerfile, Railway service, CI and env'
+    status: pending
+  - id: phase_12
+    title: 'Cutover tooling: copy, audits, rollback SQL and runbooks'
+    status: pending
+  - id: phase_13
+    title: 'Staging verification: edge check, unmodified clients, full rehearsal'
+    status: pending
+current_plan_phase: phase_1
 gates:
   spec-approval:
     status: approved
@@ -18,10 +57,10 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-10-14T03:31:15.359Z'
-updated_at: '2026-10-16T05:10:51.637Z'
+updated_at: '2026-10-16T05:10:58.128Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-10-16T00:28:28.599Z'
