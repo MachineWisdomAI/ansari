@@ -73,3 +73,9 @@
   - Copy SQL: provider_id/gen_random_uuid/ON CONFLICT.
   - G-5: guest-on-cold-launch vs the 3/60s sign-up limit.
   At the plan-approval gate.
+- 2026-10-16: Security review of plan 11608c4 (High tier): shape approved, amendments A-D applied (0283177).
+  - A: apps/auth gets two listeners. PUBLIC (PORT) never mounts /internal/* and always strips the forwarded-IP header. INTERNAL (INTERNAL_PORT, private only, no domain) carries /internal/*, the credentialed hop and the JWKS; AUTH_INTERNAL_URL points at it. Reason: the global 600/min internal limit was exhaustible from the internet, which would 503 admin routes and new users.
+  - B: net.isIP on the forwarded IP.
+  - C: ON DELETE CASCADE on session/account user_id, with an orphan test for 04-complete-tombstones.
+  - D: residual recorded: the JWKS goes over plain http on the private network; escalation is https on the public domain if the peer inventory grows.
+  - Security's positions for the owner: G-1 yes (default email); G-2 the in-window probe plus a pre-merge dig/curl passive check, with prod in the staging-verdict mode (added to the plan); G-3 yes; G-4 OK pending baselines; G-5 a separate, higher guest per-IP rule, decided with B-1.
