@@ -153,3 +153,4 @@
   3. Run 3, after appending a comment to RELEASE.md: cache MISS, executing cfaec60275ce2a6d.
   4. Bonus: with RELEASE.md restored, run 4 HIT c4abafb2a6ee4b17 again.
 - Phase 2 consult iter1: Gemini APPROVE. Codex REQUEST_CHANGES, whose single issue was the it.skip on thread-get-contract, now resolved by the develop merge (develop's deterministic fix, no skip). Both reports carry a "repository moved" banner: that is my merge (0dbdb7a to abeabf2) landing during the review, not a consultant commit.
+- Phase 2 consult iter2: Codex APPROVE, Gemini APPROVE (no issues).
