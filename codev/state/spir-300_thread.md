@@ -142,3 +142,14 @@
 - Flaky (pre-existing, NOT mine): apps/api tests/thread-get-contract.test.ts "thread GET keeps today's exact keys…" fails 2 of 6 runs. Two messages tie on created_at=now(), and getThreadWithMessages orders by (created_at, id) with a random uuid id, so messages[1] is sometimes the user message. Skipped with a FLAKY annotation. It goes in the review under Flaky Tests. The fix is distinct created_at values.
 - arch.md's Better Auth paragraph had the old table list (`user`/session/account/verification in the shared DB). Only that sentence is fixed now; the full arch rewrite stays in the documentation phase.
 - packages/auth/turbo.json: the `test` inputs gain `$TURBO_ROOT$/RELEASE.md` and `$TURBO_ROOT$/docs/**/*.md`, because the parity test reads them. Without these inputs a warm cache would replay the null-marker guard after a record line lands. Verified: the dry-run hash changes when a docs/*.md file changes. This is a turbo hunk, so it needs the main architect's review.
+
+### Phase 2 follow-ups (security architect, 06:11Z to 06:12Z)
+- The flaky-test skip is WITHDRAWN. Main says develop already fixed thread-get-contract.test.ts (PR 301, merge 9862798, issue 292: explicit increasing createdAt). I merged origin/develop (d9ea8ac) into builder/spir-300 at abeabf2. The only conflict was that file, resolved to develop's version (identical to origin/develop, no skip). The merge also brings PR 302's lazy db handle (apps/api/lib/db/index.ts).
+- After the merge: full suite green (api 934 passed + 3 pre-existing skips, frontend 624, auth 31 + 1 deliberate skip). thread-get-contract.test.ts passed 10 of 10 runs. No new flake.
+- Numbering-rule re-check after this develop merge: develop added NO app migrations. The app journal still ends at 0008_model_provenance, and `drizzle-kit generate` in apps/api reports "No schema changes". This branch has no app migration yet (phase 6), so its next number stays 0009, and the plan's 0009 to 0011 still hold.
+- Turbo inputs hunk: APPROVED by main. Cache-bust proof for `turbo run test --filter=@ansari/auth`:
+  1. Run 1: cache miss (c4abafb2a6ee4b17; inputs changed by the merge).
+  2. Run 2, warm: cache HIT, replaying c4abafb2a6ee4b17.
+  3. Run 3, after appending a comment to RELEASE.md: cache MISS, executing cfaec60275ce2a6d.
+  4. Bonus: with RELEASE.md restored, run 4 HIT c4abafb2a6ee4b17 again.
+- Phase 2 consult iter1: Gemini APPROVE. Codex REQUEST_CHANGES, whose single issue was the it.skip on thread-get-contract, now resolved by the develop merge (develop's deterministic fix, no skip). Both reports carry a "repository moved" banner: that is my merge (0dbdb7a to abeabf2) landing during the review, not a consultant commit.
