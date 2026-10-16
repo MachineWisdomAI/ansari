@@ -239,3 +239,4 @@
   - (1) Reset requests: the router's 3/60 s burst refused requests BEFORE the hook, so those requests never counted toward the IP and email caps. The router rule is now `false`, and apps/auth enforces the burst itself on an `ip-burst:` key, counting every request against all three windows.
   - (2) `ipBucket` is a faithful port of better-auth's `normalizeIP` (hex IPv4-mapped forms, eight-group /64). A parity test checks it against the router's own keys.
   Both are mutation-checked. Response file: codev/projects/300-better-auth-migration/300-phase_4-iter1-rebuttals.md.
+- Phase 4 consult iter2: Codex APPROVE (HIGH), Gemini APPROVE, no issues, and no tree-change banners.
