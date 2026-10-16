@@ -51,9 +51,27 @@ is final for implementation unless the gate overturns it.
 
 ### P-1. Transport of the layer's sign-in hop: Railway's private network
 
-Every `apps/api` → `apps/auth` call uses **`AUTH_INTERNAL_URL`** (`http://<auth service>.railway.internal:<port>`).
-That covers the layer's sign-in, sign-up, token exchange, sign-out and reset calls, the three
-internal endpoints, and the JWKS fetch. None of them uses the public domain.
+**`apps/auth` runs two listeners** (security review of `11608c4`, amendment A):
+
+| Listener | Port | Reachable from | Mounts | Forwarded-IP header |
+|---|---|---|---|---|
+| **Public** | `PORT` | the public domain (`auth.askansari.ai`) | `/api/auth/*`, `/health`, the diag route | **always stripped**. `/internal/*` is never mounted (404) |
+| **Internal** | `INTERNAL_PORT` | Railway's private network only. No public domain routes to it | `/internal/*`, the credentialed `/api/auth/*` hop for the layer, and `/api/auth/jwks` | honoured **only** with a valid credential |
+
+Both listeners share one `createAuth()` instance and one database, so the rate-limit budget is the
+same on both paths. The internal listener still requires the credential on every request.
+
+Every `apps/api` → `apps/auth` call uses **`AUTH_INTERNAL_URL`**
+(`http://<auth service>.railway.internal:<INTERNAL_PORT>`). That covers the layer's sign-in,
+sign-up, token exchange, sign-out and reset calls, the internal endpoints, and the JWKS fetch. None
+of them uses the public domain.
+
+**Why a second listener.** In the first draft, `auth.askansari.ai/internal/*` was reachable from
+the internet, protected by the credential alone. Its **global** 600/min limit also meant anyone on
+the internet could exhaust it, which would turn admin routes into 503 (fail closed) and block new
+users' first requests. On a private-only listener, the global limit can be exhausted only from
+inside the environment. `INTERNAL_PORT` is a new variable for `apps/auth`'s env schema and
+`turbo.json` `globalEnv`, which is a main-architect hunk.
 
 - **Why not the public domain.** The edge would overwrite the forwarded client IP with `apps/api`'s
   egress IP. `apps/auth` would then have to trust a forwarded header arriving *through* the public
@@ -61,8 +79,10 @@ internal endpoints, and the JWKS fetch. None of them uses the public domain.
   on a path that is internet-reachable.
 - **What the private network costs.** It skips the edge, so no `X-Real-IP` is stamped and any
   service in the Railway environment could send one. The spec's requirement covers this: the
-  forwarded IP (`X-Ansari-Forwarded-Client-IP`) is used **only** when `X-Ansari-Internal-Auth`
-  verifies in constant time. Otherwise the header is deleted before Better Auth sees the request.
+  forwarded IP (`X-Ansari-Forwarded-Client-IP`) is used **only** on the internal listener, and
+  only when `X-Ansari-Internal-Auth` verifies in constant time **and** the value passes
+  `net.isIP` (amendment B). Anything else is treated as absent, and the header is deleted before
+  Better Auth sees the request.
 - **One more rule this plan adds (hardening, not a spec change).** In production, a request to
   Better Auth's router that carries **neither** a verified forwarded IP **nor** an `X-Real-IP` is
   refused with 400 before `toNodeHandler`. So no request can reach better-auth's shared
@@ -70,7 +90,15 @@ internal endpoints, and the JWKS fetch. None of them uses the public domain.
   are exempt.
 - **Residual, documented:** an uncredentialed private-network peer can still send its own
   `X-Real-IP`. Today the only peers in the environment are `backend`, the web `frontend` and the two
-  Postgres services, and none of them originates requests to `apps/auth`. This goes into `arch.md`.
+  Postgres services, and none of them originates requests to `apps/auth`. This **peer inventory**
+  goes into `arch.md`.
+- **Residual, documented (amendment D):** `apps/api` fetches the JWKS over plain `http` on the
+  private network. A private-network peer able to impersonate the auth service's internal hostname
+  could serve its own keys, and `apps/api` would then accept JWTs that peer forged. The mitigation
+  is the same peer inventory in `arch.md`. **The escalation, if the inventory ever grows** to
+  include a service that is not fully trusted: move the JWKS fetch to `https` on the public domain
+  (`https://auth.askansari.ai/api/auth/jwks`), which the edge's TLS authenticates. This is
+  recorded in `arch.md` beside the inventory, so whoever adds a service sees it.
 
 ### P-2. The numbers the spec delegated
 
@@ -89,7 +117,7 @@ amending a number does not touch any test.
 | Password-reset request (better-auth router) | client IP | every request | 3 / 60 s (its built-in rule, kept) | A burst cap underneath the two above |
 | Reset consume (`/reset-password`) | client IP | every request | 5 / 15 min | Tokens are random and single-use. This only stops hammering |
 | Session → JWT exchange (`/token`, `/get-session`) | client IP | every request | 60 / 60 s | Clients exchange about once per 15 minutes per device. The released mobile client refreshes concurrently with no single-flight guard (`legacy/frontend-app/src/services/ApiService.ts:101-128`), so bursts must pass |
-| Internal endpoints (profile, role, delete, revoke-sessions) | per endpoint, global | every request | 600 / 60 s | Profile is called once per new user, role once per admin request, delete once per deletion. B-4 sizes peak first requests |
+| Internal endpoints (profile, role, delete, revoke-sessions) | per endpoint, global | every request | 600 / 60 s | Profile is called once per new user, role once per admin request, delete once per deletion. B-4 sizes peak first requests. They are reachable only on the private-network listener (P-1), so the global budget cannot be exhausted from the internet |
 | Global default (better-auth `window`/`max`) | client IP | every request | 100 / 60 s | Unchanged from the reference |
 | **Fallback only:** sign-in | normalized email | **failed** attempts only | 5 / 60 s, locks the email for the rest of the window | Spec |
 | **Fallback only:** sign-up | normalized email | every request | 3 / 60 s | Spec |
@@ -151,6 +179,17 @@ disclosure.
 
   A failure there flips `AUTH_RATE_LIMIT_MODE` to `email` and redeploys `apps/auth`, with no code
   change.
+- **A pre-merge passive check of each production domain** (security, on G-2), with no code
+  deployed. It records:
+  - the `dig` CNAME chain, to confirm that each production domain terminates at Railway's edge,
+    as the staging domains do
+  - the response headers from a plain `curl -sI`, to confirm the same edge and proxy chain (the
+    `server`, `via` and `x-railway-*` style headers that are present)
+
+  Both go into `edge-check.md`, beside the staging probes.
+- **Production ships in the staging-verdict mode.** `AUTH_RATE_LIMIT_MODE` in production is set to
+  whatever the staging edge check decided. The in-window probe can only move it to `email`, never
+  to `ip`.
 
 The spec says "both production domains … before the PR merges". This is the one place the plan
 cannot meet that literally, and it is put to the gate.
@@ -258,6 +297,10 @@ ids, and a journal that a drift guard covers.
 - `packages/auth/src/schema.ts`: rewritten. `auth.users` (via `modelName: 'users'`),
   `auth.session`, `auth.account`, `auth.verification`, `auth.rate_limit` and `auth.jwks`. Ids are
   `uuid`, timestamps are `timestamptz`, and `account` has `unique(user_id, provider_id)`.
+  **`auth.session.user_id` and `auth.account.user_id` reference `auth.users.id` with `ON DELETE
+  CASCADE`** (amendment C), and the generated SQL is checked for both. `auth.verification` has no
+  user reference in better-auth 1.7.7 (it is keyed by `identifier`), which is confirmed from the
+  generated SQL. If it does have one, it cascades too.
   `auth.users` gains the additional fields `first_name`, `last_name` and `registered_via`, plus the
   admin columns `role`, `banned`, `ban_reason` and `ban_expires`. `auth.session` gains
   `impersonated_by`. There is no `system_key` and no `source`.
@@ -282,6 +325,9 @@ ids, and a journal that a drift guard covers.
   (scenario 12).
 - [ ] The parity test, and its negative test: a column added to the schema but not to the journal
   fails it.
+- [ ] The cascade test (amendment C): deleting an `auth.users` row by plain SQL, as
+  `04-complete-tombstones.sql` does, leaves no `auth.session` and no `auth.account` row for that
+  user. Phase 12's copy suite repeats it against the real script.
 
 #### Acceptance Criteria
 
@@ -397,16 +443,20 @@ client IP cannot be forged or collapsed, and every limit holds across both modes
 
 #### Files to Create / Modify
 
-- `apps/auth/src/app.ts` (new): `createApp(auth)`, which builds the Express app, so tests drive it
-  without listening. `apps/auth/src/index.ts` keeps only `listen`.
+- `apps/auth/src/app.ts` (new): `createPublicApp(auth)` and `createInternalApp(auth)`, which build
+  the two Express apps (P-1), so tests drive them without listening. `apps/auth/src/index.ts`
+  only listens, on `PORT` and on `INTERNAL_PORT`.
 - `apps/auth/src/middleware/blocked-paths.ts` (new): runs before `toNodeHandler`. It decodes the
   path, lowercases it and strips trailing slashes, then refuses `/api/auth/admin/*`,
   `/api/auth/change-email` and `/api/auth/update-user` with one block response (404, empty body).
   It is paired with `disabledPaths` in `createAuth()`.
-- `apps/auth/src/middleware/client-ip.ts` (new): the internal-credential check
-  (`crypto.timingSafeEqual` over SHA-256 digests, so lengths never leak). With a valid credential,
-  it sets `x-real-ip` from `X-Ansari-Forwarded-Client-IP`. Without one, it deletes that header.
-  Without either, in production, it returns 400 (P-1).
+- `apps/auth/src/middleware/client-ip.ts` (new).
+  - **Public listener:** it always deletes `X-Ansari-Forwarded-Client-IP`.
+  - **Internal listener:** it runs the credential check (`crypto.timingSafeEqual` over SHA-256
+    digests, so lengths never leak). With a valid credential **and** a value that passes
+    `net.isIP` (amendment B), it sets `x-real-ip` from the forwarded header. Otherwise it treats
+    the forwarded IP as absent and deletes the header.
+  - **Both listeners, in production:** a request with no IP source gets 400 (P-1).
 - `apps/auth/src/limits/email-limiter.ts` (new): the per-email reset limiter and the fallback
   sign-in and sign-up limiters. It uses an atomic `INSERT … ON CONFLICT … DO UPDATE … RETURNING`
   on `auth.rate_limit`, with keys `email:<sha256(normalized)>|<path>`, so instances share one
@@ -439,6 +489,14 @@ client IP cannot be forged or collapsed, and every limit holds across both modes
   - With a valid admin session, it asserts that each path, and each of its case, trailing-slash
     and percent-encoded variants, gets the block response.
   - `change-email` and `update-user` get the same variants.
+- [ ] **The listener split (amendment A).** On the public listener, every `/internal/*` path and
+  its case, trailing-slash and percent-encoded variants gets 404. A forwarded-IP header sent with
+  a **valid** credential to the public listener is stripped and never becomes the bucket key. The
+  internal listener refuses `/internal/*` without the credential.
+- [ ] **Forwarded-IP validation (amendment B).** With a valid credential, a forwarded value that is
+  not an IP (empty, `1.2.3.4, 5.6.7.8`, `::ffff:` garbage, a hostname, too long) is treated as
+  absent: the request falls back to `X-Real-IP` or gets the production 400, and never lands in a
+  bucket named after the forged value.
 - [ ] **The IP tests (both modes where they apply).**
   - Scenario 21: six sign-ins from one `X-Real-IP` give 429 on the sixth. A forged two-entry
     `X-Forwarded-For` does not change the bucket. Distinct `X-Real-IP`s are separate.
@@ -466,7 +524,7 @@ client IP cannot be forged or collapsed, and every limit holds across both modes
 
 #### Test Plan
 
-`createApp(createAuth(pgliteDb))` listening on an ephemeral port, driven with `fetch` (no new test
+`createPublicApp` and `createInternalApp` over `createAuth(pgliteDb)`, each listening on an ephemeral port, driven with `fetch` (no new test
 dependency). Time is advanced with fake timers, or by
 writing `rate_limit.last_request` directly.
 
@@ -481,8 +539,9 @@ tooling to the auth database.
 
 #### Files to Create / Modify
 
-- `apps/auth/src/routes/internal.ts` (new). It is mounted at `/internal/*`, **outside**
-  `/api/auth/*`, behind the credential middleware, and rate-limited (P-2). It has three routes:
+- `apps/auth/src/routes/internal.ts` (new). It is mounted at `/internal/*` **on the internal
+  listener only** (P-1), outside `/api/auth/*`, behind the credential middleware, and rate-limited
+  (P-2). It has three routes:
   - `GET /internal/users/:id/profile` returns `{id, email, first_name, last_name, registered_via}`,
     or 404.
   - `GET /internal/users/:id/role` returns `{role, banned}`, or 404.
@@ -614,7 +673,8 @@ until phase 8, so switching the routes here would break the legacy flow between 
 
 #### Files to Create / Modify
 
-- `apps/api/lib/auth/verify-jwt.ts` (new): `jose` `createRemoteJWKSet(new URL('/api/auth/jwks', AUTH_INTERNAL_URL))`.
+- `apps/api/lib/auth/verify-jwt.ts` (new): `jose` `createRemoteJWKSet(new URL('/api/auth/jwks', AUTH_INTERNAL_URL))`,
+  fetched from the internal listener (P-1, including the residual recorded under amendment D).
   - The settings are `cooldownDuration: 30_000` (at most one re-fetch per 30 s per instance for an
     unknown `kid`, which is the amplification bound) and `cacheMaxAge: 600_000`.
   - `jwtVerify` uses `algorithms: ['EdDSA']`, the configured `issuer` and `audience`, and
@@ -671,7 +731,7 @@ contract suite is green in `legacy` mode.
 #### Test Plan
 
 Unit and integration tests of the new modules, called directly. pglite for the app database, a real
-`apps/auth` (`createApp` over pglite) for the internal endpoints, and a local JWKS handler for the
+`apps/auth` (`createInternalApp` over pglite) for the internal endpoints, and a local JWKS handler for the
 matrix.
 
 ### Phase 8: Route switch and compatibility layer over apps/auth
@@ -748,7 +808,7 @@ The result is judged by phase 1's tests in `better-auth` mode, **unchanged**.
 #### Acceptance Criteria
 
 The contract suite is green unchanged. The integration scenarios are green against
-`createApp(createAuth(pglite))` running in-process on a port.
+`createInternalApp(createAuth(pglite))` (the layer's target) running in-process on a port, with `createPublicApp` alongside for the direct-path scenarios.
 
 #### Test Plan
 
@@ -882,6 +942,9 @@ it.
   copy including `packages/`, a production stage, `NODE_ENV=production`, a non-root user).
 - `apps/auth/railway.toml` (new; the reviewable record): `watchPatterns` include `apps/auth/**`,
   `packages/**`, and the lockfile and workspace files. The healthcheck is `/health`.
+  It records the two ports (P-1): the public domain targets `PORT`, and **no domain targets
+  `INTERNAL_PORT`**. The Dockerfile exposes both. A phase 13 check proves the internal port is
+  unreachable from the public internet, and reachable from `backend` over the private network.
 - `.github/workflows/ci.yml`: the `auth` job also runs `apps/auth`'s new tests. If the main
   architect prefers, the copy-script tests (phase 12) run there too.
 - `apps/auth/.env.example`, `apps/auth/.env.ci`: every new variable, with
@@ -954,7 +1017,8 @@ runs scripts, not typed SQL.
     counts and checksums only.
   - `04-complete-tombstones.sql`, the operator's completion script. It lists pending
     `public.deleted_users` (from the app database), and the operator deletes those ids directly in
-    the auth database. It never calls the endpoint.
+    the auth database (`DELETE FROM auth.users WHERE id = ANY(:ids)`). The cascade removes
+    sessions and accounts (amendment C). It never calls the endpoint.
   - `rollback-remove-post-cutover-users.sql`: `DELETE FROM public.users WHERE created_at >= :cutover_at AND system_key IS NULL`,
     with a dry-run `SELECT count(*)` first. `:cutover_at` is the recorded window time.
   - `README.md`: what each file does and the order. It points to the runbook.
@@ -967,6 +1031,8 @@ runs scripts, not typed SQL.
   - Scenario 9h: one altered hash in transit fails the hash audit, and a failure in step 2 leaves
     no import table.
   - Scenario 7: name derivation.
+  - Amendment C: after `04-complete-tombstones.sql`, no orphan `auth.session` or `auth.account` row
+    is left.
   - Scenario 16: the admin list.
   - Scenario 20: system rows are never copied.
   - Scenario 9i: `email_verified = true`, and no email is sent.
@@ -1036,7 +1102,8 @@ Produce the evidence the spec requires before the merge, and commit it.
 
 #### Files to Create / Modify
 
-- `docs/cutover/edge-check.md`: the method (probe commands, networks used, IPv4 and IPv6), the raw
+- `docs/cutover/edge-check.md`: the pre-merge passive production check (`dig` CNAME chains and
+  plain `curl -sI` headers per production domain; P-4); the method (probe commands, networks used, IPv4 and IPv6), the raw
   observations per domain, and the verdict for both properties. The verdict sets
   `AUTH_RATE_LIMIT_MODE` (P-3).
 - `docs/cutover/baselines.md`: B-1 to B-4, with the P-2 numbers confirmed or amended. Amendments go
