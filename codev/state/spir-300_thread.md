@@ -208,3 +208,4 @@
   - WITHOUT the entry: ansari-api#typecheck a8d8a96bb895d02d → a8d8a96bb895d02d; ansari-api#test 1938ea1d8bb94f0d → same; @ansari/auth#test d732dff7022d2b00 → same; ansari-auth#typecheck 65b80d5045ae75d1 → same. NONE move (a stale replay).
   - Real runs with the entry, ansari-api#typecheck: (1) miss a1db5b3b2ab3f85c; (2) warm HIT a1db5b3b2ab3f85c; (3) after the edit, MISS 9a1f4d0ccebd9902; (4) restored, HIT a1db5b3b2ab3f85c.
 - Phase 11 deploy note (main): the apps/auth image is node:22-slim and keeps node_modules/bcrypt in the runtime stage.
+- Phase 3 consult iter1: Codex APPROVE, Gemini APPROVE, no issues. Both reports carry "tree changed / repository moved" banners. Those are mine: the two consult run logs I redirected into the project dir (since deleted), and my commits 9b497be (thread env note) and c0fb40e (main's turbo condition), which landed during the review. No consultant wrote anything.
