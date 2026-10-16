@@ -51,13 +51,16 @@ cd ../..
 # One-time auth setup: a SECOND local database, never the app's
 createdb ansari_auth
 cd apps/auth
-cp .env.example .env    # DATABASE_URL = the ansari_auth owner URL
+cp .env.example .env    # DATABASE_URL = the ansari_auth owner URL; the service's
+                        # startup error names any variable still missing
 psql -v ON_ERROR_STOP=1 --single-transaction -d ansari_auth \
   -f ../../packages/auth/drizzle/0000_auth_schema.sql
 cd ../..
 
-# Then, from the repo root: starts BOTH apps together
+# Then, from the repo root: starts BOTH apps (api + frontend) together
 pnpm dev
+# …and the auth service in a second terminal (`pnpm dev` does not start it)
+pnpm auth dev
 ```
 
 **Two databases.** Development and CI use two: the app database (`apps/api`,
