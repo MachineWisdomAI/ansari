@@ -100,6 +100,22 @@ iteration 3. The PR's integration review should take a deliberate look at `resol
   cold JWKS cache (`apps/api/tests/auth/layer.test.ts`, "against apps/auth in production mode"),
   plus production-mode JWKS cases in `apps/auth/tests/client-ip.test.ts`. Removing the fix makes
   both fail.
+- **A restart policy with a retry cap turns a recoverable fault into a permanent outage**
+  (phase 11, found by the Docker boot test; security asked for it to be recorded). apps/auth's pg
+  pool had no `'error'` listener. When Postgres dropped an idle connection (a restart, failover or
+  maintenance: `57P01 terminating connection`), node-postgres emitted `'error'` on the pool, the
+  process died, and it did not come back when the database did. Railway restarts the service
+  `ON_FAILURE` at most 3 times, so three database blips over the service's life would have left
+  auth down for good, with every sign-in and every apps/api request behind it failing. No suite
+  could see it: they run on pglite, and none stops a database under a running process. The fix
+  (`packages/auth/src/db.ts`, commit 9d7371b) listens for the pool's `'error'` and logs only
+  `{name, code}`; the pool already discards the dead client and the next query reconnects.
+  Proof, in the rebuilt image against a postgres:17 container in production mode: `/health` 200,
+  503 with the database stopped, 200 when it returned, the process alive throughout (restart count
+  0). The unit test (`packages/auth/tests/unit/db.test.ts`) fails without the listener. The general
+  rule: any long-lived client that emits `'error'` needs a listener, and a stop-the-dependency
+  check belongs in the boot test of every service. apps/api's pool has the same missing listener
+  and is in production today; security took it to main.
 
 ## Deviations recorded during implementation
 

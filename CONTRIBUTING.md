@@ -48,9 +48,27 @@ cp .env.example .env    # see docs/self-hosting.md for the full env contract
 pnpm db:migrate         # needs a local Postgres and DATABASE_URL
 cd ../..
 
+# One-time auth setup: a SECOND local database, never the app's
+createdb ansari_auth
+cd apps/auth
+cp .env.example .env    # DATABASE_URL = the ansari_auth owner URL
+psql -v ON_ERROR_STOP=1 --single-transaction -d ansari_auth \
+  -f ../../packages/auth/drizzle/0000_auth_schema.sql
+cd ../..
+
 # Then, from the repo root: starts BOTH apps together
 pnpm dev
 ```
+
+**Two databases.** Development and CI use two: the app database (`apps/api`,
+e.g. `ansari`) and the auth database (`apps/auth`, e.g. `ansari_auth`), each
+with its own owner URL. `apps/api` never reads the auth database; it reaches
+`apps/auth` over HTTP, so set its `AUTH_INTERNAL_URL=http://localhost:3101` and
+the same `AUTH_INTERNAL_SECRET` in both services (`pnpm auth dev` serves
+`:3100` public and `:3101` internal). **If you applied the old `packages/auth`
+`0000` migration** (before spec 300), drop and recreate your local auth
+database and apply the new `0000`: the journal was replaced, not extended.
+The test suites need neither database (they run on pglite).
 
 `pnpm dev` needs a real terminal: it runs Turbo's interactive UI so the Expo dev
 server keeps its keypress shortcuts (`i`, `a`, `w`, `r`) while sharing a console

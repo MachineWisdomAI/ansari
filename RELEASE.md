@@ -37,6 +37,7 @@ migration runbook were both proven in real releases on 2026-08-02.
 > |---|---|
 > | backend | `apps/api/Dockerfile` |
 > | frontend (web) | `apps/frontend/Dockerfile.web` |
+> | auth | `apps/auth/Dockerfile` |
 >
 > **Watch paths** — set these per service, or Railway rebuilds *both* on every push
 > (any commit touches the root lockfile):
@@ -44,6 +45,7 @@ migration runbook were both proven in real releases on 2026-08-02.
 > ```
 > backend:   apps/api/**       packages/**  package.json  pnpm-lock.yaml  pnpm-workspace.yaml
 > frontend:  apps/frontend/**  packages/**  package.json  pnpm-lock.yaml  pnpm-workspace.yaml
+> auth:      apps/auth/**      packages/**  package.json  pnpm-lock.yaml  pnpm-workspace.yaml
 > ```
 >
 > `packages/**` is **not optional**. The shared config packages are copied into both
@@ -52,7 +54,19 @@ migration runbook were both proven in real releases on 2026-08-02.
 > drifts from the repo.
 >
 > **Deploy settings** — backend healthcheck `/api/health` (timeout 300s), frontend
-> healthcheck `/`; restart ON_FAILURE, max 3 retries.
+> healthcheck `/`, auth healthcheck `/health` (200 only when the auth database
+> answers; timeout 300s); restart ON_FAILURE, max 3 retries.
+>
+> **auth service (spec 300)** — two listeners: the public domain
+> (`auth.askansari.ai`, `auth-staging.askansari.ai`) targets `PORT` (3100) and
+> nothing else; `INTERNAL_PORT` (3101) has NO domain and is reached by `backend`
+> over the private network (`AUTH_INTERNAL_URL`). Set both as service variables.
+> It has its OWN Railway Postgres, the auth database, with snapshots or PITR
+> enabled before its first real row (C-4, provisioned by the owner). Operator
+> scripts run in its image, from `/repo/apps/auth` (a Railway shell):
+> `./node_modules/.bin/tsx scripts/grant-admin.ts …` and `… scripts/ban-user.ts …`
+> (tsx directly: the image has no pnpm for its non-root user). From a checkout
+> with the auth database's `DATABASE_URL`, `pnpm exec tsx scripts/…` works too.
 >
 > **frontend (web) build variables** — `Dockerfile.web` bakes `EXPO_PUBLIC_API_URL`
 > and `EXPO_PUBLIC_AUTH_URL` into the bundle at build time, so both are set on the
@@ -207,7 +221,8 @@ Order proven for migration `0003` on 2026-08-02:
 
 3. **Run bootstrap scripts** (after the migration, before the deploy):
    - **Admins** live in `apps/auth` (spec 300): from `apps/auth/`, with the
-     auth database's `DATABASE_URL`, `pnpm exec tsx scripts/grant-admin.ts <email>`.
+     auth database's `DATABASE_URL`, `pnpm exec tsx scripts/grant-admin.ts <email>`
+     (in the auth service's Railway shell: `./node_modules/.bin/tsx scripts/grant-admin.ts <email>`).
      It grants the admin role to an account that already exists; it never
      creates an account or touches a password. A new admin therefore signs up
      first, then their address joins `apps/auth`'s `ADMIN_EMAILS`, then the
