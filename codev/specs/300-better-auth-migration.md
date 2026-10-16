@@ -16,8 +16,9 @@ This spec defines WHAT and WHY. The plan defines HOW and WHEN.
 > **Owner decisions, 2026-10-16.** Better Auth has **its own database from the start**. Only
 > `apps/auth` can reach it. `apps/api` keeps the existing database, where `public.users` stays for
 > referential integrity with its auth-only columns removed. See "Two databases from the start".
-> Also: **one PR for the cutover** (C-2; the main architect adds a provisioning PR before it and a
-> contract PR after it, pending the owner's confirmation), merged at the window; the JWT lifetime is **Better Auth's default, 15
+> Also: **one PR for the cutover** (C-2; a contract PR after the rollback deadline is pending the
+> owner's confirmation), merged at the window; **no database logins are provisioned**: each service
+> uses its own database's Railway default account; the JWT lifetime is **Better Auth's default, 15
 > minutes**; `apps/api` uses **plain JWKS validation with no per-request session check** (I-7).
 >
 > **Lineage.** This spec is written for issue #300. Its evidence base is the issue #60 reference
@@ -190,8 +191,8 @@ After the cutover:
 7. **`apps/frontend` signs in directly against `apps/auth`** with a Better Auth client from the
    cutover, and sends the JWT to `apps/api`. This change is agreed with the app architect first.
 8. **Admins are identified by the admin plugin's `role`** in the auth database, assigned by
-   `grant-admin.ts`, which moves to `apps/auth/scripts/` (same name, one script) and runs as the
-   auth database's migrator. Admin is never an email match. `ADMIN_EMAILS` moves to `apps/auth` and
+   `grant-admin.ts`, which moves to `apps/auth/scripts/` (same name, one script) and runs against
+   the auth database. Admin is never an email match. `ADMIN_EMAILS` moves to `apps/auth` and
    keeps only its reservation role and the boot assertion, rewritten against `role`. **Admin routes
    on `apps/api` ask `apps/auth` for the role on each request** rather than trusting a claim, so a
    demotion takes effect immediately, and they fail closed when `apps/auth` is unreachable.
@@ -422,10 +423,10 @@ is a **redeploy, never a database restore**:
 - **In the window, nothing legacy auth reads is dropped.** `password_hash` loses `NOT NULL`
   (`apps/api/drizzle/0000_baseline.sql:4`), so new users get a NULL hash. The new code neither
   reads nor writes any of the four legacy objects.
-- **During the rollback window, the runtime role cannot read the hashes.** The window revokes the
-  `apps/api` runtime role's table-level `SELECT` on `public.users` and grants column-level `SELECT`
-  on every column except `password_hash`. The new Drizzle schema has no `password_hash`, and
-  `apps/api` has no raw `SELECT *` on `users` (grep, 2026-10-16).
+- **During the rollback window, no code reads the hashes.** The new Drizzle schema has no
+  `password_hash`, `apps/api` has no raw `SELECT *` on `users` (grep, 2026-10-16), and a source scan
+  pins both. The database account itself could still read them until the contract migration
+  (owner decision: no separate logins; see Database accounts).
 - **After the deadline, a contract migration drops them**, in the first release after the
   24-hour deadline passes (see Phasing).
 
@@ -482,7 +483,7 @@ issue's dedicated-schema decision): `auth.users`, `auth.session`, `auth.account`
    The profile path in rule 2 **never re-creates a tombstoned id**. If step 3 fails, any later
    request carrying that `sub` (and so that user's JWT), or the user's retry of `DELETE me`,
    retries step 3 before answering 401. The operator's completion script lists pending tombstones
-   and deletes those auth users **directly as the auth database's migrator**; it never uses the
+   and deletes those auth users **directly in the auth database**; it never uses the
    endpoint. A failure therefore leaves an account that `apps/api` refuses, and never app data
    without a user.
 6. **Admin role.** `role` lives only in the auth database. On **each admin request**, `apps/api`
@@ -491,7 +492,7 @@ issue's dedicated-schema decision): `auth.users`, `auth.session`, `auth.account`
    grants access. The only admin route is `admin/stats`, so the traffic is small.
    - `ADMIN_EMAILS` (the reservation and the boot assertion) moves to `apps/auth`.
    - `grant-admin.ts` moves to `apps/auth/scripts/`, keeps its name, sets `auth.users.role`, and
-     runs as the auth database's migrator.
+     runs against the auth database.
 7. **System accounts stay app-only.** `ai-skill` and `leaderboard` are `public.users` rows with
    `system_key`. They have no auth-database row and no credential, so they cannot sign in or reset
    a password. `getOrCreateSystemUser` keeps working as today, including its guard against a
@@ -515,46 +516,30 @@ issue's dedicated-schema decision): `auth.users`, `auth.session`, `auth.account`
    only. A check would be an HTTP call to `apps/auth` on every request and a hard dependency of all
    of `apps/api` on `apps/auth`.
 
-**Database principals** (security review of 388371b, carried over per database). Each database has
-a **migrator** (its owner) and **one runtime role**:
+**Database accounts (owner decision, 2026-10-16): Railway's default account for each database.**
+No database logins, roles or grants are provisioned. Isolation comes from the **two databases**:
+`apps/api`'s `DATABASE_URL` points only at the app database and `apps/auth`'s only at the auth
+database, each with that database's Railway default account. The operator uses the same default
+URLs for applies, audits and the copy.
 
-- **App database.** The existing owner becomes the migrator and is **not** re-owned
-  (`ALTER … OWNER` on production tables is avoidable risk; the owner confirms ownership with
-  `\dt public.*` and `\du`). The `apps/api` runtime role gets DML on `public` and no DDL. Today's
-  `apps/api` `DATABASE_URL` **is** the migrator credential, so there is a **re-point step**. It is
-  **operations-only and runs ahead of the window** (security review of 52cff7a): it has no code
-  dependency, because `apps/api` already works under any DML-capable role (it runs no DDL or
-  `migrate()` at runtime, and its lazy pool from bugfix-260 is on `develop`, `aa20376`). Order: the
-  app database's provisioning SQL, **merged first in its own PR** (see Phasing), is applied as the
-  migrator from `develop`, then
-  `apps/api` moves to the runtime role, on staging first with a soak and then on production with its
-  own soak. The step ends with the migrator URL **in no service environment** and the migrator
-  password **rotated**. Rollback is restoring the old URL in Railway. The PR's runtime-role boot
-  check simply starts passing on a database that is already re-pointed.
-- **Auth database.** It is new, and its default user is the migrator. The `apps/auth` runtime role
-  gets DML on `auth.*` and no DDL. `apps/auth` never receives the migrator URL.
-- **Provisioning, not migrations.** Roles and grants live in reviewed provisioning SQL outside both
-  journals, under the operator scripts. It sets `ALTER DEFAULT PRIVILEGES FOR ROLE <migrator>` on
-  tables and sequences, in `public` for the app database and in `auth` for the auth database, so a
-  later migration's table is usable without a new `GRANT` (otherwise it fails with `42501`, which
-  is the #165 outage class). The deploy order is written into `RELEASE.md`: **roles SQL → migration →
-  grants → boot**. Every `psql` apply uses the operator-held migrator URL of that database. **No
-  runtime code path falls back to a migrator URL.**
-- **Proof.**
-  - A pglite test per database, under `SET ROLE`, shows: runtime-role DDL is denied with `42501`;
-    a table the migrator creates after provisioning is usable by the runtime role; and the same
-    case fails with `42501` when the default privileges are omitted. pglite 0.5.4 supports this
-    (probe, 2026-10-16). If that stops holding, the test moves to a CI Postgres service and is never
-    skipped.
-  - A loud **boot check in each service, on staging and production**, under the same gate as the
-    admin startup check (`NODE_ENV=production`, Node runtime, not `next build`; `apps/api/Dockerfile:40`
-    sets it, the new `apps/auth` Dockerfile sets it, and the plan confirms that staging's Railway
-    variables do not override it). The runtime role must **not** have `CREATE` on its schema
-    (`has_schema_privilege`). If it does, boot fails with a message naming the grant.
-  - **Local dev and CI** keep one owner URL per database, and contributors never create roles.
-    `CONTRIBUTING.md` says so. There, the pglite test is the proof.
-- Column-level grants, the cross-schema cascade test and the no-join scan of the earlier design
-  are no longer needed, because nothing references across databases.
+This supersedes the earlier three-principal design (migrator and runtime role per database,
+provisioning SQL, the `apps/api` re-point and password rotation, the runtime-role boot check, and
+column-level grants), together with the provisioning PR the main architect required for it.
+
+**Owner-accepted costs:**
+
+- Each service can run DDL on its own database, so a compromised service could alter or drop its
+  own tables. It still cannot reach the other database.
+- `apps/api`'s account can read the legacy `password_hash` column until the contract migration
+  drops it. Mitigations: no code reads it (the Drizzle schema has no such column, plus a source
+  scan), and the contract migration is dated to the first release after the rollback deadline.
+- The account used for migrations is the one in the service's environment, as it is today.
+
+**What stays:**
+
+- **No runtime code path names the other database's URL**, and there is no default or fallback
+  connection string in code. A source scan pins both.
+- The admin startup check stays, gated as today.
 
 ### Migration SQL location (resolves an issue "must be resolved" item)
 
@@ -595,10 +580,6 @@ schema) is dropped. Condition 6 (retire the `packages/auth` journal) is reversed
 
   Both are backward-compatible with the legacy code. **The owner** bumps `DEPLOYED_THROUGH`. A
   **schema freeze** runs from the cutover PR's merge to the end of the window.
-- **Column grants (window, operator step, not a migration).** From the merged provisioning SQL:
-  `REVOKE SELECT ON public.users` from the `apps/api` runtime role, then `GRANT SELECT (<every
-  column except password_hash>)`. Rollback re-grants with **one documented `psql` line**, then
-  redeploys.
 - **Contract migration (contract PR, the first release after the 24-hour deadline passes).** It
   drops `password_hash`, `is_admin` and `session_version`, and drops `tokens`. It is **not**
   backward-compatible, so it is the **one named exception** to `RELEASE.md`'s rule, and it gets its
@@ -615,8 +596,8 @@ schema) is dropped. Condition 6 (retire the `packages/auth` journal) is reversed
 **The cutover data copy** (owner: "a plain SQL query selecting from the old database into the new
 one, while the system is in maintenance mode"). The operator runs it **from a Railway shell inside
 the project, never from a laptop**, so the hashes never transit an operator machine. The two
-migrator URLs (`APP_MIGRATOR_DATABASE_URL`, `AUTH_MIGRATOR_DATABASE_URL`) are entered for that
-session only and stored nowhere: not in either database, not in a file, not in shell history.
+databases' default URLs (as `APP_DATABASE_URL` and `AUTH_DATABASE_URL`) are entered for that session
+only and stored nowhere: not in either database, not in a file, not in shell history.
 
 1. **Export from the app database into the auth database.** `\copy (SELECT id, lower(trim(email)),
    first_name, last_name, password_hash, registered_via, created_at, updated_at FROM public.users
@@ -639,7 +620,7 @@ session only and stored nowhere: not in either database, not in a file, not in s
    - a **hash checksum**: `md5(string_agg(password_hash, '' ORDER BY id))` on `public.users`,
      against the same over the `credential` rows' password column in `auth.account`, ordered by
      `user_id`. A corrupted or truncated copy is caught before the app migration.
-4. **Apply the app-database window migration**, then the column grants.
+4. **Apply the app-database window migration.**
 
 The copy is **not atomic across the two databases**, so ordering and gates replace atomicity. A
 failure in step 2 changes nothing. A failure in step 4 rolls back its own transaction and is
@@ -648,12 +629,10 @@ retried, with `apps/auth` not yet deployed.
 **Rollback within the 24-hour deadline is a redeploy, never a restore.** Nothing legacy auth reads
 has been dropped, so the runbook:
 
-1. re-grants table-level `SELECT` on `public.users` to the `apps/api` runtime role (one documented
-   `psql` line)
-2. removes the users registered after the cutover, by `created_at` (their threads, preferences and
+1. removes the users registered after the cutover, by `created_at` (their threads, preferences and
    feedback go with them through the cascade), because they have a NULL legacy hash and no usable
    legacy credential
-3. redeploys the previous `apps/api` and `apps/frontend` deployments, and detaches `apps/auth`'s
+2. redeploys the previous `apps/api` and `apps/frontend` deployments, and detaches `apps/auth`'s
    public domain
 
 **Owner-accepted costs of rollback:** a password changed at `apps/auth` after the cutover reverts
@@ -671,17 +650,15 @@ backfill inserts nothing, because of the unique `(user_id, provider_id)`.
 
 **Environment per service** (names approved by the main architect on #300; the auth database is new):
 
-| Principal | Database credential | Other variables |
+| Service | Database credential | Other variables |
 |---|---|---|
-| app migrator | `APP_MIGRATOR_DATABASE_URL`: the app database's owner, used for `psql` applies, provisioning, grants and audits | none |
-| auth migrator | `AUTH_MIGRATOR_DATABASE_URL`: the auth database's owner, used for its journal, provisioning, `grant-admin.ts` and audits | none |
-| `apps/auth` | `DATABASE_URL` = **auth database**, runtime role | `AUTH_INTERNAL_SECRET`, `AUTH_JWT_ISSUER`, `AUTH_JWT_AUDIENCE`, `ADMIN_EMAILS` (moved), plus the existing `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `CORS_ORIGIN` |
-| `apps/api` | `DATABASE_URL` = **app database**, re-pointed to the runtime role | `AUTH_INTERNAL_URL`, `AUTH_JWT_ISSUER`, `AUTH_JWT_AUDIENCE`, `AUTH_INTERNAL_SECRET`. The cutover PR removes `JWT_SECRET`, `ACCESS_TOKEN_EXPIRY_HOURS`, `REFRESH_TOKEN_EXPIRY_HOURS` and `ADMIN_EMAILS` |
+| `apps/auth` | `DATABASE_URL` = **auth database**, Railway default account | `AUTH_INTERNAL_SECRET`, `AUTH_JWT_ISSUER`, `AUTH_JWT_AUDIENCE`, `ADMIN_EMAILS` (moved), plus the existing `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `CORS_ORIGIN` |
+| `apps/api` | `DATABASE_URL` = **app database**, Railway default account (unchanged) | `AUTH_INTERNAL_URL`, `AUTH_JWT_ISSUER`, `AUTH_JWT_AUDIENCE`, `AUTH_INTERNAL_SECRET`. The cutover PR removes `JWT_SECRET`, `ACCESS_TOKEN_EXPIRY_HOURS`, `REFRESH_TOKEN_EXPIRY_HOURS` and `ADMIN_EMAILS` |
 
-The two migrator URLs are **shell variables in the operator's session only**: never set on a
-Railway service, never in `turbo.json`, never written to a file, and referenced by those names in
-`RELEASE.md`'s `psql` steps. The source scan fails on either name in runtime code, and the release
-check confirms that neither is present in any Railway service's environment.
+For the copy, the operator's Railway shell holds both databases' URLs as `APP_DATABASE_URL` and
+`AUTH_DATABASE_URL`, for that session only: never set on a Railway service, never in `turbo.json`,
+never written to a file. `RELEASE.md`'s `psql` steps name them. The source scan fails on either
+name in runtime code.
 
 `DATABASE_URL` keeps one name, with a different database per Railway service, so `turbo.json`
 gains no database variable. The four `AUTH_*` names go into `globalEnv`, and the three `JWT_*`
@@ -690,30 +667,29 @@ logged, and uses the placeholder-not-a-real-* convention in `.env.ci`. Local dev
 databases on one local Postgres, both with owner URLs.
 
 **Reviewers.** The main architect reviews both journals, their numbering and markers, the new
-Railway Postgres service, the provisioning SQL (High tier), the lockfile, `turbo.json` and CI. The
+Railway Postgres service, the lockfile, `turbo.json` and CI. The
 security architect reviews everything. The migration and copy SQL are High tier.
 
 ### Phasing (resolves an issue "must be resolved" item)
 
-**Owner decision, 2026-10-16: one PR for the cutover.** The main architect's re-review on #300
-(2026-10-16) adds a small PR before it and a contract PR after it, because **no unmerged SQL may
-touch a deployed database** and because the destructive drops must wait for the rollback deadline.
-**The owner confirms this three-PR shape at spec-approval (C-2).** Every SQL applied to a deployed
-database is applied from `develop` at a commit recorded in the release notes.
+**Owner decision, 2026-10-16: one PR for the cutover.** The owner also decided that no database
+logins are provisioned, so the provisioning PR the main architect required is gone. The main
+architect's re-review (2026-10-16) still adds a **contract PR after the rollback deadline**,
+because the destructive drops must wait for it; **the owner confirms this at spec-approval (C-2).**
+No unmerged SQL touches a deployed database: every SQL applied to one is applied from `develop` at
+a commit recorded in the release notes.
 
 | PR / stage | Reference phases | What happens |
 |---|---|---|
-| **1. Provisioning PR** (small, first; High tier, main architect) | 0 | The app database's provisioning SQL (roles; default privileges on tables and sequences in `public`); its `RELEASE.md` stage (migrator URL; roles → grants → re-point → soak → rotate); the pglite `SET ROLE` test with a negative case. Merged and released normally |
-| **Re-point, operations-only** | 0 | From `develop`: provisioning, then the `apps/api` re-point on staging with a soak, then on production with its own soak, ending with the migrator URL in no service environment and its password rotated |
-| **2. Cutover PR, built on the branch** | 0 to 2 (code) | The `apps/auth` config (UUIDs, `auth` schema, dual verify, `bearer()`, `jwt()`, `admin()` kept for its columns with its whole HTTP surface blocked, `change-email` and `update-user` blocked, rate limiting and client IP, the internal hop and endpoints), its Dockerfile and service; the fresh `packages/auth` `0000` and the auth database's provisioning SQL; the app migrations (scaffold cleanup, `public.deleted_users`, the window migration); the column-grant and rollback SQL; the copy script and audits; the `apps/api` JWKS verification, app-row creation, tombstoned deletion, role calls and compatibility layer; the CORS fix; contract tests written first against today's implementation; removal of the legacy JWT code and the `JWT_*` config (and their `globalEnv` names), with `grant-admin.ts` and `ADMIN_EMAILS` moving to `apps/auth`; the `apps/frontend` switch to `apps/auth` (agreed with the app architect); `RELEASE.md` and `CONTRIBUTING.md` |
+| **1. Cutover PR, built on the branch** | 0 to 2 (code) | The `apps/auth` config (UUIDs, `auth` schema, dual verify, `bearer()`, `jwt()`, `admin()` kept for its columns with its whole HTTP surface blocked, `change-email` and `update-user` blocked, rate limiting and client IP, the internal hop and endpoints), its Dockerfile and service; the fresh `packages/auth` `0000`; the app migrations (scaffold cleanup, `public.deleted_users`, the window migration); the rollback SQL; the copy script and audits; the `apps/api` JWKS verification, app-row creation, tombstoned deletion, role calls and compatibility layer; the CORS fix; contract tests written first against today's implementation; removal of the legacy JWT code and the `JWT_*` config (and their `globalEnv` names), with `grant-admin.ts` and `ADMIN_EMAILS` moving to `apps/auth`; the `apps/frontend` switch to `apps/auth` (agreed with the app architect); `RELEASE.md` and `CONTRIBUTING.md` |
 | **Before the window** | 2 | Staging deployments from the branch: the empirical edge check, and the **rehearsal** (including a rollback rehearsal) on a clone of the production app database plus a fresh auth database. The empty production auth database is created on Railway, with backups or PITR on before the first real row (C-4). The branch is kept current with `develop`, the numbering is re-checked after every merge, and the rehearsal is re-run after the last rebase |
-| **The window** | 3 | Merge and promote the cutover PR with `apps/api` offline: the app database's snapshot or PITR mark, the auth database's baseline and provisioning, the copy and its audits, the window migration and column grants, admin roles, deploy `apps/auth`, `apps/api` and `apps/frontend`, smoke tests, then `apps/auth`'s public domain |
-| **3. Contract PR** (the first release after the 24-hour deadline passes) | 4 | The contract migration: drop `password_hash`, `is_admin`, `session_version` and `tokens`, with its own `DEPLOYED_THROUGH` bump; the remaining pglite DDL; `RELEASE.md` names it as the one exception |
+| **The window** | 3 | Merge and promote the cutover PR with `apps/api` offline: the app database's snapshot or PITR mark, the auth database's baseline, the copy and its audits, the window migration, admin roles, deploy `apps/auth`, `apps/api` and `apps/frontend`, smoke tests, then `apps/auth`'s public domain |
+| **2. Contract PR** (the first release after the 24-hour deadline passes; pending the owner, C-2) | 4 | The contract migration: drop `password_hash`, `is_admin`, `session_version` and `tokens`, with its own `DEPLOYED_THROUGH` bump; the remaining pglite DDL; `RELEASE.md` names it as the one exception |
 | Out of this project (follow-up issues) | 4 triggers, 5 | Remove the layer (its trigger). A profile sync design before `change-email` or `update-user` is enabled |
 
 **Why the code switch cannot hide behind a feature flag.** The Drizzle schema in `apps/api` either
-has the legacy auth columns or does not, and the new code must not read `password_hash`, which the
-window's column grants enforce. So the code switch lands with the window. Rollback is the redeploy
+has the legacy auth columns or does not, and the new code must not read `password_hash`. So the
+code switch lands with the window. Rollback is the redeploy
 described under the cutover data copy, never a code toggle.
 
 **Costs, accepted by the owner.**
@@ -762,10 +738,9 @@ rollback deadline passing, and the contract PR's release.
 - [ ] The window migration, in one transaction with guards, normalizes `public.users.email`
   (aborting on a collision) and drops `NOT NULL` from `password_hash`, and **does nothing else**.
   The foreign keys from `threads`, `preferences` and `feedback` to `public.users` are unchanged.
-- [ ] During the rollback window the `apps/api` runtime role holds column-level `SELECT` on every
-  `public.users` column except `password_hash`. A pglite `SET ROLE` test proves that
-  `SELECT password_hash` fails with `42501` while the row read the new code makes succeeds. The new
-  code neither reads nor writes `password_hash`, `is_admin`, `session_version` or `tokens`.
+- [ ] The new code neither reads nor writes `password_hash`, `is_admin`, `session_version` or
+  `tokens`. The Drizzle schema has none of them, and a source scan, negative-tested against a
+  planted line, finds no raw SQL that names them or selects `*` from `users`.
 - [ ] **Hashes are gone from the app database:** the contract migration drops `password_hash`,
   `is_admin`, `session_version` and `tokens`, with its own `DEPLOYED_THROUGH` bump, in the first
   release after the 24-hour deadline passes.
@@ -805,9 +780,9 @@ rollback deadline passing, and the contract PR's release.
 - [ ] The pglite DDL in `apps/api` tests that names the dropped columns or `tokens` is updated,
   coordinated with #292.
 - [ ] **Two databases, enforced.** `apps/api` has no auth-database credential, and `apps/auth` has
-  no app-database credential. A source scan pins it, and also fails on `APP_MIGRATOR_DATABASE_URL`
-  or `AUTH_MIGRATOR_DATABASE_URL` in runtime code, negative-tested against a planted line. The
-  release check confirms neither migrator name is set on any Railway service.
+  no app-database credential. A source scan pins it, and also fails on `APP_DATABASE_URL` or
+  `AUTH_DATABASE_URL` in runtime code and on any fallback connection string, negative-tested
+  against a planted line.
 
 **App rows, deletion and system accounts (`apps/api`)**
 
@@ -821,7 +796,7 @@ rollback deadline passing, and the contract PR's release.
   fires.
 - [ ] The internal delete endpoint refuses a call without the subject's JWT, with an invalid JWT,
   or with a JWT whose `sub` differs from the target id. The operator completion script deletes as
-  the auth migrator and never calls it.
+  the auth database directly and never calls it.
 - [ ] Internal routes compare the credential in constant time, are mounted outside the Better Auth
   handler path, are rate-limited, and are reached over the private network.
 - [ ] `DELETE me` refuses a system account before deleting anything. Otherwise it deletes the app
@@ -832,17 +807,6 @@ rollback deadline passing, and the contract PR's release.
   auth database.
 - [ ] `change-email` and `update-user` are blocked on `apps/auth`, with the same variant tests as
   the admin surface.
-
-**Database principals**
-
-- [ ] Each database has a migrator and one runtime role. Provisioning SQL, outside both journals,
-  sets default privileges on tables and sequences (`public` in the app database, `auth` in the auth
-  database).
-- [ ] A pglite test per database under `SET ROLE`: runtime DDL fails with `42501`; a table the
-  migrator creates later is usable by the runtime role; without the default privileges it fails
-  with `42501`.
-- [ ] The boot check in each service, on staging and production, fails boot if the runtime role
-  has `CREATE` on its schema.
 
 **Credentials and sessions (`apps/auth`)**
 
@@ -1029,30 +993,19 @@ rollback deadline passing, and the contract PR's release.
   - the cross-database copy, its audits, the app window migration, admin roles, and attaching
     `apps/auth`'s domain
   - deploying `apps/api` and `apps/frontend`, then the smoke tests
-  - the **24-hour rollback deadline**: re-grant `SELECT` on `public.users` with the documented
-    `psql` line, remove the users registered after the cutover by `created_at`, redeploy the
+  - the **24-hour rollback deadline**: remove the users registered after the cutover by
+    `created_at`, redeploy the
     previous `apps/api` and `apps/frontend` deployments, and detach `apps/auth`'s public domain.
     It is a redeploy, never a database restore. After the deadline, fix forward.
-- [ ] The rehearsal of the full runbook, **including the rollback** (re-grant, removal of
-  post-cutover users, redeploy of the previous image, which then serves legacy logins), runs on a
+- [ ] The rehearsal of the full runbook, **including the rollback** (removal of post-cutover users, redeploy of the previous image, which then serves legacy logins), runs on a
   clone of the production app database and a fresh auth database, never a database production
   uses. It passes all audits, then boots the cutover PR's
   `apps/api` and `apps/auth` against the rehearsed databases and passes the smoke tests.
-- [ ] The cutover PR amends `RELEASE.md` with the auth database, the provisioning step and the deploy order
-  **roles SQL → migration → grants → boot** for each database. The order is written as two stages.
-  **Ahead of the window**, for the app database: provisioning, then the re-point and its soak, then
-  rotation. **In the window**, for the auth database: roles, baseline, grants, then the copy, before
-  the `apps/auth` deploy. Every `psql` apply, the smoke test and the admin
-  bootstrap step use the operator-held migrator URL of the right database; `CONTRIBUTING.md` states
-  that dev and CI use one owner URL per database, on two local databases.
-- [ ] The **provisioning PR** merges first: the app database's provisioning SQL, its `RELEASE.md`
-  stage and the pglite `SET ROLE` test with a negative case. No unmerged SQL touches a deployed
-  database, and every applied SQL is recorded with its `develop` commit in the release notes.
-- [ ] The **re-point** is an operations-only step **ahead of the window**, from `develop`: the app
-  database's provisioning SQL, then staging with a soak, then production with its own soak. The
-  window holds no re-point. It ends
-  with the migrator URL in no service environment (checked on every Railway service) and the
-  migrator password rotated. A source scan finds no fallback connection string in runtime code.
+- [ ] The cutover PR amends `RELEASE.md` with the auth database and its window steps (baseline,
+  copy, audits, app window migration), each `psql` step naming `APP_DATABASE_URL` or
+  `AUTH_DATABASE_URL` from the Railway shell. `CONTRIBUTING.md` states that dev and CI use two local
+  databases with owner URLs. Every applied SQL is recorded with its `develop` commit in the release
+  notes.
 - [ ] The cutover and contract PRs also amend `RELEASE.md`:
   - it names the **contract** migration as the one exception to the backward-compatible rule
   - it records the schema freeze
@@ -1180,7 +1133,7 @@ decided rate limits apply to every production sign-in, because all of them pass 
 ## Solution Approaches
 
 The owner settled hosting and the token model at the spec-approval gate on 2026-10-15. The
-approaches below record what was considered and why. The PR shape is one cutover PR (owner), with a provisioning PR before it and a contract PR after it (main architect; C-2).
+approaches below record what was considered and why. The PR shape is one cutover PR (owner), with a contract PR after the rollback deadline pending the owner (C-2).
 
 ### Approach 1: Separate `apps/auth` service, JWT/JWKS verification in `apps/api`, layer as an HTTP client (chosen by the owner)
 
@@ -1224,7 +1177,7 @@ This was the first draft's proposal.
 - **Cons:** auth stays inside `apps/api`.
 - **Not chosen:** rejected by the owner.
 
-**PR shape (independent of the above):** a provisioning PR, the cutover PR merged at the window, and a contract PR after the rollback deadline (C-2).
+**PR shape (independent of the above):** the cutover PR merged at the window, and a contract PR after the rollback deadline (C-2).
 
 ## Open Questions
 
@@ -1235,9 +1188,9 @@ This was the first draft's proposal.
   database. The main architect's seven conditions were written for a single journal and need
   re-review; the spec states which carry over. No external migration framework is needed and
   Waleed is not a reviewer (owner).
-- **C-2: PR shape (owner, at spec-approval).** The owner decided one PR for the cutover. The main
-  architect's re-review requires a small provisioning PR before it and a contract PR after the
-  rollback deadline. Does the owner accept these three PRs? See Phasing.
+- **C-2: PR shape (owner, at spec-approval).** The owner decided one PR for the cutover, and no
+  database logins (so no provisioning PR). The main architect's re-review adds a contract PR after
+  the rollback deadline, so that rollback stays a redeploy. Does the owner accept it? See Phasing.
 - **C-4: The auth database on Railway** (owner and main architect). A new Railway Postgres service
   for `apps/auth` in staging and production, with snapshots or PITR, and its cost.
 - **C-3: Staging database.** `api-staging.askansari.ai` exists (plan 124). Does it have its own
@@ -1315,9 +1268,6 @@ This was the first draft's proposal.
 9c. A user who signs up directly at `apps/auth` gets a `public.users` row on the first `apps/api`
    request, with the same id, email and names. Two concurrent first requests create one row. A
    `sub` that `apps/auth` does not know gets 401 and no row.
-9d. Provisioning, in pglite under `SET ROLE`, for each database: runtime DDL fails with `42501`; a
-   table the migrator creates later is usable by the runtime role, and fails with `42501` when the
-   default privileges are omitted.
 9e. The source scan finds no auth-database connection in `apps/api` and no app-database connection
    in `apps/auth`, and fails on a planted one.
 9f. A user created at `apps/auth` whose email is already held in `public.users` under another id
@@ -1329,13 +1279,11 @@ This was the first draft's proposal.
    migration is not run. A step 2 failure leaves no import table behind.
 9i. No verification email is sent to any copied user, and every copied user has
    `email_verified = true`.
-9j. Under `SET ROLE` on the `apps/api` runtime role after the window's grants, `SELECT password_hash
-   FROM public.users` fails with `42501`, and the new code's user read succeeds.
-9k. Rollback rehearsal: after the documented re-grant, the removal of post-cutover users by
+9k. Rollback rehearsal: after the removal of post-cutover users by
    `created_at`, and a redeploy of the previous image, a migrated user signs in with the legacy
    password through the legacy code, and no post-cutover user remains.
-9l. The source scan fails on a planted `APP_MIGRATOR_DATABASE_URL` or `AUTH_MIGRATOR_DATABASE_URL`
-   in runtime code.
+9l. The source scan fails on a planted `APP_DATABASE_URL` or `AUTH_DATABASE_URL` in runtime code,
+   on a planted read of `password_hash`, and on a planted `SELECT *` from `users`.
 10. Re-running the `account` backfill inserts zero rows. The auth-database copy transaction run
     against a non-empty `auth.users` aborts with no changes.
 11. A fresh empty app database migrated through the full `apps/api` journal, and a fresh auth
@@ -1422,8 +1370,9 @@ This was the first draft's proposal.
 | `apps/frontend` client change slips or breaks in the window | Medium | High | Agreed with the app architect up front; rehearsed; web rollback by redeploy; native release timing decided (I-6) |
 | Long-lived branch drifts from `develop` | Medium | Medium | Regular `develop` merges; numbering re-check after each; rehearsal re-run after the last rebase; nothing merges early, so releases never freeze |
 | More lands in one window | Medium | High | Full rehearsal on a production clone; ordered, gated runbook; 24-hour snapshot rollback |
-| Rollback after cutover | Low | High | A redeploy, never a restore: nothing legacy reads is dropped until the contract migration; documented re-grant; post-cutover users removed by `created_at` (owner-accepted cost); rollback rehearsed |
-| Runtime role reads legacy hashes during the rollback window | Low | High | Column-level `SELECT` without `password_hash`; `42501` test; no raw `SELECT *` on `users` |
+| Rollback after cutover | Low | High | A redeploy, never a restore: nothing legacy reads is dropped until the contract migration; post-cutover users removed by `created_at` (owner-accepted cost); rollback rehearsed |
+| Legacy hashes readable by `apps/api`'s database account until the contract migration | Certain (owner: no separate logins) | Medium | No code reads them (Drizzle schema, scan); contract migration dated to the first release after the deadline |
+| A compromised service runs DDL on its own database | Low | High | Owner-accepted (default accounts); it still cannot reach the other database; snapshots or PITR on both |
 | Contract migration forgotten, leaving hashes in the app database | Medium | Medium | Dated to the first release after the deadline; a success criterion; part of this project's verify |
 | Cross-database copy half-done (auth database filled, app migration failed) | Low | High | Ordered, gated steps; each step one transaction; audits before the app migration; `apps/auth` not deployed until both succeed; rehearsed on a clone |
 | App row and auth user drift apart (missing row, orphan, resurrected deleted user) | Medium if unguarded | High | Same UUID; app row created on first use from the profile endpoint; tombstone blocks re-creation; pending deletions completed on access and by an operator script; profile-changing endpoints blocked |
@@ -1433,7 +1382,6 @@ This was the first draft's proposal.
 | Legacy admin silently dropped or added | Medium if overlooked | High | Owner-approved inventory; role-set audit |
 | Mixed-case legacy email becomes unfindable | Unknown (older rows unverified) | High | Copy `lower(trim(email))`; in-transaction collision guard; pre-window audit with owner decisions; mixed-case sign-in test |
 | A journal drifts from its database | Medium | High | One journal per database, each with a parity test and its own marker |
-| Migrator credential left in a service environment | Medium if overlooked | High | Re-point step ends with every service checked and the password rotated; no runtime fallback (scan) |
 | Migration numbering collides after a concurrent merge | Medium | Medium | Numbering rule: merge `develop`, run generate, rename, re-check after every merge; schema freeze from the PR's merge to window close |
 | #59 scaffold tables hold data at drop time | Low | Medium | In-migration guard aborts on any row |
 | Targeted sign-in lockout under the IP fallback | Medium (fallback only) | Low | Failed-only counting, bounded to one 60s window per five failures; list-walk alert; reset unaffected |
