@@ -88,6 +88,21 @@ tombstone re-check in one transaction): **security spot-check, no own consult ro
 3-iteration ceiling force-advanced). Its code was in the tree Codex approved in phase 8
 iteration 3. The PR's integration review should take a deliberate look at `resolve-user.ts`.
 
+Later phases, all Codex-only (Gemini skipped every round):
+
+| Phase | Rounds | Outcome |
+|---|---|---|
+| 9 | 1 | Codex COMMENT, one README item fixed (README/comment-only follow-up not re-seen) |
+| 10 | 2 | iter1: the app architect's acceptance pending (no code issue); iter2 APPROVE, including the app architect's three required fixes |
+| 11 | 2 | iter1: env templates (deferred to the owner by the security architect) and a CONTRIBUTING fix; iter2 APPROVE |
+| 12 | 3 | iter1 four issues, iter2 one, iter3 one, all accepted |
+
+Phase 12's last fix (68aef71, `apps/auth/scripts/cutover/02-import-auth.sql`: a NULL legacy
+timestamp blocks the copy instead of becoming `now()`): **security spot-check, no own consult
+round** (porch's 3-iteration ceiling force-advanced), as for 583b045. The stacked frontend PRs
+(#309, #311, #312) were each reviewed by the app architect with a real-path run on the iOS
+Simulator, and approved on the PR before their merge commits.
+
 ## Lessons for the lessons-learned pass
 
 - **A rule that exists only in production needs a production-mode test** (phase 8, found by the
