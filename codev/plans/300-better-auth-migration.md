@@ -4,8 +4,10 @@
 (approved by the owner, 2026-10-16, at `da1ad81`)
 
 **Evidence base**: `codev/plans/60-better-auth-migration-reference.md` (not edited). Where this
-plan departs from it, the departure comes from the approved spec, which records its reasons. This
-plan adds no new departures. The questions for the plan-approval gate are listed at the end.
+plan departs from it, the departure comes from the approved spec, which records its reasons. Two
+points depart from the **spec** itself, and both are put to the gate rather than assumed: G-2
+(when the production domains are edge-checked) and G-3 (a fourth internal endpoint). The questions
+for the plan-approval gate are listed at the end.
 
 ## Executive Summary
 
@@ -37,9 +39,10 @@ The order of the phases has three rules:
 - **Destructive removal of legacy code late** (phase 9), so every earlier phase keeps the whole
   test suite green against a codebase that still has both.
 
-Until phase 9, `apps/api` keeps compiling and passing with the legacy code present. From phase 7 on,
-routes resolve users through the new verifier. The legacy JWT modules remain until phase 9 deletes
-them.
+Until phase 9, `apps/api` keeps compiling and passing with the legacy code present. Phase 7 builds
+the verifier without wiring it to any route. Phase 8 switches every route and the layer in **one
+commit**, so no intermediate commit mixes legacy-issued tokens with JWT-verified routes. The legacy
+JWT modules remain until phase 9 deletes them.
 
 ## Decisions this plan makes (the spec delegated them)
 
@@ -86,7 +89,7 @@ amending a number does not touch any test.
 | Password-reset request (better-auth router) | client IP | every request | 3 / 60 s (its built-in rule, kept) | A burst cap underneath the two above |
 | Reset consume (`/reset-password`) | client IP | every request | 5 / 15 min | Tokens are random and single-use. This only stops hammering |
 | Session → JWT exchange (`/token`, `/get-session`) | client IP | every request | 60 / 60 s | Clients exchange about once per 15 minutes per device. The released mobile client refreshes concurrently with no single-flight guard (`legacy/frontend-app/src/services/ApiService.ts:101-128`), so bursts must pass |
-| Internal endpoints (profile, role, delete) | per endpoint, global | every request | 600 / 60 s | Profile is called once per new user, role once per admin request, delete once per deletion. B-4 sizes peak first requests |
+| Internal endpoints (profile, role, delete, revoke-sessions) | per endpoint, global | every request | 600 / 60 s | Profile is called once per new user, role once per admin request, delete once per deletion. B-4 sizes peak first requests |
 | Global default (better-auth `window`/`max`) | client IP | every request | 100 / 60 s | Unchanged from the reference |
 | **Fallback only:** sign-in | normalized email | **failed** attempts only | 5 / 60 s, locks the email for the rest of the window | Spec |
 | **Fallback only:** sign-up | normalized email | every request | 3 / 60 s | Spec |
@@ -172,8 +175,8 @@ cannot meet that literally, and it is put to the gate.
     {"id": "phase_4", "title": "apps/auth HTTP perimeter: blocked surfaces, client IP, rate limits, CORS"},
     {"id": "phase_5", "title": "apps/auth internal endpoints, reset email, role script and boot assertion"},
     {"id": "phase_6", "title": "App database migrations: scaffold cleanup, tombstones, window migration"},
-    {"id": "phase_7", "title": "apps/api JWT verification, user resolution and admin role calls"},
-    {"id": "phase_8", "title": "Compatibility layer over apps/auth"},
+    {"id": "phase_7", "title": "apps/api JWT verifier, user resolution and auth-service client"},
+    {"id": "phase_8", "title": "Route switch and compatibility layer over apps/auth"},
     {"id": "phase_9", "title": "Legacy auth removal, CORS fix and source scans"},
     {"id": "phase_10", "title": "apps/frontend signs in at apps/auth"},
     {"id": "phase_11", "title": "apps/auth deployment: Dockerfile, Railway service, CI and env"},
@@ -309,14 +312,21 @@ fails when the setting is removed.
   (min 32), `RESEND_API_KEY` (min 20), `FRONTEND_URL`, `ADMIN_EMAILS` and `AUTH_RATE_LIMIT_MODE`
   (P-3).
 - `packages/auth/src/limits.ts` (new): the P-2 numbers, the only source.
-- `packages/auth/src/reserved.ts` (new): the `@system.ansari.chat` reservation, ported from
-  `apps/api/lib/auth/reserved.ts` and `system-accounts.ts`.
+- `packages/auth/src/reserved.ts` (new): `isReservedAddress`, ported from
+  `apps/api/lib/auth/reserved.ts` and `system-accounts.ts`. It reserves **both** the
+  `ADMIN_EMAILS` entries and the `@system.ansari.chat` domain, exactly as today
+  (`reserved.ts:15-20`).
+- `packages/auth/src/newsletter.ts` (new): the fire-and-forget `MARKETMAKER_URL` subscribe, ported
+  from `apps/api/lib/newsletter.ts`. It is called from a `hooks.after` on `/sign-up/email` when the
+  body carries `register_to_mail_list: true`, so `apps/frontend` registrations keep the opt-in
+  after phase 10. `MARKETMAKER_URL` (already in `globalEnv`) joins `apps/auth`'s env.
 - `packages/types/src/attribution.ts` (new): the pure `X-Ansari-Client` parser, moved from
   `apps/api/lib/attribution.ts` (the pattern and normalisation only; the Sentry wrapper stays in
   `apps/api`). Both services import it, so neither copy can drift, and `apps/api` still never
   imports `better-auth`.
-- `packages/auth/package.json`: `bcrypt` (`^6.0.0`, already resolved through `apps/api`; a native module, so
-  phase 11's Dockerfile builds it). This is a lockfile hunk for the main architect.
+- `packages/auth/package.json`: `bcrypt` (`^6.0.0`, already resolved through `apps/api`; a native
+  module, so phase 11's Dockerfile builds it) and `resend` (`^6.9.3`, as in `apps/api`). This is a
+  lockfile hunk for the main architect.
 - `packages/auth/tests/*.test.ts`: new and extended.
 
 #### Deliverables
@@ -331,10 +341,22 @@ fails when the setting is removed.
   - `jwt({ jwks: { keyPairConfig: { alg: 'EdDSA' } }, jwt: { issuer, audience, expirationTime: '15m', definePayload: ({ user, session }) => ({ sub: user.id, sid: session.id }) } })`
   - `admin()`
 - [ ] `user.additionalFields`: `first_name`, `last_name`, and `registered_via` (`input: false`).
-- [ ] `databaseHooks.user.create.before`:
-  - refuse a reserved domain with the same error as a taken email
-  - set `registered_via` from `X-Ansari-Client` through the shared parser
-  - derive `name` when the client sent none, by the spec's rule
+- [ ] **The sign-up guard order, kept as today** (`register/route.ts`; no oracle). A
+  `hooks.before` on `/sign-up/email` runs, in order:
+  1. a reserved address (`isReservedAddress`) or an existing user
+     (`internalAdapter.findUserByEmail`) → the **identical 409**
+  2. `checkPasswordStrength` → 400 with the legacy `detail`
+
+  Before step 1 the hook applies the email and length checks itself, so validation stays first
+  whether or not better-auth's body validation runs before `hooks.before`. Phase 3 pins that
+  order with the reserved-address, weak-password case.
+  `databaseHooks.user.create.before` repeats the reservation as defence in depth, and also:
+  - sets `registered_via` from `X-Ansari-Client` through the shared parser
+  - derives `name`, when the client sent none, by the spec's rule
+- [ ] **The reset-consume order, kept as today** (`reset_password/route.ts:38-57`). A
+  `hooks.before` on `/reset-password` first looks the token up
+  (`internalAdapter.findVerificationValue('reset-password:<token>')`): missing or expired gives 400
+  `Invalid or expired reset token`. Only then does it run `checkPasswordStrength`.
 - [ ] `emailVerification.sendOnSignUp: false` and no `sendVerificationEmail`, so no copied user is
   ever emailed (scenario 9i).
 - [ ] `user.changeEmail.enabled: false`, and `deleteUser` left disabled.
@@ -397,9 +419,14 @@ client IP cannot be forged or collapsed, and every limit holds across both modes
 - `apps/auth/src/routes/health.ts` (new): `GET /health` answers 200 only after `select 1` on the
   auth database succeeds.
 - CORS: `origin` is an exact allowlist (the `apps/frontend` web origins from `CORS_ORIGIN`, now a
-  comma list), `credentials: false`, and `exposedHeaders: ['set-auth-token', 'set-auth-jwt']`.
+  comma list), `credentials: false`, `allowedHeaders: ['Content-Type', 'Authorization', 'X-Ansari-Client']`
+  (the attribution header must pass the browser preflight), and
+  `exposedHeaders: ['set-auth-token', 'set-auth-jwt']`.
   `trustedOrigins` uses the same list plus the native schemes.
-- `apps/auth/tests/` (new directory), with a vitest config and a CI hookup (see phase 11).
+- `apps/auth/tests/` (new directory), with `apps/auth/vitest.config.ts`, a `test` script in
+  `apps/auth/package.json`, and dev dependencies `vitest` and `@electric-sql/pglite` (as in
+  `packages/auth`). It also adds `@sentry/node` (already resolved at 10.69.0). These are lockfile
+  hunks. CI hookup is in phase 11.
 - `packages/auth/tests/auth.http.test.ts`: #266. The origin test sets `advanced.disableOriginCheck: false`
   explicitly under `NODE_ENV=test` (`dist/context/create-context.mjs:211`) and asserts that a wrong
   origin is **rejected**. A negative test proves it fails if the check is bypassed.
@@ -463,6 +490,14 @@ tooling to the auth database.
     `jose` against the service's **own** JWKS, with `alg`, `iss`, `aud` and `exp` pinned, and
     refuses unless `sub === :id`. It then calls `internalAdapter.deleteUser(id)`, which deletes
     the sessions, accounts and user (`dist/db/internal-adapter.mjs:232`). "Not found" returns 204.
+  - **`POST /internal/users/:id/revoke-sessions`** (**G-3**, built here if the gate approves). It
+    is bound to the subject's JWT exactly like delete, has the same rate limit, and calls
+    `internalAdapter.deleteSessions(id)`. The legacy logout needs it, because the legacy client
+    sends only the JWT, never the session token, and logout must revoke every session. It adds no
+    capability to the internal credential alone. **If the gate rejects it**, the layer's logout
+    calls `POST /api/auth/revoke-sessions` with the session token, which the legacy client never
+    sends to logout, so legacy logout would revoke nothing. That is not acceptable, so a rejection
+    goes back to the owner.
 - `packages/auth/src/index.ts`: the reset email. `sendResetPassword` builds
   `${FRONTEND_URL}/reset-password?token=<token>` (`dist/api/routes/password.mjs:82-85`). It sends
   through Resend with the same sender as `apps/api/lib/email.ts`.
@@ -473,6 +508,14 @@ tooling to the auth database.
   `auth.users.role` by email, against the auth database's `DATABASE_URL`. It never sets a password
   and never touches the app database. `--list` prints the current admin set for the audit. The old
   file is deleted in phase 9.
+- `apps/auth/scripts/ban-user.ts` (new). The admin HTTP surface is blocked, so a ban is an operator
+  script, like roles. `--ban <email> [--reason]` sets `banned`, `ban_reason` and `ban_expires`, and
+  deletes the user's sessions in the same transaction. `--unban` clears them. Better-auth's admin
+  plugin refuses sign-in for a banned user, and the role endpoint reports `banned`, so admin
+  routes refuse at once. Everywhere else, the user's issued JWTs last until `exp`, which is the
+  accepted window.
+- `apps/auth/package.json`: `jose` as a direct dependency (already resolved at 6.2.9), for the
+  subject-JWT check. This is a lockfile hunk.
 - `apps/auth/src/startup-checks.ts` (new): `assertConfiguredAdminsExist`, which checks that every
   `ADMIN_EMAILS` entry exists with `role = 'admin'`, gated by a port of
   `shouldRunAdminStartupCheck`.
@@ -485,6 +528,9 @@ tooling to the auth database.
 - [ ] Scenario 9g: the delete refuses with no JWT, with another user's JWT, and with a forged JWT,
   and the account remains.
 - [ ] Delete is idempotent.
+- [ ] `revoke-sessions` has the same refusal matrix as delete, and afterwards no session of the
+  user can mint a JWT (if G-3 is approved).
+- [ ] A ban kills every session, refuses sign-in, and makes the role endpoint report `banned`.
 - [ ] Profile never returns a system account, because none exists.
 - [ ] The reset link has the legacy shape, the reset kills sessions, and `checkPasswordStrength`
   runs before register and before reset. Better-auth enforces only length, so a strength hook sits
@@ -554,15 +600,17 @@ The parity test is green on the full journal. The guards are demonstrated to abo
 
 pglite: apply the journal through `0008`, seed, apply the new migrations, and assert.
 
-### Phase 7: apps/api JWT verification, user resolution and admin role calls
+### Phase 7: apps/api JWT verifier, user resolution and auth-service client
 
 **Dependencies**: Phases 5 and 6
 
 #### Objective
 
-Replace `authenticateRequest` and `requireAdmin` on every route with JWT verification against the
-JWKS, plus user resolution in the app database, keeping today's response codes and ownership
-checks.
+Build, and test in isolation, everything `apps/api` needs to authenticate against `apps/auth`:
+JWT verification against the JWKS, user resolution in the app database, the admin role call, and
+the HTTP client. **No route is rewired in this phase.** Login still issues legacy HS256 tokens
+until phase 8, so switching the routes here would break the legacy flow between the two commits
+(Codex, plan review iteration 1). Phase 8 rewires the routes and the layer together.
 
 #### Files to Create / Modify
 
@@ -585,11 +633,10 @@ checks.
      email held by a `system_key` row.
   4. Profile 404 → 401.
 - `apps/api/lib/auth/require-user.ts` (new): the drop-in for `authenticateRequest`, returning the
-  same `{user} | {error}` shape, so the twelve route diffs are mechanical.
-  `apps/api/lib/auth/admin.ts`: `requireAdmin` calls the role endpoint. A non-admin or banned user
-  gets 403, and an unreachable or 5xx `apps/auth` gets 503.
-- The twelve route files from the spec's list, **re-grepped** at the start of the phase:
-  `grep -rln "authenticateRequest\|requireAdmin" apps/api/src`.
+  same `{user} | {error}` shape, so phase 8's route diffs are mechanical.
+- `apps/api/lib/auth/require-admin-role.ts` (new): the successor to `requireAdmin`. It calls the
+  role endpoint on each request. A non-admin or banned user gets 403, and an unreachable or 5xx
+  `apps/auth` gets 503. The existing `admin.ts` stays until phase 8 switches its one caller.
 - `apps/api/lib/rate-limit.ts`: `getClientIp` reads `X-Real-IP` only. `tests/rate-limit.test.ts`
   is inverted to match. N-2 is decided **no /64 grouping**: `mcp-complete`'s limiter keeps exact
   addresses, and the change is recorded.
@@ -611,55 +658,55 @@ checks.
 - [ ] Scenarios 9a, 9c and 9f: first-request row creation (two concurrent requests create one row),
   an unknown `sub` gives 401, the email-conflict, reserved-domain and system-email cases give 401
   with an ids-only log, and a tombstone triggers a delete retry then 401.
-- [ ] Scenario 5: admin 200, non-admin 403, unauthenticated 401, a demoted admin gets 403 on the
-  next request, and an unreachable `apps/auth` gives 503.
-- [ ] Scenario 25: ownership is unchanged. The existing IDOR suites run against the new resolver.
-- [ ] The machine callers, both directions: a user JWT on `/api/v1/chat/completions` gets 401 and
-  is never parsed as a JWT, and `LEADERBOARD_API_KEY` on every JWT route gets 401.
-  `mcp-complete` is unchanged. A test asserts that `apps/api/src/middleware.ts` does not exist.
+- [ ] `require-admin-role` in isolation: admin, non-admin, banned, a demotion seen on the next
+  call, and 503 when `apps/auth` is unreachable.
 - [ ] Scenario 33: the steady state makes no network call, so the test JWKS server counts zero
   fetches after warm-up.
 
 #### Acceptance Criteria
 
-The full `apps/api` suite is green. The legacy JWT tests still pass, because the legacy code still
-exists. Phase 1's contract suite is still green in `legacy` mode.
+The full `apps/api` suite is green, with **every route still on the legacy path**. Phase 1's
+contract suite is green in `legacy` mode.
 
 #### Test Plan
 
-pglite for the app database. A real `apps/auth` (`createApp` over pglite) for the internal
-endpoints in integration tests. A local JWKS handler for the matrix.
+Unit and integration tests of the new modules, called directly. pglite for the app database, a real
+`apps/auth` (`createApp` over pglite) for the internal endpoints, and a local JWKS handler for the
+matrix.
 
-### Phase 8: Compatibility layer over apps/auth
+### Phase 8: Route switch and compatibility layer over apps/auth
 
 **Dependencies**: Phases 1, 5 and 7
 
 #### Objective
 
-Re-implement the legacy routes as HTTP clients of `apps/auth`, judged by phase 1's tests in
-`better-auth` mode, **unchanged**.
+In one commit, so no intermediate state mixes token kinds:
+
+- switch every authenticated route to phase 7's verifier
+- re-implement the legacy routes as HTTP clients of `apps/auth`
+
+The result is judged by phase 1's tests in `better-auth` mode, **unchanged**.
 
 #### Files to Create / Modify
 
-The eight route files under `apps/api/src/app/api/v2/users/` and `v2/request_password_reset` and
-`v2/reset_password`, and `apps/api/lib/auth-service/legacy.ts` (new; the translations).
+- Every route file that calls `authenticateRequest` or `requireAdmin`, **re-grepped** at the start
+  of the phase (`grep -rln "authenticateRequest\|requireAdmin" apps/api/src`; twelve today), moved
+  to `require-user` and `require-admin-role`.
+- The route files under `apps/api/src/app/api/v2/users/`, plus `v2/request_password_reset` and
+  `v2/reset_password`.
+- `apps/api/lib/auth-service/legacy.ts` (new): the translations from `apps/auth` responses to the
+  legacy `detail` strings and status codes.
 
 | Route | Call to `apps/auth` (private network, credential, forwarded IP) | Legacy response |
 |---|---|---|
-| `register` | zod → reserved and `findUserByEmail` check (409) → strength → `POST /api/auth/sign-up/email` with `X-Ansari-Client` forwarded → `GET /api/auth/token` → insert `public.users` (same id, email, names, `registered_via`) → newsletter | `{status, access_token: JWT, refresh_token: session token, token_type}` |
+| `register` | zod (as today) → an email held by a `system_key` row in `public.users` → 409 → `POST /api/auth/sign-up/email` with `X-Ansari-Client` and `register_to_mail_list` forwarded. `apps/auth` enforces reserved/taken (409) **then** strength (400), the legacy order (phase 3), and the layer maps both to the legacy `detail` → `GET /api/auth/token` → insert `public.users` (same id, email, names, `registered_via`). The newsletter call moves into `apps/auth` (phase 3), so both registration paths share it | `{status, access_token: JWT, refresh_token: session token, token_type}` |
 | `login` | `POST /api/auth/sign-in/email` → `/token` → `first_name`/`last_name` from `public.users` (resolving the row through phase 7's path if it is missing) | the frozen shape |
 | `refresh_token` | `GET /api/auth/token` with `Authorization: Bearer <refresh_token>`. 401 → 401. **The same session token is returned** | `{access_token, refresh_token, token_type}` |
-| `logout` | JWT verified → `POST /internal/users/:id/revoke-sessions`, a fourth internal route bound to the subject's JWT like delete (the layer holds no session token here; see below) | `{message}` |
+| `logout` | JWT verified → `POST /internal/users/:id/revoke-sessions` (phase 5, G-3), with the user's JWT | `{message}` |
 | `me` GET | JWT → `public.users` | the frozen shape |
 | `me` DELETE | the spec's rule 5: refuse a system account → app transaction (delete row, write tombstone) → internal delete with the user's JWT → set `auth_deleted_at` | unchanged |
 | `request_password_reset` | `POST /api/auth/request-password-reset` | identical for every email |
-| `reset_password` | strength → `POST /api/auth/reset-password` | unchanged |
-
-**Logout needs a fourth internal route.** The legacy client sends only the JWT, not the session
-token, and logout must revoke all sessions. `revoke-sessions` is subject-bound exactly like delete
-(credential + the subject's JWT, `sub === :id`), and is rate-limited the same way. It adds no new
-capability to the internal credential, because only the subject's own JWT can trigger it. **This is
-an addition to the spec's three internal endpoints, put to the gate as G-3.**
+| `reset_password` | `POST /api/auth/reset-password`. `apps/auth` checks the token **then** strength, the legacy order (phase 3) | unchanged |
 
 #### Deliverables
 
@@ -677,6 +724,25 @@ an addition to the spec's three internal endpoints, put to the gate as G-3.**
 - [ ] Scenario 20: a system address reset sends nothing (a Resend spy) and creates nothing.
 - [ ] Scenario 21 through the layer: one budget shared with direct sign-in.
 - [ ] Scenario 22: two layer clients land in two buckets.
+- [ ] Scenario 5, through the real route: admin 200, non-admin 403, unauthenticated 401, a demoted
+  admin 403 on the next request, and 503 with `apps/auth` unreachable.
+- [ ] Scenario 25: ownership is unchanged. The existing IDOR suites run against the switched routes.
+- [ ] **The machine callers, both directions.** A user JWT on `/api/v1/chat/completions` gets 401 and
+  is never parsed as a JWT. `LEADERBOARD_API_KEY` on every JWT route gets 401. `mcp-complete` is
+  unchanged. A test asserts that `apps/api/src/middleware.ts` does not exist.
+- [ ] **The revocation window, one table-driven test**, the spec's "revocation window is pinned"
+  criterion. It covers four causes: logout through the layer, a password reset, a ban (the phase 5
+  script), and deletion. For each cause:
+  - the session token can no longer mint a JWT at `/token` (401)
+  - a JWT issued just before still verifies at `apps/api` until its `exp`, and is rejected after
+    it, using fake time
+  - the measured window is ≤ 900 s
+
+  Deletion is the one exception: there the JWT gets 401 at once on data routes, through the
+  tombstone. The test asserts that too.
+- [ ] Register guard order through the layer: a reserved address with a weak password gets 409,
+  not 400. Reset order: an invalid token with a weak password gets `Invalid or expired reset
+  token`.
 - [ ] The layer has no import of `better-auth` or `@ansari/auth`. A test pins it.
 
 #### Acceptance Criteria
@@ -706,6 +772,8 @@ pin the separation with scans.
   - `lib/auth/startup-checks.ts` (it moves to `apps/auth`)
   - `apps/api/scripts/grant-admin.ts`
   - the token, session-version and is-admin helpers in `lib/db/users.ts`
+  - `lib/auth/admin.ts` and `lib/auth/reserved.ts` (now in `apps/auth`), and
+    `lib/newsletter.ts`, if nothing in `apps/api` still calls it
 - **Deleted as now-meaningless tests:** `token-grace`, `session-version-reuse`, `issue-token-pair`,
   `refresh-token-route` (the legacy one) and similar. The list is re-derived by grep and recorded.
 - `apps/api/db/schema/users.ts`: no `passwordHash`, `isAdmin` or `sessionVersion`.
@@ -760,12 +828,18 @@ third-party cookies on the web.
 
 #### Files to Create / Modify
 
+- `apps/frontend/package.json`: `better-auth` and `@better-auth/expo` at **1.7.7** (pinned, as
+  in `packages/auth`). Neither is a dependency today. This is a lockfile hunk, and #265's stale
+  `expo-router` peer is re-checked here.
 - `apps/frontend/lib/auth/api.ts`: replaces the `/v2/users/*` calls with `better-auth/react`
   `createAuthClient`, with `bearer` handling: the token from `set-auth-token` is stored where
   `store.ts` keeps it today (SecureStore on native, `localStorage` on web). On native it adds the
   `@better-auth/expo` client.
 - JWT acquisition: `GET /api/auth/token` with the session bearer. The existing single-flight
   refresh on 401 is kept, and it now calls `/token`.
+- Registration sends `register_to_mail_list` in the sign-up body, and `apps/auth`'s hook
+  subscribes (phase 3), so the opt-in is kept. Every call to `apps/auth` sends `X-Ansari-Client`,
+  which the phase 4 CORS config allows.
 - `apps/frontend/lib/auth/guest.ts`: guest sign-up goes to `/api/auth/sign-up/email` with the same
   shape.
 - Reset screens call `request-password-reset` and `reset-password` at `apps/auth`, and keep the
@@ -859,10 +933,15 @@ runs scripts, not typed SQL.
     statement.
   - `02-import-auth.sql`, which runs as one session. It creates a `TEMP` import table, runs
     `\copy … FROM STDIN`, then `BEGIN`. Guards abort unless `auth.users` and `auth.account` are
-    empty, the import is non-empty, and the normalized emails are unique. It then inserts
-    `auth.users` (same id, derived `name`, `email_verified = true`, `role = 'user'`) and one
-    `credential` account per row (`account_id = user id`, `password = hash`), and `COMMIT`s. The
-    temp table goes with the session.
+    empty, the import is non-empty, and the normalized emails are unique. It then inserts:
+    - `auth.users`, with the same `id`, the derived `name`, `email_verified = true`,
+      `role = 'user'`, and `created_at` and `updated_at` copied exactly
+    - one `auth.account` per row: `id = gen_random_uuid()`, `provider_id = 'credential'`,
+      `account_id = user id`, `password = hash`, the same timestamps, and
+      `ON CONFLICT (user_id, provider_id) DO NOTHING`, so the account backfill can be re-run on its
+      own (scenario 10)
+
+    It then `COMMIT`s. The temp table goes with the session.
   - `03-audit-app.sql` and `03-audit-auth.sql`: the row count, the ordered id checksum
     `md5(string_agg(id::text, ',' ORDER BY id))`, the hash checksum, the credential count, "no
     system account in the auth database" (by the system-address domain), and the admin set.
@@ -1029,7 +1108,8 @@ The spec's risk table stands. These are the risks this plan adds or sharpens.
 | Rate-limit numbers are wrong for real traffic | Medium | Medium | B-1 to B-4 before merge; one constants module; the fallback ceiling floor |
 | A long-lived branch drifts; migration numbering collides | Medium | Medium | `develop` merges at each phase boundary; the numbering re-check is recorded in the thread every time |
 | The app architect does not agree to the phase 10 design in time | Medium | High | Sought at plan approval; phase 10 depends only on 4 and 7, so it can move without blocking 11 and 12 |
-| Logout needs the fourth internal route (G-3) | Certain | Low | Subject-bound like delete; the gate decides |
+| Logout needs the fourth internal route (G-3) | Certain | Low | Subject-bound like delete; built in phase 5; the gate decides, and a rejection goes back to the owner |
+| Guest provisioning hits the decided sign-up limit (G-5) | Medium | Medium | B-1 measures it; owner decision with data before merge |
 
 ## Documentation Updates
 
@@ -1047,11 +1127,21 @@ The spec's risk table stands. These are the risks this plan adds or sharpens.
 
 - **G-1 (P-3).** Build the IP fallback now, behind `AUTH_RATE_LIMIT_MODE` (default `email`), rather
   than only after a failed check? Recommended: yes.
-- **G-2 (P-4).** Probe the production domains in the window rather than before the merge, with
+- **G-2 (P-4). This needs an owner amendment to the spec, not only a gate answer** (Codex). The
+  spec requires production-domain verification before the merge, and also forbids deploying project
+  code to production before the window. Both cannot hold. The proposal: probe the production
+  domains in the window rather than before the merge, with
   diagnostic routes that echo only the caller's own IP? This is the one place the plan cannot meet
   the spec's "before the PR merges" literally.
-- **G-3.** Add a fourth internal endpoint, `POST /internal/users/:id/revoke-sessions`, which is
+- **G-3.** This changes the spec's three-endpoint internal surface. Add a fourth internal endpoint,
+  `POST /internal/users/:id/revoke-sessions` (built in phase 5), which is
   subject-JWT bound, for legacy logout?
 - **G-4.** The P-2 numbers, pending B-1 to B-4.
+- **G-5 (an observation on a decided item; Gemini).** Sign-up 3/60s per IP is decided. But
+  `apps/frontend` registers a **guest** on every cold launch with no stored session
+  (`lib/auth/context.tsx`). So one person who launches, then registers with one retry, uses the
+  whole budget, and three devices behind one NAT launching in the same minute hit it. The plan
+  keeps the decided number. B-1 measures the real guest rate, and the owner decides with that
+  data whether guest sign-ups need their own rule.
 - **Still open from the spec:** C-3 (the staging database) and C-4 (the auth Postgres) block
   phase 13 only. I-4 (the operator and the window). I-6 (the app architect, for phase 10).
