@@ -252,7 +252,7 @@ describe('streamGemini silent truncation (issue #41)', () => {
     expect(caught).toBeInstanceOf(TruncatedStreamError);
     expect(sdk.modelsTried.filter((m) => m === 'gemini-primary')).toHaveLength(4);
     expect(sdk.modelsTried.at(-1)).toBe('gemini-fallback');
-  }, 15000);
+  });
 
   it('streams a normal multi-chunk answer byte-shape-identical (buffer flush preserves order)', async () => {
     sdk.scripts = [

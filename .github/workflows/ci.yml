@@ -46,6 +46,13 @@ jobs:
       - name: Lint
         run: pnpm exec turbo run lint --filter ansari-api...
 
+      # Build BEFORE the dummy env is loaded: the api build must need no env
+      # (#260 — nothing may read lib/config.ts at import). GITHUB_ENV only reaches
+      # later steps, so this run sees no DATABASE_URL/JWT_SECRET, and a module-scope
+      # config read fails it with `Environment validation failed`.
+      - name: Build
+        run: pnpm exec turbo run build --filter ansari-api...
+
       # The committed dummy env (apps/api/.env.ci) is the single no-secrets env
       # source — every value is deliberately fake. No repository secrets are
       # used anywhere in this workflow.
@@ -59,9 +66,6 @@ jobs:
       # deliberately no coverage threshold gate yet.
       - name: Test (with coverage)
         run: pnpm exec turbo run test:coverage --filter ansari-api...
-
-      - name: Build
-        run: pnpm exec turbo run build --filter ansari-api...
 
   # Better Auth service (issue #59: apps/auth + packages/auth). Mirrors the `api`
   # job, scoped to the auth dependency closure — `--filter ansari-auth...`

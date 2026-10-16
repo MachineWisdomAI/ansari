@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 /**
  * Overall request-time budget — Phase 2 (Spec 49): the wall-clock backstop (T2) and the
@@ -141,6 +141,38 @@ async function collect(gen: AsyncGenerator<Event>): Promise<Event[]> {
   return events;
 }
 
+// Runs a budgeted request on a virtual clock (issue #292): runFacilitator's deadlines
+// read Date.now() and the scripted delays wait on setTimeout, so faking both puts them
+// on one clock — the ordering a test scripts can't be reordered by machine load.
+// `ms` must cover the whole scripted request: one still running after `ms` of virtual
+// time fails here, loudly, instead of hanging to the test timeout. `elapsedMs` is the
+// virtual time the request took, measured here — independent of what the agent reports.
+async function collectOnVirtualClock(
+  gen: AsyncGenerator<Event>,
+  ms: number
+): Promise<{ events: Event[]; elapsedMs: number }> {
+  vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+  try {
+    const startedAt = Date.now();
+    let elapsedMs: number | undefined;
+    const events = collect(gen).finally(() => {
+      elapsedMs = Date.now() - startedAt;
+    });
+    events.catch(() => {}); // surfaced by the await below, not as an unhandled rejection
+    await vi.advanceTimersByTimeAsync(ms);
+    if (elapsedMs === undefined) throw new Error(`request still running after ${ms} ms of virtual time`);
+    return { events: await events, elapsedMs };
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
+// A request that never settles fails at the test timeout before the finally above
+// runs; restore real timers here so it can't leak into the next test's real sleeps.
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 function userMessage(text: string): Message {
   return { role: 'user', content: [{ type: 'text', text }] };
 }
@@ -184,8 +216,9 @@ describe('runFacilitator request-time budget — Phase 2 (Spec 49)', () => {
     h.toolDelayMs = 200; // iteration 1 tool run pushes the clock past the soft deadline
     h.scripts = [toolRound(['search_quran']), textRound('Synthesized answer.')];
 
-    const events = await collect(
+    const { events } = await collectOnVirtualClock(
       runFacilitator([userMessage('q')], undefined, { budgetMs: 300, reserveMs: 150 }) as AsyncGenerator<Event>,
+      600
     );
     const types = events.map((e) => e.type);
 
@@ -233,8 +266,9 @@ describe('runFacilitator request-time budget — Phase 2 (Spec 49)', () => {
     h.toolDelayMs = 200; // the first tool run crosses the soft deadline mid-fan-out
     h.scripts = [toolRound(['search_quran', 'search_hadith']), textRound('Synth.')];
 
-    const events = await collect(
+    const { events } = await collectOnVirtualClock(
       runFacilitator([userMessage('q')], undefined, { budgetMs: 300, reserveMs: 150 }) as AsyncGenerator<Event>,
+      600
     );
 
     const toolResults = events.filter((e) => e.type === 'tool_result');
@@ -251,8 +285,9 @@ describe('runFacilitator request-time budget — Phase 2 (Spec 49)', () => {
     h.toolDelayMs = 200;
     h.scripts = [toolRound(['search_quran']), textRound('')]; // synthesis yields empty
 
-    const events = await collect(
+    const { events } = await collectOnVirtualClock(
       runFacilitator([userMessage('q')], undefined, { budgetMs: 300, reserveMs: 150 }) as AsyncGenerator<Event>,
+      600
     );
     const types = events.map((e) => e.type);
 
@@ -275,8 +310,9 @@ describe('runFacilitator request-time budget — Phase 2 (Spec 49)', () => {
       textRound('Recovered synthesis.'),
     ];
 
-    const events = await collect(
+    const { events } = await collectOnVirtualClock(
       runFacilitator([userMessage('q')], undefined, { budgetMs: 300, reserveMs: 150 }) as AsyncGenerator<Event>,
+      600
     );
     const types = events.map((e) => e.type);
 
@@ -317,21 +353,22 @@ describe('runFacilitator request-time budget — Phase 2 (Spec 49)', () => {
     // then throws — exercising the exception path and the whole-request timing bound.
     h.scripts = [toolRound(['search_quran']), hangHonoringTimeout()];
 
-    const start = Date.now();
-    const events = await collect(
+    const { events, elapsedMs } = await collectOnVirtualClock(
       runFacilitator([userMessage('q')], undefined, { budgetMs: 300, reserveMs: 150 }) as AsyncGenerator<Event>,
+      600
     );
-    const elapsed = Date.now() - start;
     const types = events.map((e) => e.type);
 
     expect(types).toContain('error');
     expect(types).not.toContain('done');
     expect(events.find((e) => e.type === 'error')?.data).toMatch(/taking longer than expected/i);
-    // The terminal event lands within the budget window (gathering ~soft deadline + synthesis
-    // bounded to the reserve), not Gemini's 60s/3-min defaults.
-    expect(elapsed).toBeLessThan(300 + 300);
     expect(Sentry.captureMessage).toHaveBeenCalledTimes(1); // short-circuit logged, terminalPath 'error'
     const extra = (Sentry.captureMessage as ReturnType<typeof vi.fn>).mock.calls[0][1].extra;
     expect(extra.terminalPath).toBe('error');
+    // The terminal event lands within the budget (gathering past the soft deadline + synthesis
+    // bounded to the reserve), not Gemini's 60s/3-min defaults — measured by the test on the
+    // virtual clock, and agreeing with what the agent reports.
+    expect(elapsedMs).toBeLessThanOrEqual(300);
+    expect(extra.elapsedMs).toBeLessThanOrEqual(300);
   });
 });

@@ -1,0 +1,17 @@
+id: bugfix-260
+title: apps-api-next-build-should-not
+protocol: bugfix
+phase: pr
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: approved
+    requested_at: '2026-10-15T00:30:32.826Z'
+    approved_at: '2026-10-15T22:57:05.419Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-10-15T00:09:54.437Z'
+updated_at: '2026-10-15T22:57:05.420Z'
+pr_ready_for_human: false

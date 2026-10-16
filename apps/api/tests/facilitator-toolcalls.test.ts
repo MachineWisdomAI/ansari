@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { unavailableResult } from '../lib/tools/resilience';
 import type { ToolCallRecord } from '../db/schema/messages';
 
@@ -144,6 +144,38 @@ async function collect(gen: AsyncGenerator<FacilitatorStreamEvent>): Promise<Fac
   for await (const e of gen) events.push(e);
   return events;
 }
+
+// Runs a budgeted request on a virtual clock (issue #292): runFacilitator's deadlines
+// read Date.now() and the scripted delays wait on setTimeout, so faking both puts them
+// on one clock — the ordering a test scripts can't be reordered by machine load.
+// `ms` must cover the whole scripted request: one still running after `ms` of virtual
+// time fails here, loudly, instead of hanging to the test timeout. `elapsedMs` is the
+// virtual time the request took, measured here — independent of what the agent reports.
+async function collectOnVirtualClock(
+  gen: AsyncGenerator<FacilitatorStreamEvent>,
+  ms: number
+): Promise<{ events: FacilitatorStreamEvent[]; elapsedMs: number }> {
+  vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+  try {
+    const startedAt = Date.now();
+    let elapsedMs: number | undefined;
+    const events = collect(gen).finally(() => {
+      elapsedMs = Date.now() - startedAt;
+    });
+    events.catch(() => {}); // surfaced by the await below, not as an unhandled rejection
+    await vi.advanceTimersByTimeAsync(ms);
+    if (elapsedMs === undefined) throw new Error(`request still running after ${ms} ms of virtual time`);
+    return { events: await events, elapsedMs };
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
+// A request that never settles fails at the test timeout before the finally above
+// runs; restore real timers here so it can't leak into the next test's real sleeps.
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 function userMessage(text: string): Message {
   return { role: 'user', content: [{ type: 'text', text }] };
@@ -322,7 +354,10 @@ describe('never-executed dispatches are still recorded', () => {
     h.scripts = [toolRound(['search_quran', 'search_hadith']), textRound('Best-effort synthesis.')];
 
     // softDeadline = +20ms; the first (slow, 60ms) tool pushes the second past it.
-    const events = await collect(runFacilitator([userMessage('q')], undefined, { budgetMs: 2000, reserveMs: 1980 }));
+    const { events } = await collectOnVirtualClock(
+      runFacilitator([userMessage('q')], undefined, { budgetMs: 2000, reserveMs: 1980 }),
+      2000
+    );
     const done = terminal(events);
     expect(done.type).toBe('done');
     const p = pairs(done.toolCalls!);
