@@ -1,17 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getRealIp } from '@/lib/rate-limit';
+import { AuthServiceUnavailableError } from '@/lib/auth-service/client';
 import {
   legacyError,
   requestPasswordReset,
   tooManyRequestsResponse,
+  unavailableResponse,
 } from '@/lib/auth-service/legacy';
 import { safeErrorMeta } from '@/lib/log';
 
 // Legacy reset request over apps/auth (spec 300, plan phase 8). apps/auth
 // sends the legacy-shaped link, and answers every email alike, with one rate
-// budget for known and unknown addresses. Any other failure still answers
-// success, as today, so the route never tells whether an address exists.
+// budget for known and unknown addresses. An apps/auth outage is a 503 (the
+// same for every address); any other failure still answers success, as today,
+// so the route never tells whether an address exists.
 
 const requestSchema = z.object({
   email: z.string().email('Invalid email format'),
@@ -37,6 +40,12 @@ export async function POST(request: NextRequest) {
     });
     if (result.kind === 'rate_limited') return tooManyRequestsResponse(result.retryAfter);
   } catch (error) {
+    // An outage is the same for every address, so the 503 tells nothing about
+    // which exist; the layer never lets a dead apps/auth look like success.
+    if (error instanceof AuthServiceUnavailableError) {
+      console.error('Request password reset: apps/auth unavailable', { status: error.status });
+      return unavailableResponse();
+    }
     console.error('Request password reset error:', safeErrorMeta(error));
   }
   return NextResponse.json({ status: 'success' });

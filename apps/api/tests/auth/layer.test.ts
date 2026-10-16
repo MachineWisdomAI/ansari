@@ -174,6 +174,19 @@ describe('scenario 3: register through the layer', () => {
     expect((await call(login, { body: { email: nextEmail('down'), password: STRONG_PASSWORD } })).status).toBe(503);
     expect((await call(register, { body: { email: nextEmail('down'), password: STRONG_PASSWORD } })).status).toBe(503);
   });
+
+  it('every layer route answers 503 with the legacy detail when apps/auth is unreachable', async () => {
+    const { refresh } = await registerUser(nextEmail('outage-all'));
+    process.env.AUTH_INTERNAL_URL = 'http://127.0.0.1:9';
+    resetEnvCache();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const unavailable = { status: 503, body: { detail: 'Authentication service unavailable' } };
+    expect(await call(requestReset, { body: { email: nextEmail('any') } })).toEqual(unavailable);
+    expect(await call(resetPassword, { body: { reset_token: 'x', new_password: STRONG_PASSWORD } })).toEqual(unavailable);
+    expect(await call(refreshToken, { body: { refresh_token: refresh } })).toEqual(unavailable);
+    expect(await call(login, { body: { email: nextEmail('any'), password: STRONG_PASSWORD } })).toEqual(unavailable);
+  });
 });
 
 describe('layer edges the contract does not reach', () => {
