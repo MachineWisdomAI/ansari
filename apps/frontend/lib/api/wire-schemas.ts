@@ -106,35 +106,33 @@ export const threadDocumentsSchema = z.object({
 });
 export type WireThreadDocuments = z.infer<typeof threadDocumentsSchema>;
 
-// --- Auth ------------------------------------------------------------------
+// --- Auth (apps/auth, better-auth 1.7.7) -------------------------------------
 
-/** `POST /users/register` — note: NO first_name/last_name (differs from login). */
-export const registerResponseSchema = z.object({
-  status: z.string(),
-  access_token: z.string(),
-  refresh_token: z.string(),
-  token_type: z.string(),
+/**
+ * `POST /api/auth/sign-in/email` and `POST /api/auth/sign-up/email`. `token`
+ * is the session token (the bearer for every later apps/auth call); the user
+ * carries the names apps/auth stores as additional fields.
+ */
+export const authSessionSchema = z.object({
+  token: z.string().min(1),
+  user: z.object({
+    id: z.string(),
+    first_name: z.string().nullish(),
+    last_name: z.string().nullish(),
+  }),
 });
 
-/** `POST /users/login` — includes the user's names. */
-export const loginResponseSchema = z.object({
-  status: z.string(),
-  access_token: z.string(),
-  refresh_token: z.string(),
-  token_type: z.string(),
-  first_name: z.string(),
-  last_name: z.string(),
+/** `GET /api/auth/token` — a fresh JWT for `apps/api`, from the session bearer. */
+export const authTokenSchema = z.object({
+  token: z.string().min(1),
 });
 
-/** `POST /users/refresh_token` — rotates the pair; NO `status` field. */
-export const refreshResponseSchema = z.object({
-  access_token: z.string(),
-  refresh_token: z.string(),
-  token_type: z.string().optional(),
+/** `POST /api/auth/sign-out`. */
+export const signOutSchema = z.object({
+  success: z.boolean(),
 });
 
-/** Endpoints returning a bare `{ message }` — `POST /users/logout` and
- * `DELETE /threads/{id}`. */
+/** Endpoints returning a bare `{ message }` — `DELETE /threads/{id}`. */
 export const messageResponseSchema = z.object({
   message: z.string(),
 });

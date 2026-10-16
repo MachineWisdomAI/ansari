@@ -22,13 +22,28 @@ import {
   type StoredSession,
 } from '@/lib/auth/store';
 import {
-  loginRequest,
-  logoutRequest,
-  refreshRequest,
-  registerRequest,
+  AuthError,
+  createAuthApi,
+  type AuthSession,
   type RegisterInput,
 } from '@/lib/auth/api';
+import { clientId } from '@/lib/auth/client-id';
 import { generateGuestCredentials } from '@/lib/auth/guest';
+import { resolveAuthUrl } from '@/lib/api/config';
+
+// Sign-in, sign-up and sign-out happen at apps/auth; apps/api only ever sees
+// the JWT minted from the session (`/token`).
+const authApi = createAuthApi({ baseUrl: resolveAuthUrl(), clientId: clientId() });
+
+/**
+ * The ONLY failure that means a stored guest is gone for good: apps/auth
+ * refused its credentials (the account no longer exists, or the password no
+ * longer verifies). A 429, a 5xx, a network error or a failed `/token` are
+ * transient, and must never orphan the device's guest and its threads.
+ */
+function storedGuestRejected(error: unknown): boolean {
+  return error instanceof AuthError && error.endpoint === 'sign-in' && error.status === 401;
+}
 
 type AuthStatus = 'loading' | 'signedIn' | 'signedOut';
 
@@ -72,7 +87,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   // Single-flight refresh: on a 401 the transport calls this; concurrent callers
-  // share one refresh round-trip. A failed refresh signs the user out.
+  // share one round-trip to apps/auth's `/token`, which mints a fresh JWT from
+  // the session. Only a 401 there (the session is dead: signed out elsewhere,
+  // reset, banned, expired) signs the user out; any other failure keeps the
+  // session, and the request that 401'd fails on its own.
   const refresh = useCallback(async (): Promise<string | null> => {
     if (!sessionRef.current) return null;
     if (refreshInFlight.current) return refreshInFlight.current;
@@ -80,15 +98,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const current = sessionRef.current;
       if (!current) return null;
       try {
-        const { accessToken, refreshToken } = await refreshRequest(
-          current.refreshToken,
-        );
-        const updated: StoredSession = { ...current, accessToken, refreshToken };
+        const accessToken = await authApi.mintJwt(current.sessionToken);
+        const updated: StoredSession = { ...current, accessToken };
         sessionRef.current = updated;
         await saveSession(updated);
         setSession(updated);
         return accessToken;
-      } catch {
+      } catch (error) {
+        if (!(error instanceof AuthError && error.status === 401)) return null;
         // Failed refresh is a principal transition (→ signed out): clear the
         // cache too, so a subsequent sign-in never inherits stale threads.
         queryClient.clear();
@@ -118,57 +135,55 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [refresh]);
 
+  // A new apps/auth session becomes the app's session: mint its first JWT,
+  // persist both tokens, and switch principal.
+  const startSession = useCallback(
+    async (auth: AuthSession, isGuest: boolean) => {
+      const accessToken = await authApi.mintJwt(auth.sessionToken);
+      const next: StoredSession = {
+        accessToken,
+        sessionToken: auth.sessionToken,
+        firstName: auth.firstName,
+        lastName: auth.lastName,
+        isGuest,
+      };
+      await saveSession(next);
+      applySession(next);
+    },
+    [applySession],
+  );
+
   const login = useCallback(
     async (
       email: string,
       password: string,
       opts: { guest?: boolean } = {},
     ) => {
-      const result = await loginRequest(email, password);
-      const next: StoredSession = {
-        accessToken: result.accessToken,
-        refreshToken: result.refreshToken,
-        firstName: result.firstName,
-        lastName: result.lastName,
-        isGuest: opts.guest ?? false,
-      };
-      await saveSession(next);
-      applySession(next);
+      await startSession(await authApi.signIn(email, password), opts.guest ?? false);
     },
-    [applySession],
+    [startSession],
   );
 
   const register = useCallback(
     async (input: RegisterInput, opts: { guest?: boolean } = {}) => {
-      const creds = await registerRequest(input);
-      // Register's response carries no names, so keep what the user typed for
-      // display.
-      const next: StoredSession = {
-        accessToken: creds.accessToken,
-        refreshToken: creds.refreshToken,
-        firstName: input.firstName ?? '',
-        lastName: input.lastName ?? '',
-        isGuest: opts.guest ?? false,
-      };
-      await saveSession(next);
-      applySession(next);
+      await startSession(await authApi.signUp(input), opts.guest ?? false);
     },
-    [applySession],
+    [startSession],
   );
 
   // Continue as guest. A device reuses its ONE guest account: if credentials are
-  // already stored, log back into that same account; only when none exist (or the
-  // stored account no longer authenticates) do we register a new guest and
-  // remember it. This keeps repeated taps from minting a new staging user each time.
+  // stored, sign back into that same account. A new guest is signed up only when
+  // none is stored, or when apps/auth refuses the stored credentials (401 from
+  // sign-in). Every other failure is thrown with the stored credentials kept, so
+  // a rate limit or an outage never mints a new guest and orphans the old one.
   const loginAsGuest = useCallback(async () => {
     const stored = await loadGuestCredentials();
     if (stored) {
       try {
         await login(stored.email, stored.password, { guest: true });
         return;
-      } catch {
-        // Stored guest no longer works (e.g. deleted server-side) — fall through
-        // and mint a fresh one.
+      } catch (error) {
+        if (!storedGuestRejected(error)) throw error;
       }
     }
     const creds = generateGuestCredentials();
@@ -194,8 +209,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         await loginAsGuest();
       } catch {
-        // Offline at first launch: land signed-out. Screens surface their own
-        // load errors, and the effect below retries on the next transition.
+        // Offline, rate-limited or apps/auth down: land signed-out with the
+        // stored guest kept. Screens surface their own load errors, and the
+        // "Continue as guest" control shows this error when tapped again.
         if (active) applySession(null);
       }
     })();
@@ -212,16 +228,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (status !== 'signedOut' || reguesting.current) return;
     reguesting.current = true;
-    void loginAsGuest().finally(() => {
-      reguesting.current = false;
-    });
+    loginAsGuest()
+      .catch(() => {
+        // Transient (offline, rate-limited, apps/auth down): stay signed-out
+        // with the stored guest kept; the next transition or tap retries.
+      })
+      .finally(() => {
+        reguesting.current = false;
+      });
   }, [status, loginAsGuest]);
 
   const logout = useCallback(async () => {
-    try {
-      await logoutRequest();
-    } catch {
-      // Even if the server call fails, clear locally so the device is signed out.
+    const current = sessionRef.current;
+    if (current) {
+      try {
+        await authApi.signOut(current.sessionToken);
+      } catch {
+        // Even if the server call fails, clear locally so the device is signed out.
+      }
     }
     sessionRef.current = null;
     await clearSession();
