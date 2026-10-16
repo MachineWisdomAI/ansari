@@ -79,3 +79,9 @@
   - C: ON DELETE CASCADE on session/account user_id, with an orphan test for 04-complete-tombstones.
   - D: residual recorded: the JWKS goes over plain http on the private network; escalation is https on the public domain if the peer inventory grows.
   - Security's positions for the owner: G-1 yes (default email); G-2 the in-window probe plus a pre-merge dig/curl passive check, with prod in the staging-verdict mode (added to the plan); G-3 yes; G-4 OK pending baselines; G-5 a separate, higher guest per-IP rule, decided with B-1.
+- 2026-10-16: App architect AGREED phase 10 (issue #300 comment, 00:48Z) with four changes, applied in 7f8407e.
+  - G-5 restated: the client signs in with its stored guest and signs up only when none is stored. The real issue is the bare catch, which turns 429/5xx/network errors into new guests; phase 10 narrows it to auth failure only. B-1 reports guest counts; the rehearsal adds a stored-guest sign-in.
+  - No reset screens in apps/frontend: they're out of scope, filed as #304 (consumes ?token= unchanged).
+  - One bearer transport on all platforms; @better-auth/expo is for storage and scheme only.
+  - EXPO_PUBLIC_AUTH_URL needs no turbo edit, defaults to staging like the API URL, and is set in the Railway dashboard for the web service.
+  - Phase 10 is a STACKED PR: base builder/spir-300 at a commit carrying phases 4 and 7. The app architect runs the real path on web and iOS Simulator and approves; the builder merges it into builder/spir-300. The cutover PR is still the only PR to develop.
