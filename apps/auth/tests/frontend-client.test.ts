@@ -211,6 +211,71 @@ describe.each([
   });
 });
 
+describe.each([
+  ['native', nativeFetch, CLIENT_IDS.ios],
+  ['web', webFetch, CLIENT_IDS.web],
+] as const)('password reset through the frontend client over the %s transport (#304)', (label, transport, clientId) => {
+  const api = () => client(clientId);
+  const email = `reset-${label}@example.com`;
+  const password = 'Before-reset-123!';
+  const newPassword = 'After-reset-456!';
+
+  beforeAll(async () => {
+    using(transport);
+    await api().signUp({ email, password });
+  });
+
+  /** The token from the newest reset email to `to`, as the link carries it. */
+  async function emailedToken(to: string): Promise<string> {
+    // The send is fire-and-forget on the server; wait for it to land.
+    for (let i = 0; i < 50; i++) {
+      const message = service.mail.filter((m) => m.to === to).at(-1);
+      const match = message?.html.match(/\/reset-password\?token=([^"&<\s]+)/);
+      if (match) return decodeURIComponent(match[1] as string);
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    throw new Error('no reset email');
+  }
+
+  it('a request answers the same for a known and an unknown email', async () => {
+    await expect(api().requestPasswordReset(email)).resolves.toBeUndefined();
+    await expect(api().requestPasswordReset(`nobody-${label}@example.com`)).resolves.toBeUndefined();
+    expect(await emailedToken(email)).toMatch(/\S{10,}/);
+  });
+
+  it('a weak new password is refused with the server message, and the token survives', async () => {
+    await api().requestPasswordReset(email);
+    const token = await emailedToken(email);
+    const error = await failure(() => api().resetPassword(token, 'weakweak'));
+    expect([error.status, error.endpoint]).toEqual([400, 'reset-password']);
+    expect(error.message).toMatch(/\S/);
+    await expect(api().resetPassword(token, newPassword)).resolves.toBeUndefined();
+  });
+
+  it('the new password signs in, the old one does not, and the token is single-use', async () => {
+    const session = await api().signIn(email, newPassword);
+    expect(session.sessionToken).toMatch(/\S{20,}/);
+    expect((await failure(() => api().signIn(email, password))).status).toBe(401);
+
+    await api().requestPasswordReset(email);
+    const token = await emailedToken(email);
+    await api().resetPassword(token, 'Third-pass-789!');
+    const reused = await failure(() => api().resetPassword(token, 'Fourth-pass-012!'));
+    expect([reused.status, reused.endpoint, reused.message]).toEqual([
+      400,
+      'reset-password',
+      'Invalid or expired reset token',
+    ]);
+    // Reset ended every session, the one signed in above included.
+    expect((await failure(() => api().mintJwt(session.sessionToken))).status).toBe(401);
+  });
+
+  it('an invented token is the same 400', async () => {
+    const error = await failure(() => api().resetPassword('not-a-real-token', newPassword));
+    expect([error.status, error.message]).toEqual([400, 'Invalid or expired reset token']);
+  });
+});
+
 describe('the web transport, as the browser enforces it', () => {
   it('apps/auth lets the web origin read the response (CORS allow-origin, no credentials)', async () => {
     const res = await realFetch(`${service.publicUrl}/api/auth/token`, {

@@ -21,19 +21,9 @@ import {
   saveSession,
   type StoredSession,
 } from '@/lib/auth/store';
-import {
-  AuthError,
-  createAuthApi,
-  type AuthSession,
-  type RegisterInput,
-} from '@/lib/auth/api';
-import { clientId } from '@/lib/auth/client-id';
+import { AuthError, type AuthSession, type RegisterInput } from '@/lib/auth/api';
+import { authApi } from '@/lib/auth/client';
 import { generateGuestCredentials } from '@/lib/auth/guest';
-import { resolveAuthUrl } from '@/lib/api/config';
-
-// Sign-in, sign-up and sign-out happen at apps/auth; apps/api only ever sees
-// the JWT minted from the session (`/token`).
-const authApi = createAuthApi({ baseUrl: resolveAuthUrl(), clientId: clientId() });
 
 /**
  * The ONLY failure that means a stored guest is gone for good: apps/auth

@@ -65,6 +65,16 @@ describe('one bearer transport', () => {
     ],
     ['token', () => api.mintJwt('session-abc'), () => json(200, { token: 'jwt' })],
     ['sign-out', () => api.signOut('session-abc'), () => json(200, { success: true })],
+    [
+      'request-password-reset',
+      () => api.requestPasswordReset('a@example.com'),
+      () => json(200, { status: true }),
+    ],
+    [
+      'reset-password',
+      () => api.resetPassword('reset-tok', 'New-pass-123!'),
+      () => json(200, { status: true }),
+    ],
     ['apps/api (customFetch)', () => customFetch('/api/v2/threads'), () => json(200, [])],
   ];
 
@@ -139,6 +149,27 @@ describe('what each call sends', () => {
     expect(init.headers.get('authorization')).toBe('Bearer session-abc');
   });
 
+  it('request-password-reset: POST the email, no bearer', async () => {
+    reply = () => json(200, { status: true, message: 'If this email exists…' });
+    await api.requestPasswordReset('a@example.com');
+    const { url, init } = calls[0]!;
+    expect(url).toBe(`${AUTH}/api/auth/request-password-reset`);
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(String(init.body))).toEqual({ email: 'a@example.com' });
+    expect(init.headers.get('authorization')).toBeNull();
+    expect(init.headers.get('x-ansari-client')).toBe('askansari-ios');
+  });
+
+  it('reset-password: the token goes in the BODY, never the URL; no bearer', async () => {
+    reply = () => json(200, { status: true });
+    await api.resetPassword('reset-tok', 'New-pass-123!');
+    const { url, init } = calls[0]!;
+    expect(url).toBe(`${AUTH}/api/auth/reset-password`);
+    expect(url).not.toContain('reset-tok');
+    expect(JSON.parse(String(init.body))).toEqual({ token: 'reset-tok', newPassword: 'New-pass-123!' });
+    expect(init.headers.get('authorization')).toBeNull();
+  });
+
   it('the apps/api JWT goes to base-URL requests only', async () => {
     reply = () => json(200, []);
     await customFetch('/api/v2/threads');
@@ -206,6 +237,16 @@ describe('failures become AuthErrors the provider can classify', () => {
     reply = () => json(200, { user: { id: 'u1' } });
     const error = await failure(() => api.signIn('a@example.com', 'pw'));
     expect(error.status).toBe(0);
+  });
+
+  it('400 from reset-password keeps the server message (the screen keys on it)', async () => {
+    reply = () => json(400, { code: 'INVALID_TOKEN', message: 'Invalid or expired reset token' });
+    const error = await failure(() => api.resetPassword('dead', 'New-pass-123!'));
+    expect([error.status, error.endpoint, error.message]).toEqual([
+      400,
+      'reset-password',
+      'Invalid or expired reset token',
+    ]);
   });
 
   it('401 from /token is tagged as the token endpoint', async () => {

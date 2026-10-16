@@ -4,6 +4,7 @@
 import { ApiError, customFetch } from '../../vendor/api-client-react/custom-fetch';
 import {
   authSessionSchema,
+  authStatusSchema,
   authTokenSchema,
   signOutSchema,
 } from '../api/wire-schemas';
@@ -18,6 +19,10 @@ import {
  * - sign-in / sign-up answer with the session token in the body.
  * - `GET /api/auth/token` exchanges that session for a JWT for `apps/api`.
  * - sign-out ends the session.
+ * - request-password-reset and reset-password are the two halves of a reset
+ *   (`app/forgot-password.tsx`, `app/reset-password.tsx`). They need no
+ *   session. The reset token is a credential: it is sent in the body and
+ *   never logged.
  *
  * Every response is zod-validated. Tokens flow through here but are never
  * logged.
@@ -37,7 +42,13 @@ export interface AuthSession {
   lastName: string;
 }
 
-export type AuthEndpoint = 'sign-in' | 'sign-up' | 'token' | 'sign-out';
+export type AuthEndpoint =
+  | 'sign-in'
+  | 'sign-up'
+  | 'token'
+  | 'sign-out'
+  | 'request-password-reset'
+  | 'reset-password';
 
 /**
  * A human-readable auth failure. `status` is the HTTP status, or 0 when no
@@ -91,6 +102,10 @@ export interface AuthApi {
   /** A fresh apps/api JWT for a live session. */
   mintJwt(sessionToken: string): Promise<string>;
   signOut(sessionToken: string): Promise<void>;
+  /** Asks for a reset email. Answers the same whether or not the account exists. */
+  requestPasswordReset(email: string): Promise<void>;
+  /** Sets a new password with the emailed token. Ends every session of the account. */
+  resetPassword(token: string, newPassword: string): Promise<void>;
 }
 
 export function createAuthApi({ baseUrl, clientId }: AuthApiOptions): AuthApi {
@@ -164,6 +179,36 @@ export function createAuthApi({ baseUrl, clientId }: AuthApiOptions): AuthApi {
         signOutSchema.parse(raw);
       } catch (error) {
         throw toAuthError(error, 'sign-out', 'Could not sign you out.');
+      }
+    },
+
+    async requestPasswordReset(email) {
+      try {
+        const raw = await customFetch<unknown>(url('/request-password-reset'), {
+          method: 'POST',
+          headers: headers(),
+          body: JSON.stringify({ email }),
+        });
+        authStatusSchema.parse(raw);
+      } catch (error) {
+        throw toAuthError(
+          error,
+          'request-password-reset',
+          'Could not send the reset email. Please try again.',
+        );
+      }
+    },
+
+    async resetPassword(token, newPassword) {
+      try {
+        const raw = await customFetch<unknown>(url('/reset-password'), {
+          method: 'POST',
+          headers: headers(),
+          body: JSON.stringify({ token, newPassword }),
+        });
+        authStatusSchema.parse(raw);
+      } catch (error) {
+        throw toAuthError(error, 'reset-password', 'Could not reset your password. Please try again.');
       }
     },
   };
