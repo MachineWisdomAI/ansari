@@ -3,8 +3,8 @@
 // Design decision #1 (see codev/plans/59-*): the db client and schema live
 // INSIDE packages/auth rather than a separate packages/db, so the whole auth
 // stack is one self-contained unit that #60 can relocate or merge wholesale.
-// It shares the physical database with apps/api via the same DATABASE_URL, but
-// only through Better Auth's NEW tables — no shared Drizzle code.
+// Every table it touches is in the `auth` Postgres schema (src/schema.ts); it
+// shares no Drizzle code with apps/api.
 //
 // node-postgres' `drizzle(connectionString)` creates the pool lazily, so this
 // module can be constructed without opening a connection; the first query is

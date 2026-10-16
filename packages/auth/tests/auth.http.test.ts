@@ -13,16 +13,11 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { PGlite } from '@electric-sql/pglite';
-import { drizzle } from 'drizzle-orm/pglite';
+import type { PGlite } from '@electric-sql/pglite';
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 
-import { createAuth, resetEnvCache, type Auth, type Db } from '../src/index';
-
-const migrationSql = readFileSync(
-  fileURLToPath(new URL('../drizzle/0000_better_auth_init.sql', import.meta.url)),
-  'utf8'
-);
+import { createAuth, type Auth, type Db } from '../src/index';
+import { drizzleFor, migrate, setAuthEnv } from './helpers/auth-db';
 
 const BASE = 'http://localhost:3100';
 const user = { name: 'HTTP User', email: 'http@example.com', password: 'correct-horse-battery-staple' };
@@ -31,14 +26,7 @@ let client: PGlite;
 let db: Db;
 let auth: Auth;
 
-function setEnv(baseUrl: string) {
-  process.env.DATABASE_URL = 'postgres://test:test@localhost:5432/test';
-  process.env.BETTER_AUTH_SECRET = 'test-secret-at-least-32-characters-long-000';
-  process.env.BETTER_AUTH_URL = baseUrl;
-  process.env.CORS_ORIGIN = 'http://localhost:3100';
-  process.env.NODE_ENV = 'test';
-  resetEnvCache();
-}
+const setEnv = setAuthEnv;
 
 function signInReq(baseUrl: string, origin: string): Request {
   return new Request(`${baseUrl}/api/auth/sign-in/email`, {
@@ -50,9 +38,8 @@ function signInReq(baseUrl: string, origin: string): Request {
 
 beforeAll(async () => {
   setEnv(BASE); // http baseURL → dev cookie mode
-  client = new PGlite();
-  await client.exec(migrationSql);
-  db = drizzle(client, { schema: {} }) as unknown as Db;
+  client = await migrate();
+  db = drizzleFor(client);
   auth = createAuth(db);
 
   const signUp = await auth.handler(
