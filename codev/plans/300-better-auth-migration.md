@@ -1004,7 +1004,7 @@ it.
   `ansari_auth`) with owner URLs, and developers who ran the old `packages/auth` `0000` must drop
   and recreate their local auth database.
 - `RELEASE.md`: the "Railway service configuration" block gains the `auth` service and the auth
-  Postgres (with backups or PITR before its first real row; C-4).
+  Postgres (with backups or PITR before its first real row; C-4, provisioned by the owner).
 
 #### Deliverables
 
@@ -1140,9 +1140,14 @@ pglite pair. The real `psql` pipe is exercised in phase 13.
 
 ### Phase 13: Staging verification: edge check, unmodified clients, full rehearsal
 
-**Dependencies**: Phases 1 to 12. **External prerequisites:** C-3 (a staging database separate from
-production, which a production clone can be restored into), C-4 (the auth Postgres on Railway in
-staging), and an operator with Railway access (I-4). This phase **cannot complete without them**;
+**Dependencies**: Phases 1 to 12. **External prerequisites, all resolved by the owner on
+2026-10-16:**
+- C-3: staging is isolated from production and has its own database. The production clone is
+  restored into the staging app database.
+- C-4: the owner provisions the auth Postgres in staging and production.
+- I-4: the owner operates.
+
+The phase still **cannot complete until those resources exist**;
 if they are not available, the builder reports that and stops.
 
 #### Objective
@@ -1219,7 +1224,7 @@ The spec's risk table stands. These are the risks this plan adds or sharpens.
 
 | Risk | Probability | Impact | Mitigation |
 |------|-------------|--------|------------|
-| C-3, C-4 or the operator are unavailable, so phase 13 cannot run | Medium | High (no merge) | Phases 1 to 12 do not depend on them. Raised at plan approval; phase 13 stops and reports rather than guessing |
+| The owner-provisioned staging resources (C-3, C-4) are not ready when phase 13 starts | Low | High (no merge) | All resolved by the owner; phases 1 to 12 do not depend on them; phase 13 stops and reports rather than guessing |
 | Production domains behave differently from staging at the edge | Low | High | P-4 probe in the window; `AUTH_RATE_LIMIT_MODE` flips to `email` without code (P-3) |
 | The phase 1 contract suite is weakened during phase 8 to pass | Low | High | CI diff check on the fixtures; assertions are never forked between modes |
 | Copy tests on pglite miss a `psql` pipe behaviour | Medium | Medium | The real pipe is rehearsed in phase 13 on a production clone, with checksums |
@@ -1269,6 +1274,7 @@ The spec's risk table stands. These are the risks this plan adds or sharpens.
     window. That is sign-in traffic only, as long as migrated guest hashes verify. Phase 13's
     rehearsal includes a stored-guest sign-in against the migrated database.
   - **Position:** keep the decided 3/60s, narrow the catch, and let B-1 measure.
-- **Still open from the spec:** C-3 (the staging database) and C-4 (the auth Postgres) block
-  phase 13 only. I-4 (the operator and the window). I-6 is **resolved**: the app architect agreed
+- **Resolved from the spec** (owner, 2026-10-16): C-3 (staging is isolated and has its own
+  database, which the production clone is restored into), C-4 (the owner provisions the auth
+  Postgres), and I-4 (the owner operates the window). I-6 is **resolved**: the app architect agreed
   to phase 10 with four changes, now folded in.

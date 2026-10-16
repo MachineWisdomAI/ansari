@@ -1148,13 +1148,13 @@ decided rate limits apply to every production sign-in, because all of them pass 
   the owner (main's condition 6). Either way, the scaffold cleanup's guard refuses to drop a
   non-empty table.
 - The rehearsal runs against a **clone of production data**, whatever host it runs on.
-  `api-staging.askansari.ai` exists (plan 124), but it is unconfirmed whether it has its own
-  database separate from production; the security architect is asking the owner (C-3). The
-  rehearsal must never run against a database that production also uses. It needs an `apps/auth`
+  Staging and production are isolated environments, and staging has its own database (owner,
+  2026-10-16; C-3 resolved), so the rehearsal restores the production clone into the staging app
+  database. The rehearsal must never run against a database that production also uses. It needs an `apps/auth`
   instance and its own auth database too.
 - The operator can take a snapshot or PITR mark of **both** databases. The app database's
-  pre-window mark is a last resort only; the planned rollback is a redeploy. Railway can host a second Postgres for `apps/auth`
-  (C-4).
+  pre-window mark is a last resort only; the planned rollback is a redeploy. The owner provisions
+  the second Postgres for `apps/auth` in staging and production (C-4 resolved).
 - Railway's `X-Real-IP` behaviour as stated by staff holds on our domains. It is verified during
   before the PR merges, not assumed, and the spec carries a fallback if it does not hold.
 - `apps/api` can reach `apps/auth` reliably, over the public domain or the private network (the plan
@@ -1226,11 +1226,13 @@ This was the first draft's proposal.
 - **C-2 (resolved, owner, 2026-10-16):** the cutover PR, merged at the window, plus a contract PR
   in the first release after the 24-hour rollback deadline. No database logins, so no
   provisioning PR. See Phasing.
-- **C-4: The auth database on Railway** (owner and main architect). A new Railway Postgres service
-  for `apps/auth` in staging and production, with snapshots or PITR, and its cost.
-- **C-3: Staging database.** `api-staging.askansari.ai` exists (plan 124). Does it have its own
-  database that a production clone can be restored into, with room for an `apps/auth` staging
-  instance? If not, who provisions one? The rehearsal is a hard prerequisite for merging.
+- **C-4 (resolved, owner, 2026-10-16):** the owner provisions the auth database, a new Railway
+  Postgres service for `apps/auth`, in staging and production, with snapshots or PITR on before its
+  first real row.
+- **C-3 (resolved, owner, 2026-10-16):** staging and production are isolated environments, and
+  staging has its own database. The rehearsal restores the production clone into the staging app
+  database, with a fresh staging auth database beside it. The rehearsal stays a hard prerequisite
+  for merging.
 
 **Important (shapes design)**
 
@@ -1241,8 +1243,8 @@ This was the first draft's proposal.
 - **I-3: Layer removal trigger.** "90 days after cutover or ≥ 95% new-client adoption, whichever
   first", owner Amr, carried from the reference. Is it measured by `/v2/users/*` traffic share or by
   released build versions? This affects only the follow-up issue.
-- **I-4: Cutover timing.** Who is the operator, and what is the window? This is needed for the
-  runbook.
+- **I-4 (resolved, owner, 2026-10-16):** the owner operates the window. The owner also sets its
+  date and time, which the runbook records.
 - **I-5 (resolved, owner, 2026-10-16):** `auth.askansari.ai` (production) and
   `auth-staging.askansari.ai` (staging). `apps/api` reaches the profile, role and delete endpoints
   over Railway's private network (security). The transport of the layer's sign-in hop, which
