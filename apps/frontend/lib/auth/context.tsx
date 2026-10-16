@@ -45,8 +45,26 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+export function AuthProvider({
+  children,
+  deferGuest = false,
+}: {
+  children: React.ReactNode;
+  /**
+   * Hold off provisioning a guest while true. A shared thread is public: a
+   * visitor opening one needs no identity, and viewing must not mint an
+   * account. With nothing stored, the provider then stays `loading` until
+   * the flag drops (the visitor moves on into the app), and provisions then.
+   */
+  deferGuest?: boolean;
+}) {
   const queryClient = useQueryClient();
+  const deferGuestRef = useRef(deferGuest);
+  useEffect(() => {
+    deferGuestRef.current = deferGuest;
+  }, [deferGuest]);
+  const [guestHeld, setGuestHeld] = useState(false);
+  const heldGuestSent = useRef(false);
   const [status, setStatus] = useState<AuthStatus>('loading');
   const [session, setSession] = useState<StoredSession | null>(null);
 
@@ -191,6 +209,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         applySession(restored);
         return;
       }
+      if (deferGuestRef.current) {
+        setGuestHeld(true);
+        return;
+      }
       try {
         await loginAsGuest();
       } catch {
@@ -203,6 +225,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       active = false;
     };
   }, [applySession, loginAsGuest]);
+
+  // The held guest, once the public page is left: still `loading`, so the
+  // gate keeps the app back until the transport has a token.
+  useEffect(() => {
+    if (!guestHeld || deferGuest || heldGuestSent.current) return;
+    heldGuestSent.current = true;
+    loginAsGuest().catch(() => applySession(null));
+  }, [guestHeld, deferGuest, loginAsGuest, applySession]);
 
   // Never stay tokenless. Any time the app lands signed-out AFTER startup —
   // principally just after `logout()` from a real account — fall straight back

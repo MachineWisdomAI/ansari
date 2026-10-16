@@ -212,6 +212,7 @@ function AppFrame({ children }: { children: React.ReactNode }) {
   const reading =
     leaving ||
     path.startsWith('/chat') ||
+    isSharePath(path) ||
     path.startsWith('/about') ||
     path.startsWith('/terms') ||
     path.startsWith('/privacy');
@@ -240,8 +241,11 @@ function AppFrame({ children }: { children: React.ReactNode }) {
       {/* One rail, two ways of standing. A desktop keeps it beside the
           page; a phone has no width to give it, so the same component
           arrives over the page and leaves again. */}
-      {desktop ? <Sidebar /> : <SidebarDrawer />}
-      {desktop && <AccountChrome />}
+      {/* Not over a shared thread: it is a public page, and the rail
+          and account cluster are the viewer's own threads and identity,
+          which a visitor may not have (see `isSharePath`). */}
+      {!isSharePath(path) && (desktop ? <Sidebar /> : <SidebarDrawer />)}
+      {!isSharePath(path) && desktop && <AccountChrome />}
     </PaperBackground>
   );
 }
@@ -251,13 +255,15 @@ function AppFrame({ children }: { children: React.ReactNode }) {
  * restored, so no screen (and none of its data queries) mounts before
  * the transport knows whether it has a token. Ansari works signed-out —
  * `apps/api` serves guest and anonymous threads — so there is no forced
- * redirect: signing in is an optional add-on reached from the rail.
+ * redirect: signing in is an optional add-on reached from the rail. A
+ * shared thread is let through: it needs no token at all.
  */
 function AuthGate({ children }: { children: React.ReactNode }) {
   const { status } = useAuth();
   const colors = useColors();
+  const path = usePathname();
 
-  if (status === 'loading') {
+  if (status === 'loading' && !isSharePath(path)) {
     return (
       <View style={[styles.authGate, { backgroundColor: colors.background }]}>
         <ActivityIndicator color={colors.primary} />
@@ -290,6 +296,7 @@ function RootLayoutNav() {
       >
         <Stack.Screen name="index" />
         <Stack.Screen name="chat/[id]" />
+        <Stack.Screen name="share/[id]" />
         <Stack.Screen name="about" />
         <Stack.Screen name="terms" />
         <Stack.Screen name="privacy" />
@@ -308,6 +315,7 @@ export default function RootLayout() {
   // immediately ready and the first paint is not withheld while several
   // megabytes of type download. See `hooks/useAppFonts.web.ts`.
   const fontsReady = useAppFonts();
+  const path = usePathname();
 
   useEffect(() => {
     if (fontsReady) {
@@ -325,7 +333,7 @@ export default function RootLayout() {
               attach + 401 refresh) for both `custom-fetch` and the SSE
               path. Inside the query client because a principal change
               clears its cache. */}
-          <AuthProvider>
+          <AuthProvider deferGuest={isSharePath(path)}>
             <GestureHandlerRootView>
               <KeyboardProvider>
                 <WebManners />
@@ -355,6 +363,16 @@ export default function RootLayout() {
       </ErrorBoundary>
     </SafeAreaProvider>
   );
+}
+
+/**
+ * A shared thread (`/share/<id>`, the path apps/api hands out in
+ * `share_url`) is the one page that needs no identity: it is read without
+ * a bearer, renders while the session is still being restored, and must
+ * not provision a guest for a visitor who only came to read it.
+ */
+function isSharePath(path: string): boolean {
+  return path.startsWith('/share/');
 }
 
 /**

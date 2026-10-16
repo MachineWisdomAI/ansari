@@ -1,0 +1,12 @@
+# air-307 — public shared-thread page at /share/[id]
+
+## 2026-10-16 — implement
+
+- Share page reads `GET /api/v2/share/:id` + `/documents` through `lib/api/share.ts`, which uses the platform `fetch`, not `customFetch`/`apiFetch`. Those attach the viewer's bearer and refresh on a 401. The share snapshot has no message ids, so synthetic `<shareId>:<index>` ids are given to both the messages and the documents entries, and the thread's own decode pipeline (citations, unbacked-marker stripping, documents degrade path) runs unchanged.
+- **Surprise: "no guest sign-up by viewing" needed an auth change, not just a page.** `AuthProvider` provisions a guest at boot for anyone with nothing stored, on any route, and `AuthGate` holds every screen while `loading`. Added `AuthProvider deferGuest` (root layout passes `path.startsWith('/share/')`). With nothing stored the provider stays `loading` and mints nothing. `AuthGate` lets `/share` through while `loading`. When the visitor leaves (Continue in Ansari → `/`), the held guest is provisioned while the gate holds home. A stored session is still restored as usual.
+- `AppFrame` drops the rail/drawer/account cluster on `/share`. The Sidebar queries the viewer's threads, which would 401 for a tokenless visitor.
+- The page holds its fetch in local state, not react-query. `applySession` calls `queryClient.clear()`, which cancels in-flight queries. A signed-in viewer's session restore would land mid-load and leave the page stuck on its spinner.
+- Non-UUID ids are not-found client-side: `shares.id` is a uuid column, and the API 500s (pg cast error) on a malformed id instead of 404ing.
+- Verified on a real staging share made from a real thread. Web: built `dist/`, headless Chrome with a fresh profile. Only the two share GETs went out, with no `Authorization` and no `/users/register`. The register fired only after Continue landed on `/`. iOS Simulator: dev client, `ansarichat://share/<id>` → "Open in Ansari?" → page renders with sources. A logging proxy confirmed no `Authorization` on either share GET.
+- Env gotcha for whoever runs native next: SDK 57's dev server inlines `apps/frontend/.env.local` as a virtual env module. It beats `EXPO_PUBLIC_API_URL` in the process env, and `--clear`/`EXPO_NO_DOTENV` don't change that. I put a forwarding proxy on :3000 instead of editing the file.
+- Not done by me: tapping a source pill on native. The Simulator window left System Events' reach, and I didn't install idb. The same component opened the sources sheet on web.
