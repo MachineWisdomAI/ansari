@@ -41,6 +41,8 @@ export interface AuthServiceRequest {
   bearer?: string;
   /** The end user's IP, forwarded so apps/auth rate-limits them, not apps/api. */
   clientIp?: string | null;
+  /** Extra headers (X-Ansari-Client). The credential and Origin are always set here. */
+  headers?: Record<string, string>;
 }
 
 /**
@@ -52,8 +54,14 @@ export async function authServiceFetch(
   path: string,
   request: AuthServiceRequest = {}
 ): Promise<Response> {
-  const { internalUrl, internalSecret } = config.authService;
-  const headers: Record<string, string> = { [INTERNAL_AUTH_HEADER]: internalSecret };
+  const { internalUrl, internalSecret, layerOrigin } = config.authService;
+  // Node's fetch sends Sec-Fetch-Mode, so better-auth's CSRF check wants a
+  // trusted Origin; apps/auth trusts this one for that and nothing else.
+  const headers: Record<string, string> = {
+    ...request.headers,
+    [INTERNAL_AUTH_HEADER]: internalSecret,
+    origin: layerOrigin,
+  };
   if (request.clientIp) headers[FORWARDED_IP_HEADER] = request.clientIp;
   if (request.bearer) headers.authorization = `Bearer ${request.bearer}`;
   if (request.body !== undefined) headers['content-type'] = 'application/json';

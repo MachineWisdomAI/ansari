@@ -3,8 +3,8 @@ import { NextRequest, NextResponse } from 'next/server';
 
 // Mock admin auth — must match import paths used in the route file
 const mockRequireAdmin = vi.fn();
-vi.mock('@/lib/auth/admin', () => ({
-  requireAdmin: (...args: unknown[]) => mockRequireAdmin(...args),
+vi.mock('@/lib/auth/require-admin-role', () => ({
+  requireAdminRole: (...args: unknown[]) => mockRequireAdmin(...args),
 }));
 
 // Mock middleware for createErrorResponse

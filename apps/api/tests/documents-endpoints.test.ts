@@ -29,6 +29,9 @@ vi.mock('@/lib/auth/middleware', () => ({
       headers: { 'Content-Type': 'application/json' },
     }),
 }));
+vi.mock('@/lib/auth/require-user', () => ({
+  requireUser: (...a: unknown[]) => mockAuthenticateRequest(...a),
+}));
 
 vi.mock('@/lib/ai/thread-naming', () => ({ maybeGenerateThreadName: vi.fn() }));
 vi.mock('@/lib/facilitator/agent', () => ({ runFacilitator: vi.fn() }));

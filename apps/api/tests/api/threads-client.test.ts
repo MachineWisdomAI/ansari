@@ -14,6 +14,9 @@ vi.mock('@/lib/auth/middleware', () => ({
       headers: { 'Content-Type': 'application/json' },
     }),
 }));
+vi.mock('@/lib/auth/require-user', () => ({
+  requireUser: (...a: unknown[]) => mockAuthenticateRequest(...a),
+}));
 
 const mockCreateThread = vi.fn();
 const mockCreateMessage = vi.fn();

@@ -31,6 +31,8 @@ import {
 export { INTERNAL_SECRET };
 export const TEST_ISSUER = 'https://auth.test.example';
 export const TEST_AUDIENCE = 'ansari-api-test';
+/** apps/api's origin: packages/auth's TEST_LAYER_ORIGIN, which apps/auth trusts. */
+export const TEST_LAYER_ORIGIN = 'https://api.test.example';
 export const LEGACY_JWT_SECRET = 'phase-7-legacy-jwt-secret-at-least-32-chars';
 
 /** apps/api's own required env, plus apps/auth's coordinates. */
@@ -43,6 +45,7 @@ export function setApiEnv(internalUrl: string, secret = INTERNAL_SECRET): void {
   process.env.AUTH_JWT_ISSUER = TEST_ISSUER;
   process.env.AUTH_JWT_AUDIENCE = TEST_AUDIENCE;
   process.env.AUTH_INTERNAL_SECRET = secret;
+  process.env.AUTH_LAYER_ORIGIN = TEST_LAYER_ORIGIN;
   resetEnvCache();
   resetJwksCache();
 }

@@ -1,7 +1,7 @@
 import * as Sentry from '@sentry/nextjs';
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '@/lib/db/index';
-import { findUserById, isUniqueViolation } from '@/lib/db/users';
+import { findUserById, insertAppUserRow, isUniqueViolation } from '@/lib/db/users';
 import { deletedUsers, users, type User } from '@/db/schema';
 import { isSystemAddress } from '@/lib/auth/system-accounts';
 import {
@@ -121,9 +121,6 @@ export async function resolveUser(sub: string, jwt: string): Promise<ResolveResu
   const taken = await refusalForHolder(email, sub);
   if (taken) return taken;
 
-  // `password_hash` stays NULL: the credential lives in the auth database
-  // (0011 drops its NOT NULL).
-  //
   // A concurrent `DELETE me` must not be undone. A tombstone check inside the
   // INSERT is not enough under READ COMMITTED: the INSERT can take its
   // snapshot before the delete commits, wait on the row the delete removes,
@@ -132,11 +129,16 @@ export async function resolveUser(sub: string, jwt: string): Promise<ResolveResu
   // committed by then, and rolls the insert back.
   try {
     await db.transaction(async (tx) => {
-      await tx.execute(sql`
-        INSERT INTO ${users} (id, email, first_name, last_name, registered_via)
-        VALUES (${sub}, ${email}, ${profile.first_name}, ${profile.last_name}, ${profile.registered_via})
-        ON CONFLICT (id) DO NOTHING
-      `);
+      await insertAppUserRow(
+        {
+          id: sub,
+          email,
+          firstName: profile.first_name,
+          lastName: profile.last_name,
+          registeredVia: profile.registered_via,
+        },
+        tx
+      );
       const [tombstoned] = await tx
         .select({ id: deletedUsers.id })
         .from(deletedUsers)

@@ -5,8 +5,16 @@ import { NextRequest } from 'next/server';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import * as schema from '@/db/schema';
-import { hashPassword } from '@/lib/auth/password';
+import bcrypt from 'bcrypt';
 import { resetEnvCache } from '@/lib/config';
+import { resetJwksCache } from '@/lib/auth/verify-jwt';
+import {
+  freshIp,
+  INTERNAL_SECRET,
+  startService,
+  TEST_ADMIN_EMAIL,
+  type Service,
+} from '../../../auth/tests/helpers/service';
 import { POST as register } from '../../src/app/api/v2/users/register/route';
 import { POST as login } from '../../src/app/api/v2/users/login/route';
 import { POST as refreshToken } from '../../src/app/api/v2/users/refresh_token/route';
@@ -26,15 +34,20 @@ import { GET as adminStats } from '../../src/app/api/v2/admin/stats/route';
  * reads the frozen fixtures; the suite never branches on the backend. Phase 8
  * adds the `better-auth` backend and must pass the same assertions unedited.
  *
- * The test file owns the two module mocks (vitest hoists `vi.mock` per file):
- * `@/lib/db/index` points the app's `db` handle at pglite, and `resend` records
- * outgoing email instead of sending it. Nothing else is mocked: real route
- * handlers, real middleware, real `lib/db` helpers, real bcrypt and real JWTs.
+ * The test file owns the module mocks (vitest hoists `vi.mock` per file):
+ * `@/lib/db/index` points the app's `db` handle at pglite. Nothing else is
+ * mocked: real route handlers, real `lib/db` helpers, real bcrypt, real JWTs.
+ *
+ * Phase 8 (`better-auth`): the routes are the compatibility layer, so the
+ * backend is the real apps/auth (both listeners over its own pglite, the
+ * second database), reached over HTTP on localhost. Its reset mailer records
+ * into the same `sentEmails` the legacy backend's Resend mock did. The legacy
+ * backend is gone with the legacy routes; its setup is in git history (phase 1).
  */
 
 export type AuthBackend = 'legacy' | 'better-auth';
 
-export const AUTH_BACKEND: AuthBackend = 'legacy';
+export const AUTH_BACKEND: AuthBackend = 'better-auth';
 
 /** State shared with the test file's hoisted module mocks. */
 export interface MockState {
@@ -119,15 +132,16 @@ export interface ContractHarness {
   close(): Promise<void>;
 }
 
-const FRONTEND_URL = 'https://contract.example.test';
-const RESERVED_ADMIN_EMAIL = 'reserved-admin@example.com';
-const LEGACY_ACCESS_TOKEN_EXPIRY_HOURS = 2;
+/** The JWT lifetime apps/auth signs (Better Auth's default, I-7). */
+const ACCESS_TOKEN_LIFETIME_MS = 15 * 60 * 1000;
 const CLOCK_START = new Date('2026-10-16T12:00:00.000Z');
 const DRIZZLE_DIR = path.resolve(__dirname, '../../drizzle');
+/** apps/api's origin, which apps/auth trusts for the layer's calls (packages/auth TEST_LAYER_ORIGIN). */
+const LAYER_ORIGIN = 'https://api.test.example';
 
 const RESET_LINK = /reset-password\?token=([^"'&<\s]+)/;
 
-/** Build the app database from the real migration journal: the legacy DDL, exactly. */
+/** Build the app database from the real migration journal, through the window migration. */
 async function migratedPglite(): Promise<PGlite> {
   const client = new PGlite();
   const journal: { tag: string }[] = JSON.parse(
@@ -142,23 +156,24 @@ async function migratedPglite(): Promise<PGlite> {
   return client;
 }
 
-function setLegacyEnv(): void {
+/** apps/api's env, pointed at the in-process apps/auth (whose env startService set). */
+function setApiEnv(service: Service): void {
   process.env.JWT_SECRET = 'contract-testing-secret-for-purposes-only-32chars';
   process.env.DATABASE_URL = 'postgresql://placeholder:placeholder@localhost:5432/placeholder';
   process.env.KALEMAT_API_KEY = 'placeholder';
   process.env.USUL_API_TOKEN = 'placeholder';
-  process.env.ACCESS_TOKEN_EXPIRY_HOURS = String(LEGACY_ACCESS_TOKEN_EXPIRY_HOURS);
-  process.env.REFRESH_TOKEN_EXPIRY_HOURS = '2160';
-  process.env.ADMIN_EMAILS = RESERVED_ADMIN_EMAIL;
-  process.env.RESEND_API_KEY = 're_contract_placeholder';
-  process.env.FRONTEND_URL = FRONTEND_URL;
-  delete process.env.MARKETMAKER_URL;
+  process.env.AUTH_INTERNAL_URL = service.internalUrl;
+  process.env.AUTH_INTERNAL_SECRET = INTERNAL_SECRET;
+  process.env.AUTH_LAYER_ORIGIN = LAYER_ORIGIN;
   resetEnvCache();
+  resetJwksCache();
 }
 
 function toRequest(route: RouteName, init: CallInit): NextRequest {
   const { method, path: routePath } = ROUTES[route];
-  const headers: Record<string, string> = { ...init.headers };
+  // Each call comes from its own client address, as from the edge, so no test
+  // that is not about limits shares a rate-limit bucket.
+  const headers: Record<string, string> = { 'X-Real-IP': freshIp(), ...init.headers };
   if (init.token !== undefined) headers.Authorization = `Bearer ${init.token}`;
   let body: string | undefined;
   if (init.rawBody !== undefined) body = init.rawBody;
@@ -167,23 +182,26 @@ function toRequest(route: RouteName, init: CallInit): NextRequest {
   return new NextRequest(`http://localhost${routePath}`, { method, headers, body });
 }
 
-export async function createLegacyHarness(state: MockState): Promise<ContractHarness> {
-  setLegacyEnv();
-  // Only Date is faked: JWT iat/exp and token expiry all read Date.now(), while
-  // bcrypt, pglite and timers run for real.
+export async function createHarness(state: MockState): Promise<ContractHarness> {
+  const service = await startService({
+    mailer: async (message) => {
+      state.sentEmails.push({ to: message.to, html: message.html });
+    },
+  });
+  const frontendUrl = process.env.FRONTEND_URL as string;
+  setApiEnv(service);
+  // Only Date is faked: JWT iat/exp, session expiry and rate-limit windows all
+  // read Date.now(), while bcrypt, pglite, HTTP and timers run for real.
   vi.useFakeTimers({ toFake: ['Date'], now: CLOCK_START });
   const client = await migratedPglite();
   state.db = drizzle(client, { schema });
 
   const harness: ContractHarness = {
-    backend: 'legacy',
-    frontendUrl: FRONTEND_URL,
-    reservedAdminEmail: RESERVED_ADMIN_EMAIL,
+    backend: 'better-auth',
+    frontendUrl,
+    reservedAdminEmail: TEST_ADMIN_EMAIL,
 
     async call(route, init = {}) {
-      // Legacy JWTs carry no jti, so two issued in the same second for the same
-      // user are byte-identical. One second per request keeps each issuance
-      // distinct, as it is in production.
       vi.advanceTimersByTime(1000);
       const response = await ROUTES[route].handler(toRequest(route, init));
       const text = await response.text();
@@ -194,14 +212,27 @@ export async function createLegacyHarness(state: MockState): Promise<ContractHar
       };
     },
 
+    // A migrated legacy user, as the cutover copy leaves one: the same UUID in
+    // both databases, the legacy bcrypt hash as the credential (dual verify),
+    // email_verified = true, and the role in the auth database.
     async seedUser({ email, password, firstName = null, lastName = null, admin = false }) {
-      const passwordHash = await hashPassword(password);
-      const result = await client.query<{ id: string }>(
-        `INSERT INTO users (email, password_hash, first_name, last_name, is_admin)
-         VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-        [email.toLowerCase(), passwordHash, firstName, lastName, admin]
+      const normalized = email.toLowerCase();
+      const app = await client.query<{ id: string }>(
+        `INSERT INTO users (email, first_name, last_name) VALUES ($1, $2, $3) RETURNING id`,
+        [normalized, firstName, lastName]
       );
-      return { id: result.rows[0].id };
+      const id = app.rows[0].id;
+      await service.client.query(
+        `INSERT INTO auth.users (id, name, email, email_verified, role, first_name, last_name)
+         VALUES ($1, $2, $3, true, $4, $5, $6)`,
+        [id, firstName ?? normalized.split('@')[0], normalized, admin ? 'admin' : 'user', firstName, lastName]
+      );
+      await service.client.query(
+        `INSERT INTO auth.account (account_id, provider_id, user_id, password, updated_at)
+         VALUES ($1, 'credential', $2, $3, now())`,
+        [id, id, await bcrypt.hash(password, 12)]
+      );
+      return { id };
     },
 
     async seedOwnedRows(userId) {
@@ -241,7 +272,7 @@ export async function createLegacyHarness(state: MockState): Promise<ContractHar
     },
 
     expireAccessToken() {
-      vi.advanceTimersByTime(LEGACY_ACCESS_TOKEN_EXPIRY_HOURS * 60 * 60 * 1000 + 1000);
+      vi.advanceTimersByTime(ACCESS_TOKEN_LIFETIME_MS + 1000);
     },
 
     async awaitResetToken(to) {
@@ -263,13 +294,19 @@ export async function createLegacyHarness(state: MockState): Promise<ContractHar
     },
 
     async reset() {
-      await client.exec('TRUNCATE users CASCADE');
+      await client.exec('TRUNCATE users, deleted_users CASCADE');
+      await service.client.exec(
+        'TRUNCATE auth.users, auth.verification, auth.rate_limit CASCADE'
+      );
       state.sentEmails.length = 0;
       vi.setSystemTime(CLOCK_START);
+      // The verifier's fetch gate and cache ages are clocked by Date; start cold.
+      resetJwksCache();
     },
 
     async close() {
       vi.useRealTimers();
+      await service.close();
       await client.close();
     },
   };

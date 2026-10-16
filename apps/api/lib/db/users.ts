@@ -115,6 +115,30 @@ export async function createUser(data: {
   return result[0];
 }
 
+/**
+ * The app row of a user apps/auth created (spec 300): the same id, the email
+ * normalized, the names and `registered_via` copied once. `password_hash`
+ * stays NULL, because the credential lives in the auth database (0011 drops
+ * its NOT NULL). `ON CONFLICT (id) DO NOTHING`, so concurrent creators make
+ * one row; an email another row holds raises the unique violation.
+ */
+export async function insertAppUserRow(
+  row: {
+    id: string;
+    email: string;
+    firstName: string | null;
+    lastName: string | null;
+    registeredVia: string | null;
+  },
+  exec: Executor = db
+): Promise<void> {
+  await exec.execute(sql`
+    INSERT INTO ${users} (id, email, first_name, last_name, registered_via)
+    VALUES (${row.id}, ${row.email.trim().toLowerCase()}, ${row.firstName}, ${row.lastName}, ${row.registeredVia})
+    ON CONFLICT (id) DO NOTHING
+  `);
+}
+
 export async function updateUser(
   id: string,
   data: Partial<Pick<User, 'email' | 'passwordHash' | 'firstName' | 'lastName'>>,

@@ -47,12 +47,15 @@ export function drizzleFor(client: PGlite): Db {
 export const TEST_JWT_ISSUER = 'https://auth.test.example';
 export const TEST_JWT_AUDIENCE = 'ansari-api-test';
 export const TEST_ADMIN_EMAIL = 'admin@ansari.test';
+/** apps/api's origin in tests: the Origin its layer sends. */
+export const TEST_LAYER_ORIGIN = 'https://api.test.example';
 
 export function setAuthEnv(baseUrl: string): void {
   process.env.DATABASE_URL = 'postgres://test:test@localhost:5432/test';
   process.env.BETTER_AUTH_SECRET = 'test-secret-at-least-32-characters-long-000';
   process.env.BETTER_AUTH_URL = baseUrl;
   process.env.CORS_ORIGIN = 'http://localhost:3100';
+  process.env.AUTH_LAYER_ORIGIN = TEST_LAYER_ORIGIN;
   process.env.NODE_ENV = 'test';
   process.env.AUTH_JWT_ISSUER = TEST_JWT_ISSUER;
   process.env.AUTH_JWT_AUDIENCE = TEST_JWT_AUDIENCE;

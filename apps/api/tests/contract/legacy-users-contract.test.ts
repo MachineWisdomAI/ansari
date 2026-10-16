@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import fixtures from './fixtures/legacy-users.json';
-import { createLegacyHarness, type ContractHarness, type MockState, type WireResponse } from './harness';
+import { createHarness, type ContractHarness, type MockState, type WireResponse } from './harness';
 
 // Frozen wire contract of the legacy /v2/users/* surface and the two
 // password-reset routes (spec 300, plan phase 1). Written against today's
@@ -82,7 +82,7 @@ const SYSTEM_ADDRESS = 'someone@system.ansari.chat';
 let harness: ContractHarness;
 
 beforeAll(async () => {
-  harness = await createLegacyHarness(h);
+  harness = await createHarness(h);
 });
 
 afterAll(async () => {

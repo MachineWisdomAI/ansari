@@ -7,6 +7,9 @@ vi.mock('@/lib/auth/middleware', () => ({
   createErrorResponse: (detail: string, status: number) =>
     NextResponse.json({ detail }, { status }),
 }));
+vi.mock('@/lib/auth/require-user', () => ({
+  requireUser: (...args: unknown[]) => mockAuthenticateRequest(...args),
+}));
 
 const mockUpsertFeedback = vi.fn();
 vi.mock('@/lib/db/feedback', () => ({

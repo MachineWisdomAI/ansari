@@ -30,6 +30,11 @@ const envSchema = z.object({
     )
     .pipe(z.array(z.url('CORS_ORIGIN must be a comma list of URLs')).min(1)),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  // apps/api's own origin, sent as `Origin` by its /v2/users/* layer, whose
+  // server-side fetch carries Sec-Fetch-Mode and so meets better-auth's CSRF
+  // check. It joins trustedOrigins ONLY, never the CORS allowlist, so a
+  // browser on that origin gets no CORS allow headers (spec 300 phase 8).
+  AUTH_LAYER_ORIGIN: z.url('AUTH_LAYER_ORIGIN must be a valid URL'),
 
   // JWT claims (spec 300). `iss` is this service's public origin
   // (https://auth.askansari.ai, or auth-staging in staging); `aud` names

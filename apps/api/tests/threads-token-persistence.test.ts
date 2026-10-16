@@ -56,6 +56,9 @@ vi.mock('@/lib/auth/middleware', () => ({
   createErrorResponse: (detail: string, status = 400) =>
     new Response(JSON.stringify({ error: detail }), { status }),
 }));
+vi.mock('@/lib/auth/require-user', () => ({
+  requireUser: (...a: unknown[]) => mockAuthenticate(...a),
+}));
 
 const mockFindThreadById = vi.fn();
 const mockCreateMessage = vi.fn();

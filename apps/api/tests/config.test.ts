@@ -267,6 +267,7 @@ describe('apps/auth config', () => {
     AUTH_JWT_ISSUER: 'https://auth.askansari.ai',
     AUTH_JWT_AUDIENCE: 'ansari-api',
     AUTH_INTERNAL_SECRET: 's'.repeat(32),
+    AUTH_LAYER_ORIGIN: 'https://api.askansari.ai',
   };
   const setAuthEnv = (overrides: Record<string, string | undefined> = {}) => {
     for (const [k, v] of Object.entries({ ...AUTH_ENV, ...overrides })) {
@@ -276,13 +277,14 @@ describe('apps/auth config', () => {
     resetEnvCache();
   };
 
-  it('exposes the four values through config.authService', () => {
+  it('exposes the five values through config.authService', () => {
     setAuthEnv();
     expect(config.authService).toEqual({
       internalUrl: AUTH_ENV.AUTH_INTERNAL_URL,
       jwtIssuer: AUTH_ENV.AUTH_JWT_ISSUER,
       jwtAudience: AUTH_ENV.AUTH_JWT_AUDIENCE,
       internalSecret: AUTH_ENV.AUTH_INTERNAL_SECRET,
+      layerOrigin: 'https://api.askansari.ai',
     });
   });
 

@@ -22,6 +22,9 @@ vi.mock('@/lib/auth/middleware', () => ({
   createErrorResponse: (detail: string, status: number) =>
     NextResponse.json({ detail }, { status }),
 }));
+vi.mock('@/lib/auth/require-user', () => ({
+  requireUser: (...args: unknown[]) => mockAuthenticateRequest(...args),
+}));
 
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';

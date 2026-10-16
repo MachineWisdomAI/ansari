@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/auth/admin';
+import { requireAdminRole } from '@/lib/auth/require-admin-role';
 import { createErrorResponse } from '@/lib/auth/middleware';
 import {
   getSummaryStats,
@@ -11,7 +11,7 @@ import {
 } from '@/lib/db/stats';
 
 export async function GET(request: NextRequest) {
-  const authResult = await requireAdmin(request);
+  const authResult = await requireAdminRole(request);
   if ('error' in authResult) return authResult.error;
 
   const { searchParams } = new URL(request.url);

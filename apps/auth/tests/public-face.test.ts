@@ -2,7 +2,17 @@
 // (plan P-4) and the health probe.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { BASE, send, signUp, startService, STRONG_PASSWORD, type Service } from './helpers/service';
+import { TEST_LAYER_ORIGIN } from '../../../packages/auth/tests/helpers/auth-db';
+import {
+  BASE,
+  freshIp,
+  internalHeaders,
+  send,
+  signUp,
+  startService,
+  STRONG_PASSWORD,
+  type Service,
+} from './helpers/service';
 
 let service: Service;
 
@@ -80,6 +90,41 @@ describe('CORS (scenario 28)', () => {
       body: {},
     });
     expect(res.status).toBe(403);
+  });
+
+  // apps/api's origin is trusted for the layer's server-side calls, and only
+  // that: it is not a CORS origin, so a browser page on apps/api's domain can
+  // read nothing back from apps/auth (security, phase 8).
+  describe('the layer origin (AUTH_LAYER_ORIGIN)', () => {
+    it('passes the CSRF check for a server-side call on the internal listener', async () => {
+      const trusted = await send(service.internalUrl, '/api/auth/sign-in/email', {
+        headers: { ...internalHeaders(freshIp()), origin: TEST_LAYER_ORIGIN },
+        body: { email: 'cors@example.com', password: STRONG_PASSWORD },
+      });
+      expect(trusted.status).toBe(200);
+      const untrusted = await send(service.internalUrl, '/api/auth/sign-in/email', {
+        headers: { ...internalHeaders(freshIp()), origin: 'https://evil.example' },
+        body: { email: 'cors@example.com', password: STRONG_PASSWORD },
+      });
+      expect(untrusted.status).toBe(403);
+    });
+
+    it('gets no CORS allow headers from a browser, on the preflight or the request', async () => {
+      const pre = await preflight(TEST_LAYER_ORIGIN);
+      expect(pre.headers.get('access-control-allow-origin')).toBeNull();
+      expect(pre.headers.get('access-control-allow-headers')).toBeNull();
+      const res = await send(service.publicUrl, '/api/auth/sign-in/email', {
+        headers: { origin: TEST_LAYER_ORIGIN },
+        body: { email: 'cors@example.com', password: STRONG_PASSWORD },
+      });
+      // The sign-in succeeded (the CSRF check trusts this origin), but with no
+      // allow-origin the browser can read none of it. better-auth's bearer
+      // plugin sets its own expose-headers on any success, which grants
+      // nothing without allow-origin, so it is not asserted here.
+      expect(res.status).toBe(200);
+      expect(res.headers.get('access-control-allow-origin')).toBeNull();
+      expect(res.headers.get('access-control-allow-credentials')).toBeNull();
+    });
   });
 
   it('the internal listener sends no CORS headers at all', async () => {

@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 
-// Real route tests for the two highest-value public/auth endpoints, exercised
-// against an in-memory Postgres (pglite) via the same vi.mock('@/lib/db/index')
+// Real route test for the public share endpoint, exercised against an
+// in-memory Postgres (pglite). (Login moved to apps/auth in spec 300; the
+// layer suites and the contract suite cover it.) via the same vi.mock('@/lib/db/index')
 // pattern as tests/token-grace.test.ts. The production DATABASE_URL is never
 // touched. These replace the previous vacuous cases that asserted on object
 // literals they constructed in-test (which could never fail).
@@ -19,7 +20,6 @@ import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import * as schema from '@/db/schema';
 import { hashPassword } from '@/lib/auth/password';
-import { POST as loginPOST } from '../src/app/api/v2/users/login/route';
 import { GET as shareGET } from '../src/app/api/v2/share/[id]/route';
 
 let client: PGlite;
@@ -118,63 +118,6 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await client.close();
-});
-
-beforeEach(async () => {
-  // Login stores tokens; clear them between tests so counts stay predictable.
-  await client.exec('DELETE FROM tokens');
-});
-
-function loginRequest(body: unknown): NextRequest {
-  return new NextRequest('http://localhost/api/v2/users/login', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-}
-
-describe('POST /api/v2/users/login', () => {
-  it('returns Ansari-format tokens for valid credentials', async () => {
-    const res = await loginPOST(loginRequest({ email: 'test@example.com', password: PASSWORD }));
-    const data = await res.json();
-
-    expect(res.status).toBe(200);
-    expect(data.status).toBe('success');
-    expect(typeof data.access_token).toBe('string');
-    expect(data.access_token.length).toBeGreaterThan(0);
-    expect(typeof data.refresh_token).toBe('string');
-    expect(data.refresh_token.length).toBeGreaterThan(0);
-    expect(data.token_type).toBe('bearer');
-    expect(data.first_name).toBe('Test');
-    expect(data.last_name).toBe('User');
-
-    // Both tokens are actually persisted (proves the route hit the DB).
-    const tokenCount = await client.query<{ count: number }>(
-      'SELECT COUNT(*)::int AS count FROM tokens'
-    );
-    expect(tokenCount.rows[0].count).toBe(2);
-  });
-
-  it('rejects a wrong password with a generic 401', async () => {
-    const res = await loginPOST(loginRequest({ email: 'test@example.com', password: 'wrong-password' }));
-    const data = await res.json();
-
-    expect(res.status).toBe(401);
-    expect(data.detail).toBe('Invalid email or password');
-  });
-
-  it('rejects an unknown email with the same generic 401 (no user enumeration)', async () => {
-    const res = await loginPOST(loginRequest({ email: 'nobody@example.com', password: PASSWORD }));
-    const data = await res.json();
-
-    expect(res.status).toBe(401);
-    expect(data.detail).toBe('Invalid email or password');
-  });
-
-  it('returns 422 for a malformed body', async () => {
-    const res = await loginPOST(loginRequest({ email: 'not-an-email', password: '' }));
-    expect(res.status).toBe(422);
-  });
 });
 
 describe('GET /api/v2/share/[id] (public)', () => {

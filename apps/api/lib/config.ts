@@ -5,6 +5,7 @@ const AUTH_SERVICE_VARS = [
   'AUTH_JWT_ISSUER',
   'AUTH_JWT_AUDIENCE',
   'AUTH_INTERNAL_SECRET',
+  'AUTH_LAYER_ORIGIN',
 ] as const;
 
 const envSchema = z.object({
@@ -36,6 +37,9 @@ const envSchema = z.object({
     .string()
     .min(32, 'AUTH_INTERNAL_SECRET must be at least 32 characters')
     .optional(),
+  // apps/api's own origin, sent as `Origin` on the layer's calls to apps/auth
+  // (which trusts it for CSRF only, never for CORS). Same value as apps/auth's.
+  AUTH_LAYER_ORIGIN: z.string().url('AUTH_LAYER_ORIGIN must be a valid URL').optional(),
 
   // AI - Facilitator (Gemini)
   // Either Vertex AI (preferred) or the public Gemini API must be configured.
@@ -211,7 +215,8 @@ export const config = {
 
   /**
    * apps/auth, as apps/api reaches it (spec 300): the internal listener's
-   * origin, the JWT issuer and audience it pins, and the internal credential.
+   * origin, the JWT issuer and audience it pins, the internal credential, and
+   * the Origin the layer sends.
    * Throws, naming only the missing variables, when any is unset.
    */
   get authService() {
@@ -225,6 +230,7 @@ export const config = {
       jwtIssuer: env.AUTH_JWT_ISSUER as string,
       jwtAudience: env.AUTH_JWT_AUDIENCE as string,
       internalSecret: env.AUTH_INTERNAL_SECRET as string,
+      layerOrigin: new URL(env.AUTH_LAYER_ORIGIN as string).origin,
     };
   },
 
