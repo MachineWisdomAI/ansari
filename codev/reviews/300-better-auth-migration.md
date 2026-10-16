@@ -33,9 +33,10 @@ porch counts the round). Those rounds are **Codex-only**: no Gemini skip is coun
 anywhere in this project. Per main's rule, a REQUEST_CHANGES fix is accepted as reviewed only
 once Codex has seen it. Phase 8: iteration 1 had both lanes (Gemini APPROVE, Codex
 REQUEST_CHANGES); iterations 2 and 3 were Codex-only; Codex approved the final state in
-iteration 3. Phase 7's last fix (583b045) had no consult round of its own because porch's
-3-iteration ceiling force-advanced; the security architect spot-checked it, and its code was in
-the tree Codex approved in phase 8 iteration 3.
+iteration 3. Phase 7's last fix (583b045, `apps/api/lib/auth/resolve-user.ts`, the first-use insert and
+tombstone re-check in one transaction): **security spot-check, no own consult round** (porch's
+3-iteration ceiling force-advanced). Its code was in the tree Codex approved in phase 8
+iteration 3. The PR's integration review should take a deliberate look at `resolve-user.ts`.
 
 ## Lessons for the lessons-learned pass
 
