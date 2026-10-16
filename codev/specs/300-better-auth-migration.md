@@ -508,11 +508,15 @@ a **migrator** (its owner) and **one runtime role**:
 - **App database.** The existing owner becomes the migrator and is **not** re-owned
   (`ALTER … OWNER` on production tables is avoidable risk; the owner confirms ownership with
   `\dt public.*` and `\du`). The `apps/api` runtime role gets DML on `public` and no DDL. Today's
-  `apps/api` `DATABASE_URL` **is** the migrator credential, so there is a **re-point step**:
-  `apps/api` moves to the runtime role on staging first, from the branch, with a soak; on
-  production it runs in the window, before `apps/api` is deployed. The step ends with the migrator
-  URL **in no service environment** and the migrator password **rotated**. Rollback before rotation
-  is restoring the old URL in Railway, with no code change.
+  `apps/api` `DATABASE_URL` **is** the migrator credential, so there is a **re-point step**. It is
+  **operations-only and runs ahead of the window** (security review of 52cff7a): it has no code
+  dependency, because `apps/api` already works under any DML-capable role (it runs no DDL or
+  `migrate()` at runtime, and its lazy pool from bugfix-260 is on `develop`, `aa20376`). Order: the
+  app database's provisioning SQL (reviewed in the PR, High tier) is applied as the migrator, then
+  `apps/api` moves to the runtime role, on staging first with a soak and then on production with its
+  own soak. The step ends with the migrator URL **in no service environment** and the migrator
+  password **rotated**. Rollback is restoring the old URL in Railway. The PR's runtime-role boot
+  check simply starts passing on a database that is already re-pointed.
 - **Auth database.** It is new, and its default user is the migrator. The `apps/auth` runtime role
   gets DML on `auth.*` and no DDL. `apps/auth` never receives the migrator URL.
 - **Provisioning, not migrations.** Roles and grants live in reviewed provisioning SQL outside both
@@ -651,8 +655,8 @@ blocked by half-shipped cutover code.
 | Stage | Reference phases | What happens |
 |---|---|---|
 | **Build, on the branch** | 0 to 2 (code) | All of it: the `apps/auth` config (UUIDs, `auth` schema, dual verify, `bearer()`, `jwt()`, `admin()` kept for its columns with its whole HTTP surface blocked, `change-email` and `update-user` blocked, rate limiting and client IP, the internal hop and endpoints), its Dockerfile and service; the `packages/auth` baseline; the app migrations (scaffold cleanup, `public.deleted_users`, the cutover); the provisioning SQL; the copy script and audits; the `apps/api` JWKS verification, app-row creation, tombstoned deletion, role calls and compatibility layer; the CORS fix; contract tests written first against today's implementation; the pglite DDL update; removal of the legacy JWT code, `tokens`, `session_version`, `is_admin`, `password_hash`, the `JWT_*` config (and their `globalEnv` names), with `grant-admin.ts` and `ADMIN_EMAILS` moving to `apps/auth`; the `apps/frontend` switch to `apps/auth` (agreed with the app architect); `RELEASE.md` and `CONTRIBUTING.md` |
-| **Before the window, nothing in production changes** | 2 | Staging deployments from the branch: the empirical edge check, the staging re-point and soak, and the **rehearsal** on a clone of the production app database plus a fresh auth database. The empty production auth database is created on Railway (C-4). The branch is kept current with `develop`, with the numbering re-checked after every merge, and the rehearsal is re-run after the last rebase |
-| **The window** | 3, plus 4's code removal | Merge and promote, with `apps/api` offline: snapshots, auth baseline, provisioning, the copy and its audits, the app cutover migration, the production re-point and password rotation, admin roles, deploy `apps/auth`, `apps/api` and `apps/frontend`, smoke tests, then `apps/auth`'s public domain |
+| **Before the window: no production code changes** | 2 | Staging deployments from the branch: the empirical edge check and the **rehearsal** on a clone of the production app database plus a fresh auth database. **Operations-only:** the app database's provisioning SQL and the `apps/api` **re-point**, staging then production, each with a soak, ending with the migrator URL in no service environment and its password rotated. The empty production auth database is created on Railway (C-4). The branch is kept current with `develop`, with the numbering re-checked after every merge, and the rehearsal is re-run after the last rebase |
+| **The window** | 3, plus 4's code removal | Merge and promote, with `apps/api` offline: snapshots, the auth database's baseline and provisioning, the copy and its audits, the app cutover migration, admin roles, deploy `apps/auth`, `apps/api` and `apps/frontend`, smoke tests, then `apps/auth`'s public domain |
 | Out of this project (follow-up issues) | 4 triggers, 5 | Remove the layer (its trigger). A profile sync design before `change-email` or `update-user` is enabled |
 
 **Why not a feature flag.** The cutover migration cannot sit in the journal on `develop` ahead of
@@ -976,11 +980,15 @@ rollback deadline passing.
   auth database, never a database production uses. It passes all audits, then boots the PR's
   `apps/api` and `apps/auth` against the rehearsed databases and passes the smoke tests.
 - [ ] The PR amends `RELEASE.md` with the auth database, the provisioning step and the deploy order
-  **roles SQL → migration → grants → boot** for each database, ahead of the `apps/auth` deploy and
-  `apps/api`'s re-pointed `DATABASE_URL`. Every `psql` apply, the smoke test and the admin
+  **roles SQL → migration → grants → boot** for each database. The order is written as two stages.
+  **Ahead of the window**, for the app database: provisioning, then the re-point and its soak, then
+  rotation. **In the window**, for the auth database: roles, baseline, grants, then the copy, before
+  the `apps/auth` deploy. Every `psql` apply, the smoke test and the admin
   bootstrap step use the operator-held migrator URL of the right database; `CONTRIBUTING.md` states
   that dev and CI use one owner URL per database, on two local databases.
-- [ ] The **re-point** is its own step, staging first with a soak, then production in the window. It ends
+- [ ] The **re-point** is an operations-only step **ahead of the window**: the app database's
+  provisioning SQL, then staging with a soak, then production with its own soak. The window holds
+  no re-point. It ends
   with the migrator URL in no service environment (checked on every Railway service) and the
   migrator password rotated. A source scan finds no fallback connection string in runtime code.
 - [ ] The PR also amends `RELEASE.md`:
