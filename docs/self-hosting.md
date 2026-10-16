@@ -8,7 +8,9 @@ the complete environment-variable contract, and deployment notes.
 - **Node.js ≥ 22** (the root `.nvmrc` pins the version)
 - **pnpm ≥ 10** — `corepack enable` provides the exact pinned version (the
   `packageManager` field in the root `package.json`); the repo is a pnpm workspace
-- **PostgreSQL** (any recent version; the schema is managed by Drizzle migrations)
+- **PostgreSQL** (any recent version) with **two databases**: the app database (`apps/api`) and
+  the auth database (`apps/auth`). Each has its own Drizzle migration journal, and neither
+  service ever connects to the other's database.
 - A **Gemini** credential — either a [Google AI Studio API key](https://aistudio.google.com/)
   or a Google Cloud project with Vertex AI enabled
 - (For full search functionality) **Kalemat** and **Usul** API keys — see the caveat below
@@ -139,9 +141,20 @@ pnpm install                # at the REPO ROOT (single workspace lockfile)
 
 cd apps/api
 cp .env.example .env        # fill in per the tables above
-pnpm db:migrate             # applies drizzle/ migrations to DATABASE_URL
+pnpm db:migrate             # applies drizzle/ migrations to DATABASE_URL (the app database)
+cd ../..
 
-pnpm dev                    # dev server on :3000
+# The auth service, on its own database (apps/api signs no one in; it verifies
+# apps/auth's JWTs, so both run). Set the same AUTH_INTERNAL_SECRET in both.
+createdb ansari_auth
+cd apps/auth
+cp .env.example .env        # DATABASE_URL = the auth database
+psql "$(grep '^DATABASE_URL=' .env | cut -d= -f2-)" -X -v ON_ERROR_STOP=1 --single-transaction \
+  -f ../../packages/auth/drizzle/0000_auth_schema.sql
+cd ../..
+
+pnpm auth dev               # apps/auth on :3100 (public) and :3101 (internal)
+pnpm api dev                # apps/api on :3000, in a second terminal
 ```
 
 Verify your setup (from `apps/api/`):
@@ -190,8 +203,12 @@ deploy gate: a deploy with a broken or unset `DATABASE_URL` will fail its health
 and be rolled back rather than going live in a broken state. Make sure `DATABASE_URL`
 is set and reachable before deploying.
 
-Database migrations are applied with `pnpm db:migrate` (from `apps/api/`) against
-the production `DATABASE_URL` (never `db:push`).
+Production migrations are **not** applied with `pnpm db:migrate`. Each reviewed SQL file
+is applied by hand with `psql -X -v ON_ERROR_STOP=1 --single-transaction -f <file>`,
+naming the database it belongs to (the app database for `apps/api/drizzle/`, the auth
+database for `packages/auth/drizzle/`), as `RELEASE.md` describes. Never `db:push`.
+`apps/auth`'s `/health` is the same kind of gate: it answers 200 only while the auth
+database does.
 
 ### Troubleshooting: crash loop at boot (admin bootstrap check)
 

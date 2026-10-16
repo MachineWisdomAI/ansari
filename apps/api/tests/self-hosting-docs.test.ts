@@ -47,3 +47,19 @@ describe('self-hosting docs: boot-blocks-on-unreachable-DB triage (issue #21)', 
     expect(existsSync(resolve(__dirname, '../../auth/scripts/grant-admin.ts'))).toBe(true);
   });
 });
+
+describe('self-hosting docs: two databases, two services (spec 300)', () => {
+  it('asks for two databases and runs both services', () => {
+    expect(doc).toMatch(/two databases/i);
+    expect(doc).toContain('packages/auth/drizzle/0000_auth_schema.sql');
+    expect(existsSync(resolve(__dirname, '../../../packages/auth/drizzle/0000_auth_schema.sql'))).toBe(true);
+    expect(doc).toContain('pnpm auth dev');
+    expect(doc).toContain('pnpm api dev');
+  });
+
+  it('applies production migrations by psql with both flags, never by db:migrate or db:push', () => {
+    expect(doc).toContain('psql -X -v ON_ERROR_STOP=1 --single-transaction -f <file>');
+    expect(doc).toMatch(/Production migrations are \*\*not\*\* applied with `pnpm db:migrate`/);
+    expect(doc).not.toMatch(/applied with `pnpm db:migrate` \(from `apps\/api\/`\) against\s+the production/);
+  });
+});

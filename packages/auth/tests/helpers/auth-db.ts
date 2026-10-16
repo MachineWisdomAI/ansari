@@ -40,6 +40,14 @@ export async function migrate(through?: string): Promise<PGlite> {
   return client;
 }
 
+/**
+ * A fresh, empty pglite database (no journal). apps/auth's cutover suite
+ * builds the APP database in one from apps/api's journal.
+ */
+export function emptyDatabase(): PGlite {
+  return new PGlite();
+}
+
 export function drizzleFor(client: PGlite): Db {
   return drizzle(client, { schema }) as unknown as Db;
 }

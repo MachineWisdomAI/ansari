@@ -9,7 +9,8 @@
     // the schema or the helpers changed. tests/frontend-client.test.ts runs
     // apps/frontend's apps/auth client (and the files it imports) against
     // the service, so those files are inputs too; that test fails if the
-    // client imports a file outside them.
+    // client imports a file outside them. tests/cutover/copy.test.ts builds
+    // the APP database from apps/api's journal, so a change there re-runs it.
     "test": {
       "inputs": [
         "$TURBO_DEFAULT$",
@@ -18,7 +19,8 @@
         "$TURBO_ROOT$/packages/auth/tests/helpers/**",
         "$TURBO_ROOT$/apps/frontend/lib/auth/**",
         "$TURBO_ROOT$/apps/frontend/lib/api/wire-schemas.ts",
-        "$TURBO_ROOT$/apps/frontend/vendor/api-client-react/custom-fetch.ts"
+        "$TURBO_ROOT$/apps/frontend/vendor/api-client-react/custom-fetch.ts",
+        "$TURBO_ROOT$/apps/api/drizzle/**"
       ]
     }
   }

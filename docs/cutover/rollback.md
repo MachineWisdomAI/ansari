@@ -1,0 +1,88 @@
+# Better Auth cutover: rollback (spec 300)
+
+**Valid until `cutover_at` + 24 hours** (both are in the window's release record). After the
+deadline, do **not** roll back: fix forward on `develop`.
+
+Rollback is a **redeploy, not a restore**. The window dropped nothing the legacy code reads
+(`password_hash`, `is_admin`, `session_version` and `tokens` all stay until the contract PR), so
+the previous `apps/api` runs on the app database as it now is. The app database snapshot from
+the window's step 4 exists for a disaster, not for this procedure.
+
+**Costs the owner accepted:** a password changed at `apps/auth` after the cutover reverts to the
+legacy one (that user resets again), and accounts created after the cutover are removed, with
+their threads.
+
+Each step: what to run, the mechanical **check**, and what to do if it fails. Database steps run
+in a Railway shell with `APP_DATABASE_URL` for that session only, as in the window runbook.
+
+## 1. `apps/api` offline
+
+By the same mechanism as the window's step 3.
+
+**Check:** `https://api.askansari.ai/api/health` and `https://api-35.ansari.chat/api/health` return
+the offline response. **If it fails:** stop; nothing below is safe while new code still serves.
+
+## 2. Remove the post-cutover users
+
+Their accounts have no legacy password, so the legacy code cannot sign them in. Dry run first,
+with `cutover_at` from the release record:
+
+```bash
+psql "$APP_DATABASE_URL" -X -v ON_ERROR_STOP=1 -v cutover_at='<cutover_at>' -f apps/auth/scripts/cutover/rollback-remove-post-cutover-users.sql
+```
+
+Read the count (`post_cutover_users`), record it, then delete:
+
+```bash
+psql "$APP_DATABASE_URL" -X -v ON_ERROR_STOP=1 -v cutover_at='<cutover_at>' -v confirm=yes -f apps/auth/scripts/cutover/rollback-remove-post-cutover-users.sql
+```
+
+**Check:** re-running the dry run prints `0`. System accounts are never removed (the script
+excludes them). **If it fails:** the delete runs in one transaction, so nothing changed; fix
+the cause (usually `cutover_at` missing or malformed) and repeat.
+
+## 3. Redeploy the previous `apps/api` and `apps/frontend`
+
+Railway dashboard → `backend` → Deployments → the deployment before the cutover → **Redeploy**.
+Do the same for the web service only if `apps/frontend` was serving production web before the
+window.
+
+**Check:** both deployments healthy, on the pre-cutover commit.
+
+## 4. Restore the previous legacy web deployment
+
+Move the web domain back from the `apps/frontend` web service to the legacy web service (the
+reverse of the window's step 13).
+
+**Check:** the web domain serves legacy web.
+
+## 5. Detach `auth.askansari.ai`
+
+Remove the public domain from the `auth` service. Leave the service and its database as they
+are (stopped is fine): they are evidence, and a second attempt starts by emptying them.
+
+**Check:** `curl -s -o /dev/null -w '%{http_code}' https://auth.askansari.ai/health` no longer
+returns 200.
+
+## 6. Smoke-test a legacy login
+
+Re-attach `apps/api`'s domains (undo step 1). With a migrated account:
+
+```bash
+curl -s https://api.askansari.ai/api/v2/users/login -H 'Content-Type: application/json' \
+  -d '{"email":"<migrated account>","password":"<its legacy password>"}' | jq -r .access_token
+```
+
+**Check:** an access token is returned, and `/api/v2/threads` with it returns 200 with the
+account's threads. A released mobile build signs in.
+
+## 7. Record it
+
+In the release record: the time, the dry-run count, who decided, and why. Un-silence alerts.
+
+## A second attempt (restart procedure)
+
+The copy refuses a non-empty auth database. To try the window again: empty the auth database
+(`DROP SCHEMA auth CASCADE`), then follow the window runbook from **step 5** (the auth baseline).
+The app window migration (`0011`) is already applied and is not re-run; its check in step 7 still
+holds.
