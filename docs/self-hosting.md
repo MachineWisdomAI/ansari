@@ -213,7 +213,7 @@ only on a production boot — never in dev or tests.
 | Boot error contains | Meaning | What to do |
 |---|---|---|
 | `Admin bootstrap check could not reach the database` | The auth database was unreachable when boot ran. This is an **outage, not a provisioning error** — do not re-run the bootstrap script. | Restore database reachability (`apps/auth`'s `DATABASE_URL` correct, network path open, database up). The next restart succeeds once the database answers; on restart-on-crash platforms recovery is automatic. |
-| `has no account` or `role is not admin` | A real provisioning gap: the configured admin never signed up, was never granted, or was deleted/demoted since. Restarting will not fix it. | Run `pnpm exec tsx scripts/grant-admin.ts <email>` from `apps/auth/` for the identified entry (see [Provisioning admins](#provisioning-admins)), then restart. |
+| `has no account` or `role is not admin` | A real provisioning gap: the configured admin never signed up, was never granted, or was deleted/demoted since. Restarting will not fix it. | Run `pnpm exec tsx scripts/grant-admin.ts <email>` from `apps/auth/` (in the auth image's shell: `./node_modules/.bin/tsx scripts/grant-admin.ts <email>`) for the identified entry (see [Provisioning admins](#provisioning-admins)), then restart. |
 
 The error identifies the failing entry by its **position** in `ADMIN_EMAILS`
 (e.g. `configured admin #2 of 3`), never by the address itself — boot logs carry

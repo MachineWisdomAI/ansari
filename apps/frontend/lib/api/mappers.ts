@@ -177,6 +177,9 @@ export function joinThreadDocuments(
 export function mapConversationDetail(
   detail: WireThreadDetail,
   documentsByMessageId: ReadonlyMap<string, WireDocument[]> = new Map(),
+  // Off for a shared thread: a visitor must see exactly what was shared,
+  // never sample text or sources the snapshot does not carry.
+  { samples = true }: { samples?: boolean } = {},
 ): ConversationDetail {
   const id = detail.thread_id;
   const mapped = detail.messages
@@ -184,7 +187,7 @@ export function mapConversationDetail(
     .filter((m): m is Message => m !== null);
   const firstAnswer = mapped.find((m) => m.role === 'assistant');
   const withSamples =
-    isKhushuThread(mapped) && firstAnswer && firstAnswer.citations.length === 0
+    samples && isKhushuThread(mapped) && firstAnswer && firstAnswer.citations.length === 0
       ? mapped.map((m) =>
           m === firstAnswer
             ? { ...m, content: SAMPLE_ANSWER_CONTENT, citations: SAMPLE_CITATIONS }

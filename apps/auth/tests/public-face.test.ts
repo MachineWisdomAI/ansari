@@ -69,6 +69,21 @@ describe('CORS (scenario 28)', () => {
     expect(sessionExposed).toContain('set-auth-jwt');
   });
 
+  it('an allowed origin can read X-Retry-After on a 429', async () => {
+    const email = 'cors-retry@example.com';
+    const ip = freshIp();
+    let res: Response | undefined;
+    for (let i = 0; i < 6; i++) {
+      res = await send(service.publicUrl, '/api/auth/request-password-reset', { ip, body: { email } });
+      if (res.status === 429) break;
+    }
+    expect(res?.status).toBe(429);
+    expect(res?.headers.get('access-control-allow-origin')).toBe(BASE);
+    expect(Number(res?.headers.get('x-retry-after'))).toBeGreaterThan(0);
+    const exposed = (res?.headers.get('access-control-expose-headers') ?? '').toLowerCase();
+    expect(exposed).toContain('x-retry-after');
+  });
+
   it.each(['https://evil.example', `${BASE}.evil.example`, 'http://localhost:31000', 'null'])(
     'a disallowed origin (%s) gets no allow headers, on the preflight or the request',
     async (origin) => {

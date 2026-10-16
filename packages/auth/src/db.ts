@@ -6,17 +6,30 @@
 // Every table it touches is in the `auth` Postgres schema (src/schema.ts); it
 // shares no Drizzle code with apps/api.
 //
-// node-postgres' `drizzle(connectionString)` creates the pool lazily, so this
-// module can be constructed without opening a connection; the first query is
-// what connects.
+// A node-postgres pool connects lazily, so this module can be constructed
+// without opening a connection; the first query is what connects.
 import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
+import { Pool } from 'pg';
 
 import { getEnv } from './env';
 import * as schema from './schema';
 
+/**
+ * An idle pooled client that loses its connection (a database restart,
+ * failover, maintenance) makes the pool emit `error`. With no listener that
+ * is an uncaught exception and the service process exits; the pool already
+ * discards the dead client and the next query reconnects, so log and go on.
+ * Only `{name, code}`: a driver error can carry query text and parameters.
+ */
+export function onPoolError(err: Error & { code?: string }): void {
+  console.error('auth database: idle client error', { name: err.name, code: err.code });
+}
+
 export function createDb() {
-  return drizzle(getEnv().DATABASE_URL, { schema });
+  const pool = new Pool({ connectionString: getEnv().DATABASE_URL });
+  pool.on('error', onPoolError);
+  return drizzle({ client: pool, schema });
 }
 
 export type Db = ReturnType<typeof createDb>;
