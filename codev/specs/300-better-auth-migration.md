@@ -461,6 +461,19 @@ wrong origin.
 | `apps/frontend` on `apps/auth` at cutover | (none; matches the reference) | An app-architect-agreed client change ships inside the window (I-6) |
 | Separate auth database from the start (2026-10-16) | Issue decided item "FKs on `threads`, `preferences`, `feedback` repointed to `auth.users.id`"; the reference's single database | A second Railway Postgres with its own backups; a cross-database copy that is ordered and gated, not atomic; app rows created on first use; deletion through a tombstone; admin role over HTTP |
 
+
+**Legacy-surface behaviour changes, accepted by the security architect (2026-10-16, phase 8).**
+None of these is pinned by the phase 1 contract fixtures, which pass unedited. Each is a response
+the legacy `/v2/users/*` surface did not give before the cutover.
+
+| Change | Before | After | Why |
+|---|---|---|---|
+| 429 passthrough | No limit on the legacy routes | `login`, `register`, `request_password_reset` and `reset_password` answer 429 `{detail: 'Too many requests. Please try again later.'}` with `Retry-After` when `apps/auth`'s limiter refuses | The shared database-backed budget (rate limits) must hold through the layer too |
+| 503 on an `apps/auth` outage | (no such dependency) | 503 `{detail: 'Authentication service unavailable'}`, never a credentials error, on the layer routes and on first-use app-row creation and admin role checks | A dead `apps/auth` must never read as "wrong password" or log a client out |
+| 8-character minimum on reset | A strong 7-character password was accepted by `reset_password` | Refused with the legacy weak-password `detail` (`Password is too weak. Use at least 8 characters`) | Better Auth's `minPasswordLength` (8), the same bound `register` already had |
+| `register` refuses any `public.users` holder | Refused taken and reserved addresses | Also refuses an address any app row holds (a system account's row, an uncopied leftover), with the identical 409 | The app insert would otherwise fail after `apps/auth` had already created the user |
+| System-account `DELETE /v2/users/me` | (system accounts could not sign in, so never reached it) | 403 `{detail: 'System accounts cannot be deleted'}` before anything is touched | "Two databases" rule 5, step 1 |
+
 `apps/auth` is now the extraction that #49 describes, so #49 can be closed by this project once the
 cutover lands.
 
