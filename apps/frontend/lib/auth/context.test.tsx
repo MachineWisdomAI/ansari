@@ -27,10 +27,15 @@ vi.mock('@/lib/auth/api', async (importActual) => ({
   createAuthApi: () => authApiDouble,
 }));
 
+const deleteAccountRequest = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock('@/lib/auth/delete-account', () => ({ deleteAccountRequest }));
+
 import * as store from '@/lib/auth/store';
 import { AuthError } from '@/lib/auth/api';
 import { handleUnauthorized } from '@/lib/api/auth-bridge';
 import { AuthProvider, useAuth } from '@/lib/auth/context';
+import { AccountSessionEndedError } from '@/lib/auth/errors';
+import { ApiError } from '@/vendor/api-client-react/custom-fetch';
 
 const loadSessionMock = vi.mocked(store.loadSession);
 const saveSessionMock = vi.mocked(store.saveSession);
@@ -506,6 +511,112 @@ describe('checkSession', () => {
       await authApi.checkSession();
     });
     expect(mintJwt).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Account deletion (#306): apps/api deletes the account (and apps/auth's
+ * copy) with the JWT; the client then ends the session LOCALLY. The session
+ * and JWT are dead, so no sign-out call and no refresh is attempted, and the
+ * device returns to its guest.
+ */
+describe('deleteAccount', () => {
+  async function mountReal() {
+    loadSessionMock.mockResolvedValueOnce({
+      accessToken: 'real-jwt',
+      sessionToken: 'real-session',
+      firstName: 'Real',
+      lastName: 'User',
+      isGuest: false,
+    });
+    loadGuestMock.mockResolvedValue(STORED_GUEST);
+    await mount();
+  }
+
+  it('deletes through apps/api, ends the session locally, and returns to the stored guest', async () => {
+    await mountReal();
+    await act(async () => {
+      await authApi.deleteAccount();
+    });
+    expect(deleteAccountRequest).toHaveBeenCalledTimes(1);
+    expect(clearSessionMock).toHaveBeenCalled();
+    expect(signOut).not.toHaveBeenCalled();
+    expect(mintJwt).not.toHaveBeenCalledWith('real-session');
+    await waitFor(() => expect(authApi.isGuest).toBe(true));
+    expect(signIn).toHaveBeenLastCalledWith(STORED_GUEST.email, STORED_GUEST.password);
+    expect(clearGuestMock).not.toHaveBeenCalled();
+  });
+
+  it('a failed delete keeps the account signed in, untouched', async () => {
+    await mountReal();
+    deleteAccountRequest.mockRejectedValueOnce(new Error('HTTP 503'));
+    let thrown: unknown;
+    await act(async () => {
+      thrown = await authApi.deleteAccount().catch((error: unknown) => error);
+    });
+    expect(String(thrown)).toContain('HTTP 503');
+    expect(clearSessionMock).not.toHaveBeenCalled();
+    expect(authApi.session?.sessionToken).toBe('real-session');
+  });
+
+  it('a guest cannot delete (no request is made)', async () => {
+    await mount(); // a fresh guest
+    await expect(
+      act(async () => {
+        await authApi.deleteAccount();
+      }),
+    ).rejects.toThrow(/Sign in/);
+    expect(deleteAccountRequest).not.toHaveBeenCalled();
+  });
+
+  it('a double tap sends ONE delete', async () => {
+    await mountReal();
+    const pending = deferred<void>();
+    deleteAccountRequest.mockImplementationOnce(() => pending.promise);
+    let both!: Promise<unknown>;
+    act(() => {
+      both = Promise.all([authApi.deleteAccount(), authApi.deleteAccount()]);
+    });
+    await act(async () => {
+      pending.resolve();
+      await both;
+    });
+    expect(deleteAccountRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it('a 401 (already deleted, response lost; or the session ended) ends the session locally, honestly', async () => {
+    await mountReal();
+    deleteAccountRequest.mockRejectedValueOnce(
+      new ApiError(new Response(null, { status: 401 }), null, { method: 'DELETE', url: '/api/v2/users/me' }),
+    );
+    let thrown: unknown;
+    await act(async () => {
+      thrown = await authApi.deleteAccount().catch((error: unknown) => error);
+    });
+    expect(thrown).toBeInstanceOf(AccountSessionEndedError);
+    expect(clearSessionMock).toHaveBeenCalled();
+    expect(mintJwt).not.toHaveBeenCalledWith('real-session');
+    expect(signOut).not.toHaveBeenCalled();
+    await waitFor(() => expect(authApi.isGuest).toBe(true));
+  });
+
+  it('a sign-in during the request keeps the new principal', async () => {
+    await mountReal();
+    const pending = deferred<void>();
+    deleteAccountRequest.mockImplementationOnce(() => pending.promise);
+    let deleting!: Promise<void>;
+    act(() => {
+      deleting = authApi.deleteAccount();
+    });
+    await act(async () => {
+      await authApi.login('b@example.com', 'pw');
+    });
+    await act(async () => {
+      pending.resolve();
+      await deleting;
+    });
+    expect(clearSessionMock).not.toHaveBeenCalled();
+    expect(authApi.session?.sessionToken).toBe('session-b@example.com');
   });
 });
 
