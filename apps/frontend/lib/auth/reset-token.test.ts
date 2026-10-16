@@ -66,8 +66,19 @@ describe('takeResetTokenFromUrl (the web entry, before expo-router loads)', () =
     expect(peekResetToken()).toBeNull();
   });
 
-  it('does nothing without a window (native, server)', () => {
+  it('does nothing without a window (server)', () => {
     expect(() => takeResetTokenFromUrl(undefined)).not.toThrow();
+  });
+
+  // React Native defines a global `window` with neither `location` nor
+  // `history` (#311: reading them red-boxed the app at boot on iOS).
+  it.each([
+    ['React Native (window, no location, no history)', {}],
+    ['a location without history', { location: { pathname: '/reset-password', search: `?token=${TOKEN}` } }],
+    ['history without replaceState', { location: { pathname: '/reset-password', search: `?token=${TOKEN}` }, history: {} }],
+  ])('never throws on %s, and takes nothing', (_label, win) => {
+    expect(() => takeResetTokenFromUrl(win as never)).not.toThrow();
+    expect(peekResetToken()).toBeNull();
   });
 });
 
@@ -95,6 +106,11 @@ describe('the app entry strips before the router loads', () => {
       (m) => m[1],
     );
     expect(imports).toEqual(['./lib/auth/strip-reset-token', 'expo-router/entry']);
+  });
+
+  it('the strip module is gated on Platform.OS, not on window (window exists on React Native)', () => {
+    const strip = readFileSync(path.join(root, 'lib', 'auth', 'strip-reset-token.ts'), 'utf8');
+    expect(strip).toMatch(/if \(Platform\.OS === 'web' && typeof window !== 'undefined'\)/);
   });
 
   it('the strip module runs the strip on the real window at import', async () => {

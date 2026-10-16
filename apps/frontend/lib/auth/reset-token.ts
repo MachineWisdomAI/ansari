@@ -35,16 +35,22 @@ export function peekResetToken(): string | null {
  * (`replaceState`: no new entry, no navigation, the entry's state kept).
  * Any other query parameter and the hash are kept. Does nothing elsewhere.
  */
-export function takeResetTokenFromUrl(win: Pick<Window, 'location' | 'history'> | undefined): void {
-  if (!win || win.location.pathname !== '/reset-password') return;
-  const params = new URLSearchParams(win.location.search);
+export function takeResetTokenFromUrl(
+  win: { location?: Partial<Location>; history?: Partial<History> } | undefined,
+): void {
+  // Defensive as well as gated (strip-reset-token.ts): React Native's global
+  // `window` has no `location`/`history`, and this must never throw at boot.
+  const location = win?.location;
+  const history = win?.history;
+  if (location?.pathname !== '/reset-password' || typeof history?.replaceState !== 'function') return;
+  const params = new URLSearchParams(location.search ?? '');
   if (!params.has('token')) return;
   handOverResetToken(params.get('token'));
   params.delete('token');
   const query = params.toString();
-  win.history.replaceState(
-    win.history.state,
+  history.replaceState(
+    history.state,
     '',
-    `${win.location.pathname}${query ? `?${query}` : ''}${win.location.hash}`,
+    `${location.pathname}${query ? `?${query}` : ''}${location.hash ?? ''}`,
   );
 }
