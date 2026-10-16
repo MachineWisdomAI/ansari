@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { SignJWT } from 'jose';
-import { verifyAccessToken, JWKS_COOLDOWN_MS, JWKS_CACHE_MAX_AGE_MS } from '@/lib/auth/verify-jwt';
+import {
+  verifyAccessToken,
+  JWKS_COOLDOWN_MS,
+  JWKS_CACHE_MAX_AGE_MS,
+  JWKS_STALE_GRACE_MS,
+} from '@/lib/auth/verify-jwt';
 import { generateToken } from '@/lib/auth/jwt';
 import {
   LEGACY_JWT_SECRET,
@@ -222,6 +227,53 @@ describe('scenario 18: apps/auth stopped', () => {
     await jwks.stop();
     expect(await verifyAccessToken(await signToken({ key }))).not.toBeNull();
     expect(jwks.requests).toBe(1);
+  });
+
+  it('a token issued before the outage verifies until its exp, even past the cache age', async () => {
+    await warmUp();
+    // Minted just before apps/auth goes down, as late as it can be: 15 minutes.
+    advance(JWKS_CACHE_MAX_AGE_MS - 1_000);
+    const lastToken = await signToken({ key, expiresIn: 15 * 60 });
+    await jwks.stop();
+
+    advance(2_000); // the cache is now stale and the refresh fails
+    expect(await verifyAccessToken(lastToken)).not.toBeNull();
+    advance(JWKS_STALE_GRACE_MS - 5_000); // just before its exp
+    expect(await verifyAccessToken(lastToken)).not.toBeNull();
+    expect(jwks.requests).toBe(1);
+  });
+
+  it('past the stale grace, verification fails closed', async () => {
+    await warmUp();
+    await jwks.stop();
+    advance(JWKS_CACHE_MAX_AGE_MS + JWKS_STALE_GRACE_MS + 1_000);
+    expect(await verifyAccessToken(await signToken({ key }))).toBeNull();
+  });
+
+  it('a failing endpoint (5xx) is an outage too: the stale keys keep verifying', async () => {
+    await warmUp();
+    jwks.failing = true;
+    advance(JWKS_CACHE_MAX_AGE_MS + 1_000);
+    expect(await verifyAccessToken(await signToken({ key }))).not.toBeNull();
+    expect(jwks.requests).toBe(2);
+  });
+
+  it('a failed refresh does not extend the grace', async () => {
+    await warmUp();
+    jwks.failing = true;
+    advance(JWKS_CACHE_MAX_AGE_MS + 1_000);
+    expect(await verifyAccessToken(await signToken({ key }))).not.toBeNull();
+    expect(jwks.requests).toBe(2);
+    // The grace counts from the last SUCCESSFUL fetch, not the failed one.
+    advance(JWKS_STALE_GRACE_MS);
+    expect(await verifyAccessToken(await signToken({ key }))).toBeNull();
+  });
+
+  it('an unknown kid during an outage is still refused', async () => {
+    await warmUp();
+    await jwks.stop();
+    advance(JWKS_CACHE_MAX_AGE_MS + 1_000);
+    expect(await verifyAccessToken(await signToken({ key: await newKey() }))).toBeNull();
   });
 });
 

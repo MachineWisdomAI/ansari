@@ -1,4 +1,11 @@
-import { createRemoteJWKSet, customFetch, jwtVerify, type JWTVerifyGetKey } from 'jose';
+import {
+  createLocalJWKSet,
+  createRemoteJWKSet,
+  customFetch,
+  errors,
+  jwtVerify,
+  type JWTVerifyGetKey,
+} from 'jose';
 import { config } from '@/lib/config';
 import { AUTH_SERVICE_TIMEOUT_MS, INTERNAL_AUTH_HEADER } from '@/lib/auth-service/client';
 
@@ -11,6 +18,10 @@ import { AUTH_SERVICE_TIMEOUT_MS, INTERNAL_AUTH_HEADER } from '@/lib/auth-servic
  *   `none`, HS256 (a legacy token) and RS256 are refused before any key lookup.
  * - `iss`, `aud`, `exp`, `sub` and `sid` are required.
  * - Keys are cached for 10 minutes. Steady state makes no network call.
+ * - When a refresh fails (apps/auth down), the last key set fetched keeps
+ *   verifying for one more JWT lifetime past the cache age, so a token issued
+ *   before the outage works until its `exp` (spec: "tokens already issued
+ *   still verify from the cache"). After that it fails closed.
  * - An unknown `kid` re-fetches at most once per 30 s cooldown, and so does a
  *   failed fetch (see `gatedFetch`), so a flood of random `kid`s, or traffic
  *   while apps/auth is down, cannot turn apps/api into an amplifier.
@@ -21,6 +32,8 @@ const JWT_ALGORITHMS = ['EdDSA'];
 export const JWKS_PATH = '/api/auth/jwks';
 export const JWKS_COOLDOWN_MS = 30_000;
 export const JWKS_CACHE_MAX_AGE_MS = 600_000;
+/** Better Auth's JWT lifetime (I-7): no token signed before an outage outlives this. */
+export const JWKS_STALE_GRACE_MS = 15 * 60_000;
 
 export interface VerifiedToken {
   /** The user's UUID, the same in both databases. */
@@ -36,34 +49,56 @@ export interface VerifiedToken {
  * itself never fetches twice within the cooldown after a success, so the gate
  * changes nothing in the healthy case.
  */
-function gatedFetch(cooldownMs: number): typeof fetch {
+function gatedFetch(cooldownMs: number, onSuccess: () => void): typeof fetch {
   let lastAttempt = Number.NEGATIVE_INFINITY;
-  return (input, init) => {
+  return async (input, init) => {
     const now = Date.now();
-    if (now - lastAttempt < cooldownMs) {
-      return Promise.reject(new Error('JWKS fetch cooling down'));
-    }
+    if (now - lastAttempt < cooldownMs) throw new Error('JWKS fetch cooling down');
     lastAttempt = now;
-    return fetch(input, init);
+    const response = await fetch(input, init);
+    if (response.status === 200) onSuccess();
+    return response;
+  };
+}
+
+/**
+ * The remote key set, falling back to the last set it fetched when a refresh
+ * fails, within the stale grace. An unknown or ambiguous `kid` is never a
+ * reason to fall back: those come from the lookup, not from the fetch.
+ */
+function keySetWithStaleFallback(internalUrl: string, internalSecret: string): JWTVerifyGetKey {
+  let lastSuccess = Number.NEGATIVE_INFINITY;
+  const remote = createRemoteJWKSet(new URL(JWKS_PATH, internalUrl), {
+    headers: { [INTERNAL_AUTH_HEADER]: internalSecret },
+    cooldownDuration: JWKS_COOLDOWN_MS,
+    cacheMaxAge: JWKS_CACHE_MAX_AGE_MS,
+    timeoutDuration: AUTH_SERVICE_TIMEOUT_MS,
+    [customFetch]: gatedFetch(JWKS_COOLDOWN_MS, () => {
+      lastSuccess = Date.now();
+    }),
+  });
+  return async (header, token) => {
+    try {
+      return await remote(header, token);
+    } catch (err) {
+      if (err instanceof errors.JWKSNoMatchingKey || err instanceof errors.JWKSMultipleMatchingKeys) {
+        throw err;
+      }
+      const lastGood = remote.jwks();
+      const withinGrace = Date.now() - lastSuccess < JWKS_CACHE_MAX_AGE_MS + JWKS_STALE_GRACE_MS;
+      if (!lastGood || !withinGrace) throw err;
+      return createLocalJWKSet(lastGood)(header, token);
+    }
   };
 }
 
 let cached: { key: string; jwks: JWTVerifyGetKey } | null = null;
 
-/** One remote key set per (URL, credential), so a config change in tests takes effect. */
+/** One key set per (URL, credential), so a config change in tests takes effect. */
 function remoteJwks(internalUrl: string, internalSecret: string): JWTVerifyGetKey {
   const key = `${internalUrl}\n${internalSecret}`;
   if (cached?.key !== key) {
-    cached = {
-      key,
-      jwks: createRemoteJWKSet(new URL(JWKS_PATH, internalUrl), {
-        headers: { [INTERNAL_AUTH_HEADER]: internalSecret },
-        cooldownDuration: JWKS_COOLDOWN_MS,
-        cacheMaxAge: JWKS_CACHE_MAX_AGE_MS,
-        timeoutDuration: AUTH_SERVICE_TIMEOUT_MS,
-        [customFetch]: gatedFetch(JWKS_COOLDOWN_MS),
-      }),
-    };
+    cached = { key, jwks: keySetWithStaleFallback(internalUrl, internalSecret) };
   }
   return cached.jwks;
 }
