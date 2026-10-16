@@ -23,6 +23,9 @@ import {
 } from '@/lib/auth/store';
 import { AuthError, type AuthSession, type RegisterInput } from '@/lib/auth/api';
 import { authApi } from '@/lib/auth/client';
+import { deleteAccountRequest } from '@/lib/auth/delete-account';
+import { AccountSessionEndedError } from '@/lib/auth/errors';
+import { ApiError } from '@/vendor/api-client-react/custom-fetch';
 import { generateGuestCredentials } from '@/lib/auth/guest';
 
 /**
@@ -52,6 +55,8 @@ interface AuthContextValue {
    * Does nothing for a guest or with no session.
    */
   checkSession: () => Promise<void>;
+  /** Deletes the signed-in (non-guest) account, then returns to the guest. */
+  deleteAccount: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -307,6 +312,47 @@ export function AuthProvider({
     await refresh();
   }, [refresh]);
 
+  // The account is gone once apps/api answers 2xx: its session and JWT are
+  // dead (the JWT gets 401 on data routes at once). So the session is ended
+  // locally only, with no sign-out call and no refresh attempt, and the
+  // signed-out transition then returns the device to its guest. The guest's
+  // stored credentials are a different account and are kept.
+  //
+  // Single-flight: a double tap shares one DELETE. A 401 means the session is
+  // already dead (the account was deleted and the response lost, or the
+  // session ended): it ends locally too, and `AccountSessionEndedError` lets
+  // the page say so honestly.
+  const deleteInFlight = useRef<Promise<void> | null>(null);
+  const deleteAccount = useCallback((): Promise<void> => {
+    if (deleteInFlight.current) return deleteInFlight.current;
+    const current = sessionRef.current;
+    if (!current || current.isGuest) {
+      return Promise.reject(new Error('Sign in to the account you want to delete.'));
+    }
+    const endLocally = async () => {
+      // A sign-out or sign-in during the request already left this account.
+      if (sessionRef.current !== current) return;
+      sessionRef.current = null;
+      await clearSession();
+      applySession(null);
+    };
+    deleteInFlight.current = (async () => {
+      try {
+        await deleteAccountRequest();
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          await endLocally();
+          throw new AccountSessionEndedError();
+        }
+        throw error;
+      }
+      await endLocally();
+    })().finally(() => {
+      deleteInFlight.current = null;
+    });
+    return deleteInFlight.current;
+  }, [applySession]);
+
   const value = useMemo<AuthContextValue>(
     () => ({
       status,
@@ -317,8 +363,9 @@ export function AuthProvider({
       loginAsGuest,
       logout,
       checkSession,
+      deleteAccount,
     }),
-    [status, session, login, register, loginAsGuest, logout, checkSession],
+    [status, session, login, register, loginAsGuest, logout, checkSession, deleteAccount],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
