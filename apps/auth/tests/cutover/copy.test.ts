@@ -164,6 +164,20 @@ describe('the copy and the audits', () => {
     expect(appRow?.c).toContain('.123456');
   });
 
+  it.each([
+    ['created_at', 'UPDATE users SET created_at = NULL'],
+    ['updated_at', 'UPDATE users SET updated_at = NULL'],
+  ])('a NULL %s aborts the copy with no changes (timestamps are copied exactly, never invented)', async (_col, sql) => {
+    await seed(app, [
+      { id: id(1), email: 'a@example.com' },
+      { id: id(2), email: 'b@example.com' },
+    ]);
+    await app.exec(`${sql} WHERE id = '${id(2)}'`);
+    await expect(copy(app, auth)).rejects.toThrow(/1 row\(s\) have a NULL created_at or updated_at/);
+    expect(await count(auth, 'auth.users')).toBe(0);
+    expect(await count(auth, 'auth.account')).toBe(0);
+  });
+
   it('scenario 7: the derived name (names, local part, or "User"); first and last copy as stored', async () => {
     await seed(app, [
       { id: id(1), email: 'a@example.com', first: ' Amina ', last: 'Yusuf' },

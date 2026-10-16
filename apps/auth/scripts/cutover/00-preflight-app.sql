@@ -25,7 +25,7 @@ SELECT count(*) AS no_password_hash
 FROM public.users
 WHERE system_key IS NULL AND password_hash IS NULL;
 
-\echo '== Rows with a NULL timestamp (the copy stores now() for those; informational)'
+\echo '== Rows with a NULL timestamp: must be zero (the copy aborts on any; it copies timestamps exactly)'
 SELECT count(*) FILTER (WHERE created_at IS NULL) AS null_created_at,
        count(*) FILTER (WHERE updated_at IS NULL) AS null_updated_at
 FROM public.users

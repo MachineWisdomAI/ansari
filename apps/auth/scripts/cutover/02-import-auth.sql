@@ -50,6 +50,10 @@ BEGIN
   IF n > 0 THEN
     RAISE EXCEPTION 'cutover copy: % row(s) have no password hash', n;
   END IF;
+  SELECT count(*) INTO n FROM import_users WHERE created_at IS NULL OR updated_at IS NULL;
+  IF n > 0 THEN
+    RAISE EXCEPTION 'cutover copy: % row(s) have a NULL created_at or updated_at; timestamps are copied exactly, so decide each before the window (00-preflight-app.sql counts them)', n;
+  END IF;
   SELECT count(*) INTO n FROM import_users WHERE email LIKE '%@system.ansari.chat';
   IF n > 0 THEN
     RAISE EXCEPTION 'cutover copy: % row(s) use the reserved system domain', n;
@@ -75,8 +79,8 @@ SELECT
   ),
   i.email,
   true,
-  coalesce(i.created_at, now()),
-  coalesce(i.updated_at, i.created_at, now()),
+  i.created_at,
+  i.updated_at,
   'user',
   false,
   i.first_name,
@@ -94,8 +98,8 @@ SELECT
   'credential',
   i.id,
   i.password_hash,
-  coalesce(i.created_at, now()),
-  coalesce(i.updated_at, i.created_at, now())
+  i.created_at,
+  i.updated_at
 FROM import_users i
 ON CONFLICT (user_id, provider_id) DO NOTHING;
 

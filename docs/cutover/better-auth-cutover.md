@@ -52,7 +52,8 @@ migration merges to `develop`, in either journal.
   inventory, and confirmed the production Postgres **server major version**; the auth image's
   `PG_CLIENT_MAJOR` is at least that.
 - Every **collision** the preflight lists is decided and resolved (the copy and `0011` abort on
-  any).
+  any), and the preflight shows no NULL `created_at`/`updated_at` (the copy aborts on any: it
+  copies timestamps exactly).
 - Phases 10b (#304) and 10c (#306) are merged into `builder/spir-300`, so the cutover PR carries
   the reset and delete-account pages (legacy web retires in step 16).
 - The cutover PR is approved and merged to `develop`; record its merge commit.
@@ -152,7 +153,7 @@ deployment, bring `apps/api` back online.
 
 ## 8. The copy and the audits
 
-Re-run the preflight first; it must show no collision and `no_password_hash = 0`. Then copy:
+Re-run the preflight first; it must show no collision, `no_password_hash = 0` and no NULL timestamp. Then copy:
 
 ```bash
 psql "$APP_DATABASE_URL" -X -v ON_ERROR_STOP=1 -f apps/auth/scripts/cutover/00-preflight-app.sql
