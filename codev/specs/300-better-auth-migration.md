@@ -124,8 +124,11 @@ Verified on this branch, `develop` at `2eb3fdc` plus the porch init commit.
   single-flight, and it stores tokens in SecureStore on native and `localStorage` on web. It
   contains **no** Better Auth client.
 - **Legacy web frontend** (`legacy/frontend-web`): also a `/v2/users/*` client with JWT bearer and
-  refresh (`src/services/ApiService.ts`, `src/store/slices/authSlice.ts`). The plan confirms
-  whether it is still deployed; if it is, the frozen contract covers it like the mobile build.
+  refresh (`src/services/ApiService.ts`, `src/store/slices/authSlice.ts`). **It is in production**
+  (owner, 2026-10-16), so it gets the same coverage as the released mobile build: the frozen
+  contract, the unmodified-client staging run, and the expire-refresh-retry cycle.
+- **No outside service calls Ansari with a user's token** (owner, 2026-10-16). Outside callers use
+  the machine paths below, so nothing outside the listed clients needs to sign in again.
 - **Admin analytics page** (`apps/api/src/app/admin/analytics/page.tsx`): posts to
   `/v2/users/login` and reads `access_token`.
 - **Machine callers, not users:**
@@ -953,7 +956,8 @@ rollback deadline passing, and the contract PR's release.
   - the released mobile flow: login, then a bearer call, then a 401 when the JWT expires, then
     refresh, then a retry
   - the admin analytics login
-  - `legacy/frontend-web`'s login and refresh, if it is still deployed
+  - `legacy/frontend-web` (in production): login, a bearer call, a 401 when the JWT expires,
+    refresh, then a retry
 - [ ] **Machine callers are unchanged and cannot be confused with users.** The leaderboard key and
   a user JWT share the `Authorization: Bearer` header, so tests pin both directions: on
   `/api/v1/chat/completions`, a valid user JWT gets 401 and the key is never parsed as a JWT; on
@@ -1388,7 +1392,7 @@ This was the first draft's proposal.
 | Risk | Probability | Impact | Mitigation |
 |------|-------------|--------|------------|
 | Mass lockout after cutover | Low | Critical | Dual verify with a removal-detecting test; legacy-row login test on both paths; full rehearsal with both services; 24-hour snapshot rollback |
-| Released mobile users stranded | Low | High | Contract tests written against today's implementation pass unchanged; unmodified-client run in staging, including the expire-refresh-retry cycle |
+| Released mobile and legacy web users stranded | Low | High | Contract tests written against today's implementation pass unchanged; unmodified-client run in staging for both, including the expire-refresh-retry cycle |
 | Revoked user keeps access until JWT `exp` | Certain (by design) | Medium | 15 minutes, Better Auth's default (I-7, owner); admin role asked of `apps/auth` per request; deleted `sub` rejected through the tombstone; window documented in arch-critical |
 | JWT verification misconfigured (alg confusion, missing `aud` or `iss` check) | Low | Critical | Pinned `alg`, `iss`, `aud`, `exp`; rejection-matrix tests |
 | Token payload leaks PII | Medium if the default is kept | Medium | `definePayload` restricted to `sub` and the session id; key-set test |
