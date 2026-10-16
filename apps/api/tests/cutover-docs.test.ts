@@ -65,11 +65,17 @@ describe('the window runbook', () => {
   const doc = read(RUNBOOK);
   const steps = doc.split(/^## (?=\d+\. )/m).slice(1);
 
-  it('has the 17 steps of the plan, in order', () => {
-    expect(steps.map((s) => Number(s.split('.')[0]))).toEqual(Array.from({ length: 17 }, (_, i) => i + 1));
+  const stepOf = (title: RegExp) => {
+    const index = steps.findIndex((s) => title.test(s.split('\n')[0] ?? ''));
+    if (index < 0) throw new Error(`no runbook step titled ${title}`);
+    return index + 1;
+  };
+
+  it('has 18 steps, in order (the plan 17 plus the promotion, security R5)', () => {
+    expect(steps.map((s) => Number(s.split('.')[0]))).toEqual(Array.from({ length: 18 }, (_, i) => i + 1));
   });
 
-  it.each(Array.from({ length: 17 }, (_, i) => i + 1))('step %i has a check and an abort', (n) => {
+  it.each(Array.from({ length: 18 }, (_, i) => i + 1))('step %i has a check and an abort', (n) => {
     const step = steps[n - 1] as string;
     expect(step).toMatch(/\*\*Check:\*\*/);
     expect(step).toMatch(/\*\*Abort/);
@@ -83,9 +89,50 @@ describe('the window runbook', () => {
     }
   });
 
-  it('takes cutover_at before any new code can create a user (step 3)', () => {
-    expect(steps[2]).toMatch(/cutover_at/);
-    expect(steps[2]).toMatch(/select now\(\)/);
+  it('takes cutover_at after apps/api is offline and before the new apps/api deploys', () => {
+    const taken = steps.findIndex((s) => /select now\(\)/.test(s) && /cutover_at/.test(s)) + 1;
+    expect(taken).toBeGreaterThan(stepOf(/apps\/api` offline/));
+    expect(taken).toBeLessThan(stepOf(/Deploy `apps\/api` and `apps\/frontend`/));
+  });
+
+  it('promotes to main only after apps/api is offline, with auto-deploy off (R5)', () => {
+    expect(stepOf(/Promote `develop` to `main`/)).toBeGreaterThan(stepOf(/apps\/api` offline/));
+    expect(doc).toMatch(/Auto-deploy is OFF for `backend`/);
+    expect(doc).toMatch(/main` is current except for spec 300/);
+  });
+
+  it('attaches the auth domain before the web swap (R4)', () => {
+    expect(stepOf(/Attach `auth\.askansari\.ai`/)).toBeLessThan(stepOf(/Replace legacy web/));
+  });
+
+  it('deploys apps/auth privately with ADMIN_EMAILS empty before any database step, and sets it after the grants', () => {
+    const deployAuth = stepOf(/Deploy `apps\/auth` privately/);
+    expect(deployAuth).toBeLessThan(stepOf(/The auth baseline/));
+    expect(steps[deployAuth - 1]).toMatch(/`ADMIN_EMAILS` empty/);
+    expect(steps[stepOf(/Admin roles/) - 1]).toMatch(/set `ADMIN_EMAILS`.*redeploy `auth`/s);
+  });
+
+  it('names the exact operator environment, and every database step runs in it', () => {
+    expect(doc).toContain('railway ssh --service auth --environment production');
+    expect(doc).toContain('/etc/ansari-auth-image');
+    expect(doc).not.toMatch(/RAILWAY_ENVIRONMENT=/);
+  });
+
+  it.each([/Edge probe on the `apps\/api` production domains/, /Attach `auth\.askansari\.ai`/])(
+    '%s checks both edge properties: forged headers are overwritten, and two networks differ',
+    (title) => {
+      const step = steps[stepOf(title) - 1] as string;
+      expect(step).toMatch(/-H 'X-Real-IP: 203\.0\.113\.9' -H 'X-Forwarded-For: 203\.0\.113\.9'/);
+      expect(step).toMatch(/second network/);
+    }
+  );
+
+  it('keeps the legacy variables on backend for the rollback (R3)', () => {
+    const bullet = (steps[0] as string).split('\n- ').find((b) => b.includes('keeps its legacy variables'));
+    expect(bullet, 'the legacy-variables precondition').toBeDefined();
+    for (const name of ['JWT_SECRET', 'ACCESS_TOKEN_EXPIRY_HOURS', 'REFRESH_TOKEN_EXPIRY_HOURS', 'ADMIN_EMAILS']) {
+      expect(bullet).toContain(`\`${name}\``);
+    }
   });
 
   it('carries the operator-facing facts from the reviews', () => {
@@ -107,7 +154,16 @@ describe('the rollback runbook', () => {
     expect(confirm).toBeGreaterThan(dry);
   });
 
-  it('restarts from the auth baseline (window step 5)', () => {
-    expect(doc).toMatch(/from \*\*step 5\*\*/);
+  it('restarts from the auth baseline (window step 7)', () => {
+    expect(doc).toMatch(/from \*\*step 7\*\* \(the auth\s+baseline\)/);
+  });
+
+  it('empties the auth database if no second attempt follows within 7 days (R6)', () => {
+    expect(doc).toMatch(/within 7 days/);
+    expect(doc).toContain("DROP SCHEMA auth CASCADE'");
+  });
+
+  it('runs its database step in the operator environment', () => {
+    expect(doc).toContain('railway ssh --service auth --environment production');
   });
 });

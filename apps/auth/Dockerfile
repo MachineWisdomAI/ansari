@@ -20,6 +20,31 @@ FROM node:22-slim
 # packageManager in the root package.json pins the exact pnpm version.
 RUN corepack enable
 
+# The cutover operator's environment (spec 300): the window's database steps
+# (copy.sh, the app migrations 0009-0011, grant-admin.ts, the audits) run from
+# `railway ssh` into THIS image, so the password hashes never reach an operator
+# machine. That needs psql, the repo's SQL and the scripts in a runtime image.
+# Do not slim them out while the cutover tooling exists.
+#
+# psql's major must be >= the Railway Postgres server's major (Debian
+# bookworm's own postgresql-client is 15), so the client comes from the PGDG
+# repository, pinned by PG_CLIENT_MAJOR. The runbook checks `psql --version`
+# against `select version()` before the window. Client package only; the apt
+# lists and the download tool go in the same layer.
+ARG PG_CLIENT_MAJOR=17
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl \
+ && install -d /usr/share/postgresql-common/pgdg \
+ && curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+      https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+ && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
+      > /etc/apt/sources.list.d/pgdg.list \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends "postgresql-client-${PG_CLIENT_MAJOR}" \
+ && apt-get purge -y curl \
+ && apt-get autoremove -y \
+ && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /repo
 
 # Workspace manifests first so the dependency layer caches independently of
@@ -33,6 +58,9 @@ COPY packages packages
 RUN pnpm install --frozen-lockfile --filter ansari-auth...
 
 COPY apps/auth apps/auth
+# The app migrations the window applies from this image (0009-0011). SQL only;
+# nothing else of apps/api is in this image.
+COPY apps/api/drizzle apps/api/drizzle
 
 # tsdown needs no env: nothing reads the environment at import.
 RUN pnpm --filter ansari-auth build
@@ -46,7 +74,12 @@ ENV NODE_ENV=production
 # Open the copied sources for reading; node_modules is not walked (pnpm's
 # entries there are symlinks), so this layer stays small.
 RUN chmod -R a+rX /repo/package.json /repo/pnpm-workspace.yaml /repo/pnpm-lock.yaml \
-    /repo/packages /repo/apps/auth
+    /repo/packages /repo/apps/auth /repo/apps/api/drizzle
+
+# The cutover scripts refuse to run anywhere this file does not exist, so a
+# laptop `railway shell` (which injects the same Railway variables) cannot run
+# them. It marks "inside the auth image".
+RUN touch /etc/ansari-auth-image
 
 WORKDIR /repo/apps/auth
 

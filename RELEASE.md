@@ -45,7 +45,7 @@ migration runbook were both proven in real releases on 2026-08-02.
 > ```
 > backend:   apps/api/**       packages/**  package.json  pnpm-lock.yaml  pnpm-workspace.yaml
 > frontend:  apps/frontend/**  packages/**  package.json  pnpm-lock.yaml  pnpm-workspace.yaml
-> auth:      apps/auth/**      packages/**  package.json  pnpm-lock.yaml  pnpm-workspace.yaml
+> auth:      apps/auth/**      apps/api/drizzle/**  packages/**  package.json  pnpm-lock.yaml  pnpm-workspace.yaml
 > ```
 >
 > `packages/**` is **not optional**. The shared config packages are copied into both
@@ -62,8 +62,9 @@ migration runbook were both proven in real releases on 2026-08-02.
 > nothing else; `INTERNAL_PORT` (3101) has NO domain and is reached by `backend`
 > over the private network (`AUTH_INTERNAL_URL`). Set both as service variables.
 > It has its OWN Railway Postgres, the auth database, with snapshots or PITR
-> enabled before its first real row (C-4, provisioned by the owner). Operator
-> scripts run in its image, from `/repo/apps/auth` (a Railway shell):
+> enabled before its first real row (C-4, provisioned by the owner). Its image is also the
+> cutover's operator environment (`psql`, both migration journals, the cutover scripts; reached
+> with `railway ssh --service auth`). Operator scripts run in it, from `/repo/apps/auth`:
 > `./node_modules/.bin/tsx scripts/grant-admin.ts …` and `… scripts/ban-user.ts …`
 > (tsx directly: the image has no pnpm for its non-root user). From a checkout
 > with the auth database's `DATABASE_URL`, `pnpm exec tsx scripts/…` works too.
@@ -298,6 +299,15 @@ SQL is applied while the previous deployment is still serving traffic.
 with its rollback in [`docs/cutover/rollback.md`](docs/cutover/rollback.md). From the merge of
 the cutover PR to the end of the window, **no other migration merges** to `develop`, in either
 journal (schema freeze).
+
+**The contract migration is the second exception.** The cutover drops nothing the legacy code
+reads, so the 24-hour rollback stays a redeploy. The destructive half (dropping
+`public.users.password_hash`, `is_admin` and `session_version`, and the `tokens` table, in the
+app database) is its own reviewed PR, merged and applied only **after** the rollback deadline,
+because it is not backward-compatible with the previous deployment and rollback cannot survive
+it. Its checklist also removes `backend`'s legacy variables (`JWT_SECRET`,
+`ACCESS_TOKEN_EXPIRY_HOURS`, `REFRESH_TOKEN_EXPIRY_HOURS`, `ADMIN_EMAILS`), which stay set until
+then so the rollback can boot the previous `apps/api`.
 
 ## Rollback
 

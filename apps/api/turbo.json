@@ -11,7 +11,7 @@
     //
     // The doc and scan suites read files outside this package too: the
     // runbooks and docs (release-doc, self-hosting-docs, contributor-docs,
-    // cutover-docs), the .github files contributor-docs checks, and
+    // cutover-docs), the .github and gitleaks files contributor-docs checks, and
     // apps/auth/scripts (the source scans; the cutover scripts the runbook
     // names). Without them a doc edit left ansari-api#test at the same hash
     // (verified) and a warm cache replayed a stale doc test.
@@ -30,7 +30,9 @@
         "$TURBO_ROOT$/docs/**",
         "$TURBO_ROOT$/.github/ISSUE_TEMPLATE/**",
         "$TURBO_ROOT$/.github/scripts/**",
-        "$TURBO_ROOT$/.github/workflows/**"
+        "$TURBO_ROOT$/.github/workflows/**",
+        "$TURBO_ROOT$/.gitleaksignore",
+        "$TURBO_ROOT$/.gitleaks.toml"
       ]
     }
   }

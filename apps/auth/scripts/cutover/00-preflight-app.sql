@@ -29,11 +29,12 @@ SELECT count(*) FILTER (WHERE created_at IS NULL) AS null_created_at,
 FROM public.users
 WHERE system_key IS NULL;
 
-\echo '== Guests by their exact shape (informational; migrated as-is)'
+\echo '== Guests by their exact shape: guest_ + 10 alphanumerics @askansari.ai or @ansari.chat, named Welcome Guest (informational; migrated as-is)'
 SELECT count(*) AS guests
 FROM public.users
 WHERE system_key IS NULL
-  AND lower(trim(email)) ~ '^guest_[a-z0-9]{10}@(askansari\.ai|ansari\.chat)$';
+  AND lower(trim(email)) ~ '^guest_[a-z0-9]{10}@(askansari\.ai|ansari\.chat)$'
+  AND first_name = 'Welcome' AND last_name = 'Guest';
 
 \echo '== Legacy admin inventory (is_admin): compare with the owner-approved list and ADMIN_EMAILS'
 SELECT id, lower(trim(email)) AS email
@@ -53,7 +54,8 @@ SELECT count(*) AS to_copy FROM public.users WHERE system_key IS NULL;
 \echo '== B-1: sign-ups per minute and per hour over 90 days (peak and p99), all and guest-shaped'
 WITH rows AS (
   SELECT created_at,
-         lower(trim(email)) ~ '^guest_[a-z0-9]{10}@(askansari\.ai|ansari\.chat)$' AS guest
+         lower(trim(email)) ~ '^guest_[a-z0-9]{10}@(askansari\.ai|ansari\.chat)$'
+           AND first_name = 'Welcome' AND last_name = 'Guest' AS guest
   FROM public.users
   WHERE system_key IS NULL AND created_at >= now() - interval '90 days'
 ),

@@ -6,12 +6,16 @@ checks and the abort actions are in the runbook,
 rollback is in [`docs/cutover/rollback.md`](../../../../docs/cutover/rollback.md). This
 file says what each piece is.
 
-**Where they run.** Only from a Railway shell inside the project, never from a laptop, so
-the password hashes never transit an operator machine. `APP_DATABASE_URL` and
-`AUTH_DATABASE_URL` are the two databases' URLs, entered for that shell session only:
-never set on a Railway service, never added to `turbo.json`, never written to a file. The
-source scans exclude this directory by path, because it is the one place both databases
-are named.
+**Where they run.** Only inside the **auth image**, reached with
+`railway ssh --service auth --environment production` and `cd /repo` (the image carries
+`psql`, both migration journals and these scripts; see `apps/auth/Dockerfile`), so the
+password hashes never transit an operator machine. `copy.sh` and `complete-tombstones.sh`
+refuse to run anywhere without the image's marker, `/etc/ansari-auth-image`: a laptop
+`railway shell` injects the same Railway variables, so no variable can prove where a script
+runs. `AUTH_DATABASE_URL` is the service's own `DATABASE_URL`; `APP_DATABASE_URL` is typed into
+the ssh session only: never set on a Railway service, never added to `turbo.json`, never
+written to a file. The source scans exclude this directory by path, because it is the one
+place both databases are named.
 
 **What they print.** Ids, counts and md5 checksums. Never a password hash. The preflight
 also prints the legacy admins' addresses, because the owner approves that list by address.
@@ -22,7 +26,7 @@ also prints the legacy admins' addresses, because the owner approves that list b
 | `01-export-app.sql` | app | no | `\copy (…non-system users, email normalized…) TO pstdout`. Never run alone: `copy.sh` pipes it into `02` |
 | `02-import-auth.sql` | auth | yes, one transaction | A `TEMP` import table filled from `pstdin`; guards (empty `auth.users` and `auth.account`, non-empty import, no normalized-email collision, normalized emails, every row has a hash, no system-domain address); the `auth.users` and credential `auth.account` inserts; `COMMIT` |
 | `03-audit-app.sql`, `03-audit-auth.sql` | app, auth | no | The same `key\|value` lines on each side: rows, id checksum, email checksum, hash checksum, credential count, system-domain rows |
-| `copy.sh` | both | via `02` | Refuses outside a Railway shell, or unless both URLs are set and differ. Runs `01 \| 02`, then both audits, prints them, and exits non-zero on any difference |
+| `copy.sh` | both | via `02` | Refuses unless both URLs are set and differ, and outside the auth image. Runs `01 \| 02`, then both audits, prints them, and exits non-zero on any difference |
 | `05-audit-admins-auth.sql` | auth | no | The admin set after `grant-admin.ts` (runbook step 8). It must equal the approved list |
 | `04-tombstones-pending-app.sql` | app | no | The ids of deletions whose `apps/auth` step did not finish, as one array literal |
 | `04-tombstones-delete-auth.sql` | auth | yes | `DELETE FROM auth.users WHERE id = ANY(:'ids')`; the cascade removes their sessions and accounts. Never calls the endpoint |

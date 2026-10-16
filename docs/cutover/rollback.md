@@ -13,11 +13,13 @@ legacy one (that user resets again), and accounts created after the cutover are 
 their threads.
 
 Each step: what to run, the mechanical **check**, and what to do if it fails. Database steps run
-in a Railway shell with `APP_DATABASE_URL` for that session only, as in the window runbook.
+in the window runbook's operator environment: `railway ssh --service auth --environment production`,
+`cd /repo`, and `APP_DATABASE_URL` typed into that session only.
 
 ## 1. `apps/api` offline
 
-By the same mechanism as the window's step 3.
+By the same mechanism as the window's step 3. Turn auto-deploy off for `backend` and the web
+service if it was re-enabled.
 
 **Check:** `https://api.askansari.ai/api/health` and `https://api-35.ansari.chat/api/health` return
 the offline response. **If it fails:** stop; nothing below is safe while new code still serves.
@@ -43,7 +45,10 @@ the cause (usually `cutover_at` missing or malformed) and repeat.
 
 ## 3. Redeploy the previous `apps/api` and `apps/frontend`
 
-Railway dashboard → `backend` → Deployments → the deployment before the cutover → **Redeploy**.
+The previous `apps/api` boots only with its legacy variables, which the window's preconditions
+keep on `backend` until the contract PR: `JWT_SECRET`, `ACCESS_TOKEN_EXPIRY_HOURS`,
+`REFRESH_TOKEN_EXPIRY_HOURS` and `ADMIN_EMAILS`. Confirm they are set, then: Railway dashboard →
+`backend` → Deployments → the deployment before the cutover → **Redeploy**.
 Do the same for the web service only if `apps/frontend` was serving production web before the
 window.
 
@@ -52,14 +57,15 @@ window.
 ## 4. Restore the previous legacy web deployment
 
 Move the web domain back from the `apps/frontend` web service to the legacy web service (the
-reverse of the window's step 13).
+reverse of the window's step 16).
 
 **Check:** the web domain serves legacy web.
 
 ## 5. Detach `auth.askansari.ai`
 
 Remove the public domain from the `auth` service. Leave the service and its database as they
-are (stopped is fine): they are evidence, and a second attempt starts by emptying them.
+are (stopped is fine): they are evidence, and a second attempt starts by emptying them. The auth
+database now holds every copied password hash: see "If no second attempt follows" below.
 
 **Check:** `curl -s -o /dev/null -w '%{http_code}' https://auth.askansari.ai/health` no longer
 returns 200.
@@ -79,10 +85,24 @@ account's threads. A released mobile build signs in.
 ## 7. Record it
 
 In the release record: the time, the dry-run count, who decided, and why. Un-silence alerts.
+`main` still holds the cutover commit: revert the promotion on `develop` and promote that before
+re-enabling auto-deploy, so nothing redeploys the cutover code.
 
 ## A second attempt (restart procedure)
 
 The copy refuses a non-empty auth database. To try the window again: empty the auth database
-(`DROP SCHEMA auth CASCADE`), then follow the window runbook from **step 5** (the auth baseline).
-The app window migration (`0011`) is already applied and is not re-run; its check in step 7 still
-holds.
+(`DROP SCHEMA auth CASCADE`), then follow the window runbook from **step 7** (the auth
+baseline). The app window migration (`0011`) is already applied and is not re-run; its check in
+step 9 still holds.
+
+## If no second attempt follows within 7 days
+
+The auth database holds a copy of every user's password hash. If no second attempt starts within
+7 days of the rollback, empty it, from the operator environment:
+
+```bash
+psql "$AUTH_DATABASE_URL" -X -v ON_ERROR_STOP=1 -c 'DROP SCHEMA auth CASCADE'
+```
+
+**Check:** `psql "$AUTH_DATABASE_URL" -X -At -c "select count(*) from information_schema.schemata where schema_name = 'auth'"`
+prints `0`. Record the date and who ran it. A later attempt starts from the window's step 7.

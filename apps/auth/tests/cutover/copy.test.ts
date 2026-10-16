@@ -307,6 +307,31 @@ describe('the copy and the audits', () => {
   });
 });
 
+describe('the preflight', () => {
+  it('counts guests by their exact shape: the email AND the Welcome Guest names', async () => {
+    await seed(app, [
+      { id: id(1), email: 'guest_AbCdEfGhIj@askansari.ai', first: 'Welcome', last: 'Guest' },
+      { id: id(2), email: 'guest_0123456789@ansari.chat', first: 'Welcome', last: 'Guest' },
+      // Near-misses: the email shape with other names, the names with another email,
+      // a short id, another domain.
+      { id: id(3), email: 'guest_KlMnOpQrSt@askansari.ai', first: 'Real', last: 'Person' },
+      { id: id(4), email: 'welcome@example.com', first: 'Welcome', last: 'Guest' },
+      { id: id(5), email: 'guest_abc@ansari.chat', first: 'Welcome', last: 'Guest' },
+      { id: id(6), email: 'guest_AbCdEfGhIk@gmail.com', first: 'Welcome', last: 'Guest' },
+    ]);
+    // The whole preflight runs clean, and its guest query, run alone, counts
+    // exactly the two true guests.
+    await runPsqlFile(app, script('00-preflight-app.sql'));
+    const sql = readFileSync(script('00-preflight-app.sql'), 'utf8');
+    const guestSection = sql.slice(sql.indexOf('== Guests'), sql.indexOf('== Legacy admin'));
+    const start = guestSection.indexOf('SELECT');
+    const guestQuery = guestSection.slice(start, guestSection.indexOf(';', start) + 1);
+    const result = await app.query<{ guests: number }>(guestQuery.replace('count(*)', 'count(*)::int'));
+    expect(result.rows[0]?.guests).toBe(2);
+    expect(guestSection).toContain("first_name = 'Welcome' AND last_name = 'Guest'");
+  });
+});
+
 describe('after the copy', () => {
   it('scenario 16: the approved admin list is granted; a legacy admin left off it is not', async () => {
     await seed(app, [
@@ -405,21 +430,34 @@ describe('copy.sh and complete-tombstones.sh refuse to run unguarded', () => {
     spawnSync('bash', [script(name)], { env: { PATH: process.env.PATH ?? '', ...env }, encoding: 'utf8' });
   const both = { APP_DATABASE_URL: 'postgresql://app/x', AUTH_DATABASE_URL: 'postgresql://auth/y' };
 
-  it.each(['copy.sh', 'complete-tombstones.sh'])('%s: outside a Railway shell', (name) => {
-    const result = run(name, both);
+  it.each(['copy.sh', 'complete-tombstones.sh'])('%s: outside the auth image (a laptop `railway shell`)', (name) => {
+    // Every Railway variable a laptop shell injects, and the two URLs: still refused.
+    const result = run(name, {
+      ...both,
+      RAILWAY_ENVIRONMENT: 'production',
+      RAILWAY_SERVICE_NAME: 'auth',
+      RAILWAY_PROJECT_ID: 'p',
+    });
     expect(result.status).toBe(2);
-    expect(result.stderr).toMatch(/outside a Railway shell/);
+    expect(result.stderr).toMatch(/outside the auth image/);
+  });
+
+  it.each(['copy.sh', 'complete-tombstones.sh'])('%s: the guard is the image marker, and the Dockerfile bakes it', (name) => {
+    const source = readFileSync(script(name), 'utf8');
+    expect(source).toMatch(/\[ -f \/etc\/ansari-auth-image \]/);
+    expect(source).not.toMatch(/RAILWAY_ENVIRONMENT|RAILWAY_SERVICE_NAME/);
+    const dockerfile = readFileSync(resolve(here, '../../Dockerfile'), 'utf8');
+    expect(dockerfile).toMatch(/RUN touch \/etc\/ansari-auth-image/);
   });
 
   it.each(['copy.sh', 'complete-tombstones.sh'])('%s: a missing URL', (name) => {
-    const result = run(name, { RAILWAY_ENVIRONMENT: 'production', APP_DATABASE_URL: 'postgresql://app/x' });
+    const result = run(name, { APP_DATABASE_URL: 'postgresql://app/x' });
     expect(result.status).toBe(2);
     expect(result.stderr).toMatch(/AUTH_DATABASE_URL is unset/);
   });
 
   it.each(['copy.sh', 'complete-tombstones.sh'])('%s: the same database twice', (name) => {
     const result = run(name, {
-      RAILWAY_ENVIRONMENT: 'production',
       APP_DATABASE_URL: 'postgresql://same/db',
       AUTH_DATABASE_URL: 'postgresql://same/db',
     });
