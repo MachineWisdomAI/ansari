@@ -1249,6 +1249,11 @@ The spec's risk table stands. These are the risks this plan adds or sharpens.
 
 ## Questions for the plan-approval gate
 
+**All answered by the owner on 2026-10-16. The plan is approved.** G-1 approved. G-2 approved, and
+recorded in the spec as an owner amendment. G-3 approved. G-4 approved, pending B-1 to B-4 before
+the merge. G-5 approved: keep 3/60s, narrow the guest fall-through. The questions as put to the
+gate:
+
 - **G-1 (P-3).** Build the IP fallback now, behind `AUTH_RATE_LIMIT_MODE` (default `email`), rather
   than only after a failed check? Recommended: yes.
 - **G-2 (P-4). This needs an owner amendment to the spec, not only a gate answer** (Codex). The

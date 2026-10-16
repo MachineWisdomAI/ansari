@@ -21,6 +21,20 @@ This spec defines WHAT and WHY. The plan defines HOW and WHEN.
 > uses its own database's Railway default account; the JWT lifetime is **Better Auth's default, 15
 > minutes**; `apps/api` uses **plain JWKS validation with no per-request session check** (I-7).
 >
+> **Owner amendments, 2026-10-16, at the plan-approval gate** (plan G-1 to G-5).
+>
+> - **G-2.** This amends "Client IP for rate limiting". The **production-domain** edge probe runs
+>   **in the window**, using the diagnostic routes. Before the merge, the staging domains are
+>   probed, and each production domain gets a **passive DNS and proxy-chain check** (`dig` CNAME
+>   chain and plain `curl -sI` headers, with no code deployed). Production ships in the
+>   **staging-verdict mode**, and the in-window probe can only move it to the fallback.
+> - **G-1.** The IP fallback is built now, behind `AUTH_RATE_LIMIT_MODE` (default `email`).
+> - **G-3.** A fourth internal endpoint, `revoke-sessions`, bound to the subject's JWT, carries
+>   legacy logout.
+> - **G-4.** The plan's limit numbers are approved, pending production baselines B-1 to B-4
+>   before the merge.
+> - **G-5.** Sign-up stays at 3/60s, with the guest fall-through in `apps/frontend` narrowed.
+>
 > **Lineage.** This spec is written for issue #300. Its evidence base is the issue #60 reference
 > spec and plan (`codev/specs/60-better-auth-migration-reference.md`,
 > `codev/plans/60-better-auth-migration-reference.md`), updated in #299 against better-auth 1.7.7.
@@ -285,7 +299,10 @@ The documentation establishes only that the header exists. The overwrite guarant
 statement, staff answers on the forum conflict, and Help Station threads report `X-Real-IP`
 sometimes carrying **Railway infrastructure IPs** instead of the client's. So the header **must be
 verified empirically on a deployed service before the PR merges** (staging, deployed from the
-branch), not left until the window. The check passes only if it proves both properties:
+branch). **Owner amendment G-2 (2026-10-16):** the production domains are probed in the window
+through diagnostic routes, because they cannot be probed before the merge without deploying project
+code to production. Before the merge they get a passive DNS and proxy-chain check, and production
+ships in the mode the staging verdict chose. The check passes only if it proves both properties:
 
 1. **Overwrite.** Forged `X-Real-IP` and `X-Forwarded-For` values sent through each public domain
    (both production domains and the `*.up.railway.app` domain), over IPv4 and over IPv6 where
@@ -327,6 +344,9 @@ counts its sign-in limit.
   through it. The IP finding is written into `arch.md`.
 - The security architect is told before the PR proceeds, and the fallback is the configuration the
   PR ships with.
+- **Owner amendment G-1 (2026-10-16):** the fallback is built in every case, selected by
+  `AUTH_RATE_LIMIT_MODE` (`ip` | `email`, default `email`). A failed check, including the in-window
+  production probe, switches the mode without a code change.
 
 **The layer-to-`apps/auth` hop carries the client IP, so that hop must be authenticated.** When a
 `/v2/users/*` route calls `apps/auth`, the TCP peer is `apps/api`, not the user. If the route went
@@ -521,7 +541,8 @@ issue's dedicated-schema decision): `auth.users`, `auth.session`, `auth.account`
    `@system.ansari.chat` stays reserved in `apps/auth`'s sign-up hooks and on the layer.
 8. **No query crosses databases.** `apps/api` holds no auth-database credential, and `apps/auth`
    holds no app-database credential. Every cross-service fact goes over the internal credential,
-   through three internal-only `apps/auth` endpoints (profile, role, delete). A source scan pins
+   through four internal-only `apps/auth` endpoints (profile, role, delete, and `revoke-sessions`
+   for legacy logout, which is bound to the subject's JWT like delete; owner amendment G-3). A source scan pins
    that neither service's runtime code names the other database's connection.
 
    **The internal endpoints are high-value.** The profile endpoint returns any user's personal data
@@ -997,14 +1018,16 @@ rollback deadline passing, and the contract PR's release.
 - [ ] `apps/api`'s `getClientIp` (used by `mcp-complete`, and by the layer to forward) reads
   `X-Real-IP` only. `tests/rate-limit.test.ts`, which asserts the opposite preference today, is
   updated.
-- [ ] **Empirical edge verification is done before the PR merges and recorded** (method, raw
-  observations, verdict). It covers each production domain, `apps/auth`'s domain once attached, and
-  the `*.up.railway.app` domains, and proves both properties from the Client IP section:
+- [ ] **Empirical edge verification is recorded** (method, raw observations, verdict). It is done
+  **before the PR merges** on the staging domains and the `*.up.railway.app` domains, plus a
+  passive DNS and proxy-chain check of each production domain. It is done **in the window** on
+  each production domain and on `apps/auth`'s domain once attached (owner amendment G-2). It proves
+  both properties from the Client IP section:
   - forged `X-Real-IP` and `X-Forwarded-For` values never appear as the observed `X-Real-IP`
   - two clients on different networks see distinct `X-Real-IP` values equal to their own public
     addresses, never a Railway or private-range address
-- [ ] If either property fails, the PR ships the documented fallback in `apps/auth`, and tests pin
-  each part:
+- [ ] The documented fallback is built in `apps/auth` behind `AUTH_RATE_LIMIT_MODE` (G-1).
+  Production ships in the staging-verdict mode, and tests pin each part of the fallback:
   - sign-in is keyed by email and counts failures only
   - a correct password is rejected while the email is locked
   - a successful sign-in consumes no budget
