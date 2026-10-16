@@ -206,6 +206,24 @@ describe('the production 400: no request reaches the shared no-trusted-ip bucket
     expect((await request()).status).toBe(400);
   });
 
+  // apps/api's verifier fetches the key set with the credential and no end
+  // user behind it, so no IP: it must answer in production, outside the
+  // router, and still require the credential (phase 8 consult, Codex).
+  it('internal JWKS answers with the credential and no IP source, in production', async () => {
+    const res = await send(prod.internalUrl, '/api/auth/jwks', { ip: null, headers: internalHeaders() });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { keys: { kid: string; alg?: string }[] };
+    expect(Array.isArray(body.keys)).toBe(true);
+  });
+
+  it('internal JWKS without the credential is still 401', async () => {
+    expect((await send(prod.internalUrl, '/api/auth/jwks', { ip: null })).status).toBe(401);
+  });
+
+  it('the public JWKS with no IP source is still refused', async () => {
+    expect((await send(prod.publicUrl, '/api/auth/jwks', { ip: null })).status).toBe(400);
+  });
+
   it('nothing was bucketed, least of all no-trusted-ip', async () => {
     expect(await rateLimitKeys(prod)).toEqual([]);
   });

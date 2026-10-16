@@ -478,6 +478,38 @@ describe('the revocation window is pinned', () => {
   });
 });
 
+describe('against apps/auth in production mode (its client-IP rule on)', () => {
+  // Production apps/auth refuses any router request with no usable client IP.
+  // The verifier's JWKS fetch has no end user behind it; a cold cache must
+  // still verify (phase 8 consult, Codex). Every layer call forwards X-Real-IP.
+  let prod: AuthService;
+
+  beforeAll(async () => {
+    prod = await startAuth({ production: true });
+  });
+
+  afterAll(async () => {
+    await prod.close();
+    setApiEnv(service.internalUrl);
+  });
+
+  it('the whole legacy cycle works, starting from a cold JWKS cache', async () => {
+    setApiEnv(prod.internalUrl);
+    const email = nextEmail('prod');
+    const registered = await call(register, { body: { email, password: STRONG_PASSWORD } });
+    expect(registered.status).toBe(200);
+    expect((await call(threadsGet, { token: registered.body.access_token })).status).toBe(200);
+
+    const loggedIn = await call(login, { body: { email, password: STRONG_PASSWORD } });
+    expect(loggedIn.status).toBe(200);
+    const refreshed = await call(refreshToken, { body: { refresh_token: loggedIn.body.refresh_token } });
+    expect(refreshed.status).toBe(200);
+    expect((await call(meGet, { token: refreshed.body.access_token })).body.email).toBe(email);
+    expect((await call(logout, { token: refreshed.body.access_token })).status).toBe(200);
+    expect((await call(meDelete, { token: registered.body.access_token })).status).toBe(200);
+  });
+});
+
 describe('every switched route requires a verified JWT', () => {
   // The route set comes from the source, not from a list: every route file
   // that calls requireUser or requireAdminRole, and every HTTP method it

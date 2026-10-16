@@ -5,8 +5,9 @@
 // Public (PORT, the public domain): /api/auth/*, /health and the diag route.
 //   The forwarded-IP header is always stripped; /internal/* is never mounted.
 // Internal (INTERNAL_PORT, Railway's private network only, no domain): the
-//   credentialed /api/auth/* hop for apps/api's layer, its JWKS fetch, and
-//   /internal/*. Every request must carry the internal credential.
+//   credentialed /api/auth/* hop for apps/api's layer, its JWKS fetch (served
+//   outside the router: it carries no client IP), and /internal/*. Every
+//   request must carry the internal credential.
 import { createAuth, getEnv, type Auth, type Db, type Mailer } from '@ansari/auth';
 import { toNodeHandler } from 'better-auth/node';
 import express, { type Express, type Request, type Response } from 'express';
@@ -44,6 +45,20 @@ function isProduction(options: AppOptions): boolean {
   return options.production ?? getEnv().NODE_ENV === 'production';
 }
 
+/** The JWKS path apps/api's verifier fetches (apps/api `lib/auth/verify-jwt.ts`). */
+export const JWKS_ROUTE = '/api/auth/jwks';
+
+function jwks(auth: Auth) {
+  return async (_req: Request, res: Response): Promise<void> => {
+    try {
+      res.json(await auth.api.getJwks());
+    } catch (err) {
+      console.error('internal jwks failed:', err instanceof Error ? err.name : 'unknown');
+      res.status(500).json({ message: 'Internal error' });
+    }
+  };
+}
+
 function notFound(_req: Request, res: Response): void {
   res.status(404).end();
 }
@@ -70,6 +85,12 @@ export function createInternalApp({ auth, db }: ServiceDeps, options: AppOptions
   app.use(blockedPaths);
   // Outside Better Auth's handler path (spec 300 rule 8), behind the credential.
   app.use('/internal', internalRouter({ auth, db }));
+  // apps/api's verifier fetches the key set here. That fetch has no end user,
+  // so no client IP, and the production IP rule below would refuse it (400),
+  // failing every cold-cache verification. It is served straight from the
+  // plugin, outside Better Auth's router and its rate limiter, behind the
+  // credential like everything on this listener.
+  app.get(JWKS_ROUTE, jwks(auth));
   app.all(AUTH_ROUTE, requireClientIp(isProduction(options)), toNodeHandler(auth));
   app.use(notFound);
   return app;
