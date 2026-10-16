@@ -42,7 +42,14 @@
     // is GLOBAL, so editing packages/auth/src invalidates EVERY task's cache repo-wide
     // (verified: @ansari/eslint-config#build's hash moves too), not just apps/auth's.
     // A slightly colder cache is the accepted cost of never replaying a stale result.
-    "packages/auth/src/**"
+    "packages/auth/src/**",
+
+    // Same rule for @ansari/types (spec 300): it now carries RUNTIME code, the
+    // X-Ansari-Client parser that apps/api and packages/auth (so apps/auth)
+    // import. test/typecheck/lint do not walk `workspace:*` deps, so without
+    // this entry editing the parser left ansari-api#typecheck at the same hash
+    // and a warm cache replayed a stale result. Verified both directions.
+    "packages/types/src/**"
   ],
 
   // Declared GLOBALLY rather than per-task, deliberately.

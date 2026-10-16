@@ -203,3 +203,8 @@
   - `ADMIN_EMAILS=` (optional, comma-separated; empty is valid)
   - `AUTH_RATE_LIMIT_MODE=email` (`ip` | `email`; defaults to `email` when unset)
   - `MARKETMAKER_URL=` (optional URL; when unset, newsletter subscribe is disabled)
+- Main (06:41Z, comment on #300) APPROVED: the lockfile, the package.json files, tsdown neverBundle and transpilePackages. One CONDITION, applied: `packages/types/src/**` is added to turbo.json `globalDependencies` (@ansari/types now carries runtime code, and a workspace:* dep does not enter the cache hash). Proof, by dry-run hash, with a `// cache-bust probe` line appended to packages/types/src/attribution.ts:
+  - WITH the entry: ansari-api#typecheck a1db5b3b2ab3f85c → 9a1f4d0ccebd9902; ansari-api#test fbc1b4fc71a4045c → 07d89b44cc8db187; @ansari/auth#test ef47649d7cf9bde1 → 992621baa8ce8506; ansari-auth#typecheck 9b270b0e8ff20aa8 → d40d4da202429a48. All MOVE.
+  - WITHOUT the entry: ansari-api#typecheck a8d8a96bb895d02d → a8d8a96bb895d02d; ansari-api#test 1938ea1d8bb94f0d → same; @ansari/auth#test d732dff7022d2b00 → same; ansari-auth#typecheck 65b80d5045ae75d1 → same. NONE move (a stale replay).
+  - Real runs with the entry, ansari-api#typecheck: (1) miss a1db5b3b2ab3f85c; (2) warm HIT a1db5b3b2ab3f85c; (3) after the edit, MISS 9a1f4d0ccebd9902; (4) restored, HIT a1db5b3b2ab3f85c.
+- Phase 11 deploy note (main): the apps/auth image is node:22-slim and keeps node_modules/bcrypt in the runtime stage.
