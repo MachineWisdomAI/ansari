@@ -67,6 +67,13 @@ export class AuthError extends Error {
   }
 }
 
+/**
+ * apps/auth's answer to a reset token that is unknown, expired or already
+ * used (`INVALID_RESET_TOKEN_MESSAGE` in @ansari/auth, which this app cannot
+ * import). apps/auth/tests/frontend-client.test.ts pins the two equal.
+ */
+export const INVALID_RESET_TOKEN_MESSAGE = 'Invalid or expired reset token';
+
 const UNREACHABLE = "Couldn't reach Ansari. Check your connection and try again.";
 const UNAVAILABLE = 'Sign-in is unavailable right now. Please try again shortly.';
 const TOO_MANY = 'Too many attempts. Please wait a minute and try again.';

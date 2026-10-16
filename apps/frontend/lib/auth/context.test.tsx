@@ -458,6 +458,57 @@ describe('refresh during a principal change', () => {
   });
 });
 
+/**
+ * checkSession (#311 review): after a password reset, a real account's
+ * session on this device is checked at once; if the reset killed it (401
+ * from /token) it is dropped locally, with no sign-out call.
+ */
+describe('checkSession', () => {
+  async function mountReal() {
+    loadSessionMock.mockResolvedValueOnce({
+      accessToken: 'pre-reset-jwt',
+      sessionToken: 'pre-reset-session',
+      firstName: 'Real',
+      lastName: 'User',
+      isGuest: false,
+    });
+    await mount();
+  }
+
+  it('a session the reset killed (401 from /token) is dropped locally, no sign-out', async () => {
+    await mountReal();
+    mintJwt.mockRejectedValueOnce(new AuthError('Session ended.', 401, 'token'));
+    await act(async () => {
+      await authApi.checkSession();
+    });
+    expect(mintJwt).toHaveBeenCalledWith('pre-reset-session');
+    expect(clearSessionMock).toHaveBeenCalled();
+    expect(signOut).not.toHaveBeenCalled();
+    expect(authApi.session?.sessionToken).not.toBe('pre-reset-session');
+  });
+
+  it('a session still alive (another account was reset) is kept, with a fresh JWT', async () => {
+    await mountReal();
+    await act(async () => {
+      await authApi.checkSession();
+    });
+    expect(clearSessionMock).not.toHaveBeenCalled();
+    expect(authApi.session).toMatchObject({
+      sessionToken: 'pre-reset-session',
+      accessToken: 'jwt-for-pre-reset-session',
+    });
+  });
+
+  it('a guest is not checked', async () => {
+    await mount();
+    mintJwt.mockClear();
+    await act(async () => {
+      await authApi.checkSession();
+    });
+    expect(mintJwt).not.toHaveBeenCalled();
+  });
+});
+
 describe('sign-in, sign-up and sign-out', () => {
   it('sign-in stores the session token and its JWT', async () => {
     await mount();

@@ -17,8 +17,24 @@ import { PressableScale } from '@/components/PressableScale';
  * The answer is the same whether or not an account holds the address
  * (apps/auth answers alike; this page must not tell them apart either), so
  * success always reads "if an account exists". Only a failure to reach
- * apps/auth, or its rate limit, is shown as an error.
+ * apps/auth, or its rate limit, is shown as an error. It is a public page
+ * (`isPublicPath`): opening it never provisions a guest.
  */
+/**
+ * apps/auth limits reset requests per address (3 an hour) and per IP; the
+ * client's generic rate-limit text says "a minute", which is wrong here.
+ */
+function requestError(e: unknown): string {
+  if (e instanceof AuthError) {
+    if (e.status === 429) return 'Too many reset requests for this address. Try again later.';
+    if (e.status === 0 || e.status >= 500) {
+      return "Ansari can't be reached right now. Please try again shortly.";
+    }
+    return e.message;
+  }
+  return 'Something went wrong. Please try again.';
+}
+
 export default function ForgotPasswordScreen() {
   const colors = useColors();
   const [email, setEmail] = useState('');
@@ -39,7 +55,7 @@ export default function ForgotPasswordScreen() {
       await authApi.requestPasswordReset(trimmed);
       setSent(true);
     } catch (e) {
-      setError(e instanceof AuthError ? e.message : 'Something went wrong. Please try again.');
+      setError(requestError(e));
     } finally {
       setSubmitting(false);
     }

@@ -21,7 +21,14 @@ import { fileURLToPath } from 'node:url';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { AuthError, createAuthApi, type AuthApi } from '../../frontend/lib/auth/api';
+import { INVALID_RESET_TOKEN_MESSAGE } from '@ansari/auth';
+
+import {
+  AuthError,
+  createAuthApi,
+  INVALID_RESET_TOKEN_MESSAGE as CLIENT_INVALID_RESET_TOKEN_MESSAGE,
+  type AuthApi,
+} from '../../frontend/lib/auth/api';
 import { CLIENT_IDS } from '../../frontend/lib/auth/client-id-values';
 import { generateGuestCredentials } from '../../frontend/lib/auth/guest';
 import { BASE, freshIp, startService, type Service } from './helpers/service';
@@ -225,27 +232,35 @@ describe.each([
     await api().signUp({ email, password });
   });
 
-  /** The token from the newest reset email to `to`, as the link carries it. */
-  async function emailedToken(to: string): Promise<string> {
+  const mailTo = (to: string) => service.mail.filter((m) => m.to === to);
+
+  /**
+   * Requests a reset and returns the token from the email THIS request sent,
+   * as the link carries it. The mail count is taken before the request, so
+   * an earlier message to the same address can never satisfy the wait.
+   */
+  async function requestToken(to: string): Promise<string> {
+    const before = mailTo(to).length;
+    await api().requestPasswordReset(to);
     // The send is fire-and-forget on the server; wait for it to land.
     for (let i = 0; i < 50; i++) {
-      const message = service.mail.filter((m) => m.to === to).at(-1);
+      const message = mailTo(to)[before];
       const match = message?.html.match(/\/reset-password\?token=([^"&<\s]+)/);
       if (match) return decodeURIComponent(match[1] as string);
       await new Promise((r) => setTimeout(r, 20));
     }
-    throw new Error('no reset email');
+    throw new Error('no new reset email');
   }
 
-  it('a request answers the same for a known and an unknown email', async () => {
-    await expect(api().requestPasswordReset(email)).resolves.toBeUndefined();
-    await expect(api().requestPasswordReset(`nobody-${label}@example.com`)).resolves.toBeUndefined();
-    expect(await emailedToken(email)).toMatch(/\S{10,}/);
+  it('a request answers the same for a known and an unknown email; only the known one gets mail', async () => {
+    const unknown = `nobody-${label}@example.com`;
+    await expect(api().requestPasswordReset(unknown)).resolves.toBeUndefined();
+    expect(await requestToken(email)).toMatch(/\S{10,}/);
+    expect(mailTo(unknown)).toHaveLength(0);
   });
 
   it('a weak new password is refused with the server message, and the token survives', async () => {
-    await api().requestPasswordReset(email);
-    const token = await emailedToken(email);
+    const token = await requestToken(email);
     const error = await failure(() => api().resetPassword(token, 'weakweak'));
     expect([error.status, error.endpoint]).toEqual([400, 'reset-password']);
     expect(error.message).toMatch(/\S/);
@@ -257,14 +272,13 @@ describe.each([
     expect(session.sessionToken).toMatch(/\S{20,}/);
     expect((await failure(() => api().signIn(email, password))).status).toBe(401);
 
-    await api().requestPasswordReset(email);
-    const token = await emailedToken(email);
+    const token = await requestToken(email);
     await api().resetPassword(token, 'Third-pass-789!');
     const reused = await failure(() => api().resetPassword(token, 'Fourth-pass-012!'));
     expect([reused.status, reused.endpoint, reused.message]).toEqual([
       400,
       'reset-password',
-      'Invalid or expired reset token',
+      INVALID_RESET_TOKEN_MESSAGE,
     ]);
     // Reset ended every session, the one signed in above included.
     expect((await failure(() => api().mintJwt(session.sessionToken))).status).toBe(401);
@@ -272,7 +286,11 @@ describe.each([
 
   it('an invented token is the same 400', async () => {
     const error = await failure(() => api().resetPassword('not-a-real-token', newPassword));
-    expect([error.status, error.message]).toEqual([400, 'Invalid or expired reset token']);
+    expect([error.status, error.message]).toEqual([400, INVALID_RESET_TOKEN_MESSAGE]);
+  });
+
+  it("the client's copy of the invalid-token message is apps/auth's (the reset page keys on it)", () => {
+    expect(CLIENT_INVALID_RESET_TOKEN_MESSAGE).toBe(INVALID_RESET_TOKEN_MESSAGE);
   });
 });
 

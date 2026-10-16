@@ -46,6 +46,12 @@ interface AuthContextValue {
   register: (input: RegisterInput) => Promise<void>;
   loginAsGuest: () => Promise<void>;
   logout: () => Promise<void>;
+  /**
+   * Checks a real account's session against apps/auth now (one `/token`):
+   * a dead session (a reset elsewhere, a ban) is dropped locally at once.
+   * Does nothing for a guest or with no session.
+   */
+  checkSession: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -295,6 +301,12 @@ export function AuthProvider({
     applySession(null);
   }, [applySession]);
 
+  const checkSession = useCallback(async () => {
+    const current = sessionRef.current;
+    if (!current || current.isGuest) return;
+    await refresh();
+  }, [refresh]);
+
   const value = useMemo<AuthContextValue>(
     () => ({
       status,
@@ -304,8 +316,9 @@ export function AuthProvider({
       register,
       loginAsGuest,
       logout,
+      checkSession,
     }),
-    [status, session, login, register, loginAsGuest, logout],
+    [status, session, login, register, loginAsGuest, logout, checkSession],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -2,7 +2,9 @@
 // The two password-reset routes (#304), `app/forgot-password.tsx` and
 // `app/reset-password.tsx`. Tests live here because a file under `app/`
 // is a route. The page chrome (`AuthPage`) is stood in for: what is under
-// test is what each page sends, shows and keeps out of the address.
+// test is what each page sends, shows and keeps out of the address. How the
+// web token leaves the URL before the router loads is tested against a real
+// location/history in lib/auth/reset-token.test.ts.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import React from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -62,8 +64,11 @@ const authApiDouble = vi.hoisted(() => ({
 vi.mock('@/lib/auth/client', () => ({ authApi: authApiDouble }));
 const openAuthSheet = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/authSheet', () => ({ openAuthSheet }));
+const checkSession = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock('@/lib/auth/context', () => ({ useAuth: () => ({ checkSession }) }));
 
 import { AuthError } from '@/lib/auth/api';
+import { handOverResetToken, peekResetToken, takeResetToken } from '@/lib/auth/reset-token';
 import ForgotPasswordScreen from '@/app/forgot-password';
 import ResetPasswordScreen from '@/app/reset-password';
 
@@ -79,6 +84,7 @@ const press = async (testID: string) => {
 let consoleCalls: unknown[][];
 beforeEach(() => {
   searchParams.current = {};
+  takeResetToken();
   consoleCalls = [];
   for (const method of ['log', 'info', 'warn', 'error', 'debug'] as const) {
     vi.spyOn(console, method).mockImplementation((...args: unknown[]) => {
@@ -126,14 +132,18 @@ describe('/forgot-password', () => {
     expect(screen.getByTestId('reset-error')).toBeTruthy();
   });
 
-  it('a rate limit or outage is an error, not a confirmation', async () => {
+  it.each([
+    [429, /Too many reset requests for this address\. Try again later\./],
+    [503, /can't be reached right now/],
+    [0, /can't be reached right now/],
+  ])('a %s is an error with its own text, not a confirmation', async (status, message) => {
     authApiDouble.requestPasswordReset.mockRejectedValue(
-      new AuthError('Too many attempts. Please wait a minute and try again.', 429, 'request-password-reset'),
+      new AuthError('generic client text', status, 'request-password-reset'),
     );
     render(<ForgotPasswordScreen />);
     type('email-input', 'reader@example.com');
     await press('reset-request-submit');
-    expect(screen.getByTestId('reset-error').textContent).toMatch(/too many attempts/i);
+    expect(screen.getByTestId('reset-error').textContent).toMatch(message);
     expect(screen.queryByTestId('reset-request-sent')).toBeNull();
   });
 
@@ -146,57 +156,69 @@ describe('/forgot-password', () => {
 });
 
 describe('/reset-password', () => {
-  /**
-   * The emailed link, as the router delivers it: the page opened with
-   * `?token=` hands the token over and replaces itself with a plain
-   * `/reset-password`, which mounts as a new page with no params.
-   */
-  function open(token: string | null = TOKEN) {
-    if (token !== null) {
-      searchParams.current = { token };
-      render(<ResetPasswordScreen />);
-      cleanup();
-    }
+  /** The clean page, with the token where the web entry or the native link page left it. */
+  function openClean(token: string | null = TOKEN) {
+    handOverResetToken(token);
     searchParams.current = {};
     return render(<ResetPasswordScreen />);
   }
 
-  it('the link page replaces itself with a plain /reset-password and shows nothing itself', () => {
+  it('native: the link page hands the token over and replaces itself with a plain /reset-password', () => {
     searchParams.current = { token: TOKEN };
     render(<ResetPasswordScreen />);
     expect(routerDouble.replace).toHaveBeenCalledWith('/reset-password');
-    expect(screen.queryByTestId('new-password-input')).toBeNull();
     expect(JSON.stringify(routerDouble.replace.mock.calls)).not.toContain(TOKEN);
-    // The replacement page it navigated to, as the router mounts it.
+    expect(screen.queryByTestId('new-password-input')).toBeNull();
+    expect(peekResetToken()).toBe(TOKEN);
+    // The replacement page, as the router mounts it.
     cleanup();
     searchParams.current = {};
     render(<ResetPasswordScreen />);
     expect(screen.getByTestId('new-password-input')).toBeTruthy();
   });
 
-  it('a reload of the clean page (the hand-off is memory only) offers a new link', () => {
-    open(null);
-    expect(screen.getByText('This link no longer works')).toBeTruthy();
+  it('the clean page takes the token on mount: the slot is empty while the form is up', () => {
+    openClean();
+    expect(screen.getByTestId('new-password-input')).toBeTruthy();
+    expect(peekResetToken()).toBeNull();
   });
 
-  it('sets the new password with the token from the link, then sends the reader to sign in', async () => {
+  it('sets the new password with the token, checks this device session, then sends the reader to sign in', async () => {
     authApiDouble.resetPassword.mockResolvedValue(undefined);
-    open();
+    openClean();
     type('new-password-input', 'New-pass-123!');
     type('confirm-password-input', 'New-pass-123!');
     await press('reset-submit');
     expect(authApiDouble.resetPassword).toHaveBeenCalledWith(TOKEN, 'New-pass-123!');
     expect(screen.getByText('Password changed')).toBeTruthy();
+    expect(checkSession).toHaveBeenCalledTimes(1);
     await press('reset-sign-in');
     expect(openAuthSheet).toHaveBeenCalledWith('login');
     expect(routerDouble.replace).toHaveBeenCalledWith('/');
+  });
+
+  it('a failed reset does not touch this device session', async () => {
+    authApiDouble.resetPassword.mockRejectedValue(new AuthError('Too weak', 400, 'reset-password'));
+    openClean();
+    type('new-password-input', 'weakweak');
+    type('confirm-password-input', 'weakweak');
+    await press('reset-submit');
+    expect(checkSession).not.toHaveBeenCalled();
+  });
+
+  it('a reload (no token in memory) asks to open the link again, not "no longer works"', () => {
+    openClean(null);
+    expect(screen.getByText('Open your reset link')).toBeTruthy();
+    expect(screen.getByText('Open the link from your email again, or ask for a new one.')).toBeTruthy();
+    expect(screen.queryByText('This link no longer works')).toBeNull();
+    expect(screen.queryByTestId('new-password-input')).toBeNull();
   });
 
   it.each([
     ['too short', 'short', 'short', /at least 8/],
     ['mismatched', 'New-pass-123!', 'New-pass-124!', /do not match/],
   ])('a %s password is refused before any request', async (_label, pw, confirm, message) => {
-    open();
+    openClean();
     type('new-password-input', pw);
     type('confirm-password-input', confirm);
     await press('reset-submit');
@@ -204,11 +226,11 @@ describe('/reset-password', () => {
     expect(screen.getByTestId('reset-error').textContent).toMatch(message);
   });
 
-  it('an expired or used token turns the page into "ask for a new link"', async () => {
+  it('a token apps/auth refuses (expired, used) says the link no longer works', async () => {
     authApiDouble.resetPassword.mockRejectedValue(
       new AuthError('Invalid or expired reset token', 400, 'reset-password'),
     );
-    open();
+    openClean();
     type('new-password-input', 'New-pass-123!');
     type('confirm-password-input', 'New-pass-123!');
     await press('reset-submit');
@@ -221,7 +243,7 @@ describe('/reset-password', () => {
     authApiDouble.resetPassword.mockRejectedValue(
       new AuthError('Password is too weak. Use a mix of letters, numbers and symbols.', 400, 'reset-password'),
     );
-    open();
+    openClean();
     type('new-password-input', 'weakweak');
     type('confirm-password-input', 'weakweak');
     await press('reset-submit');
@@ -229,29 +251,16 @@ describe('/reset-password', () => {
     expect(screen.getByTestId('new-password-input')).toBeTruthy();
   });
 
-  it('with no token in the link, offers a new link instead of a form', () => {
-    open(null);
-    expect(screen.getByText('This link no longer works')).toBeTruthy();
-    expect(screen.queryByTestId('new-password-input')).toBeNull();
-  });
-
-  it('leaving the page forgets the token: the next clean page has none', () => {
-    open();
-    expect(screen.getByTestId('new-password-input')).toBeTruthy();
-    cleanup();
-    open(null);
-    expect(screen.getByText('This link no longer works')).toBeTruthy();
-  });
-
-  it('after a reset, the hand-off is cleared: a second clean page has no token', async () => {
-    authApiDouble.resetPassword.mockResolvedValue(undefined);
-    open();
+  it.each([503, 0])('a %s says Ansari cannot be reached (not "sign-in is unavailable")', async (status) => {
+    authApiDouble.resetPassword.mockRejectedValue(
+      new AuthError('Sign-in is unavailable right now. Please try again shortly.', status, 'reset-password'),
+    );
+    openClean();
     type('new-password-input', 'New-pass-123!');
     type('confirm-password-input', 'New-pass-123!');
     await press('reset-submit');
-    cleanup();
-    open(null);
-    expect(screen.getByText('This link no longer works')).toBeTruthy();
+    expect(screen.getByTestId('reset-error').textContent).toMatch(/can't be reached right now/);
+    expect(screen.getByTestId('reset-error').textContent).not.toMatch(/Sign-in/);
   });
 
   it('the token is never logged and never rendered, on any outcome', async () => {
@@ -267,7 +276,7 @@ describe('/reset-password', () => {
         authApiDouble.resetPassword.mockRejectedValue(new AuthError('Too weak', 400, 'reset-password'));
       if (outcome === 'network')
         authApiDouble.resetPassword.mockRejectedValue(new AuthError("Couldn't reach Ansari.", 0, 'reset-password'));
-      open();
+      openClean();
       type('new-password-input', 'New-pass-123!');
       type('confirm-password-input', 'New-pass-123!');
       await press('reset-submit');
@@ -277,8 +286,10 @@ describe('/reset-password', () => {
     expect(JSON.stringify(consoleCalls)).not.toContain(TOKEN);
   });
 
-  it('the rendering check can fail (a near-miss: the token, when rendered, is found)', () => {
+  it('the checks can fail (near-misses: a rendered token and a logged token are both found)', () => {
     render(<span>{TOKEN}</span>);
     expect(document.body.innerHTML).toContain(TOKEN);
+    console.log('reset token', TOKEN);
+    expect(JSON.stringify(consoleCalls)).toContain(TOKEN);
   });
 });

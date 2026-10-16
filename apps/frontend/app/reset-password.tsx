@@ -3,69 +3,67 @@ import { ActivityIndicator, Text } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { authApi } from '@/lib/auth/client';
-import { AuthError } from '@/lib/auth/api';
+import { AuthError, INVALID_RESET_TOKEN_MESSAGE } from '@/lib/auth/api';
+import { useAuth } from '@/lib/auth/context';
+import { handOverResetToken, peekResetToken, takeResetToken } from '@/lib/auth/reset-token';
 import { openAuthSheet } from '@/lib/authSheet';
 import { Field } from '@/components/AuthField';
 import { AuthPage, authPageStyles as styles } from '@/components/AuthPage';
 import { PressableScale } from '@/components/PressableScale';
 
-/** What apps/auth answers for a token that is unknown, expired or used. */
-const INVALID_TOKEN = 'Invalid or expired reset token';
-
-type Outcome = 'form' | 'done' | 'dead-link';
-
 /**
- * The token, between the link's page and the clean page that replaces it.
- * Memory only: never persisted, never in a URL, gone on a reload.
+ * - form: a token is in hand.
+ * - done: the password was changed.
+ * - invalid: apps/auth refused the token (unknown, expired or already used).
+ * - missing: no token reached this page (a reload, or a later visit).
  */
-const handoff: { token: string | null } = { token: null };
+type Outcome = 'form' | 'done' | 'invalid' | 'missing';
+
+const UNREACHABLE = "Ansari can't be reached right now. Please try again shortly.";
 
 /**
  * `/reset-password?token=…` (#304): the page the reset email links to, on
  * the web directly and on native through the `ansarichat` scheme. The path
  * and the `token` query are fixed by apps/auth's email and by the released
- * app, which link here; neither may change.
+ * app, which link here; neither may change. It is a public page
+ * (`isPublicPath`): opening it never provisions a guest.
  *
- * The token is a credential. The page the link opens hands it over in
- * memory and replaces itself with a plain `/reset-password`, so the token
- * leaves the URL bar, the history entry and the router's own state (which
- * would otherwise write it back into the address: expo-router re-syncs the
- * URL from navigation state, verified in a browser). It is never logged.
+ * The token is a credential and never sits in a URL once the app has it
+ * (`lib/auth/reset-token.ts`): on the web the app entry moves it into memory
+ * before expo-router loads; on native the link's page hands it over and
+ * replaces itself with a clean `/reset-password`. The clean page takes it on
+ * mount, which empties the slot. It is never logged.
  *
  * A reset ends every session of the account (apps/auth), so success does
  * not sign anyone in here: it sends the reader to sign in with the new
- * password. If this device was signed in as that account, its next request
- * finds the session gone and it falls back to its guest.
+ * password. If this device holds a real account's session, it is checked at
+ * once and dropped locally if the reset killed it.
  */
 export default function ResetPasswordScreen() {
   const colors = useColors();
+  const { checkSession } = useAuth();
   const params = useLocalSearchParams<{ token?: string | string[] }>();
   const fromLink = (Array.isArray(params.token) ? params.token[0] : params.token)?.trim() || null;
-  const [token] = useState(() => fromLink ?? handoff.token);
+  const linkPage = params.token !== undefined;
+  const [token] = useState(() => fromLink ?? peekResetToken());
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [outcome, setOutcome] = useState<Outcome>(token ? 'form' : 'dead-link');
+  const [outcome, setOutcome] = useState<Outcome>(token ? 'form' : 'missing');
 
-  const linkPage = params.token !== undefined;
   useEffect(() => {
-    if (!linkPage) return;
-    handoff.token = fromLink;
-    router.replace('/reset-password');
-    // Only on arrival from the link; the clean page has no `token` param.
+    if (linkPage) {
+      // Native: the link's page hands the token over to the clean page.
+      handOverResetToken(fromLink);
+      router.replace('/reset-password');
+    } else {
+      // The clean page has the token in state; nothing else keeps it.
+      takeResetToken();
+    }
+    // Once, on arrival.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // Leaving the clean page forgets the token, whatever happened on it.
-  useEffect(
-    () => () => {
-      if (!linkPage) handoff.token = null;
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
-  );
-
 
   const submit = async () => {
     if (submitting || !token) return;
@@ -82,9 +80,14 @@ export default function ResetPasswordScreen() {
     try {
       await authApi.resetPassword(token, password);
       setOutcome('done');
+      // The reset ended every session of the account. If this device was
+      // signed in as it, drop that session now rather than when it next 401s.
+      void checkSession();
     } catch (e) {
-      if (e instanceof AuthError && e.status === 400 && e.message === INVALID_TOKEN) {
-        setOutcome('dead-link');
+      if (e instanceof AuthError && e.status === 400 && e.message === INVALID_RESET_TOKEN_MESSAGE) {
+        setOutcome('invalid');
+      } else if (e instanceof AuthError && (e.status === 0 || e.status >= 500)) {
+        setError(UNREACHABLE);
       } else {
         setError(e instanceof AuthError ? e.message : 'Something went wrong. Please try again.');
       }
@@ -113,7 +116,23 @@ export default function ResetPasswordScreen() {
     );
   }
 
-  if (outcome === 'dead-link') {
+  if (outcome === 'missing') {
+    return (
+      <AuthPage
+        documentTitle="Reset your password · Ansari"
+        title="Open your reset link"
+        subtitle="Open the link from your email again, or ask for a new one."
+      >
+        <PrimaryButton
+          label="Send a new link"
+          onPress={() => router.replace('/forgot-password')}
+          testID="reset-request-new"
+        />
+      </AuthPage>
+    );
+  }
+
+  if (outcome === 'invalid') {
     return (
       <AuthPage
         documentTitle="Reset link expired · Ansari"
