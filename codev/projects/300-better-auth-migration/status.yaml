@@ -14,10 +14,10 @@ plan_phases:
     status: complete
   - id: phase_4
     title: 'apps/auth HTTP perimeter: blocked surfaces, client IP, rate limits, CORS'
-    status: in_progress
+    status: complete
   - id: phase_5
     title: apps/auth internal endpoints, reset email, role script and boot assertion
-    status: pending
+    status: in_progress
   - id: phase_6
     title: 'App database migrations: scaffold cleanup, tombstones, window migration'
     status: pending
@@ -42,7 +42,7 @@ plan_phases:
   - id: phase_13
     title: 'Staging verification: edge check, unmodified clients, full rehearsal'
     status: pending
-current_plan_phase: phase_4
+current_plan_phase: phase_5
 gates:
   spec-approval:
     status: approved
@@ -56,8 +56,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 2
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1
@@ -96,7 +96,7 @@ history:
         file: >-
           /Users/amrmohamed/repos/iaser/ansari/.builders/spir-300/codev/projects/300-better-auth-migration/300-phase_4-iter1-gemini.txt
 started_at: '2026-10-14T03:31:15.359Z'
-updated_at: '2026-10-16T07:15:33.658Z'
+updated_at: '2026-10-16T07:18:11.511Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-10-16T00:28:28.599Z'
@@ -110,3 +110,5 @@ context_refreshes:
   - boundary: plan-phase:phase_4
     at: '2026-10-16T06:44:03.411Z'
     acknowledged_at: '2026-10-16T06:45:08.019Z'
+  - boundary: plan-phase:phase_5
+    at: '2026-10-16T07:18:11.511Z'
