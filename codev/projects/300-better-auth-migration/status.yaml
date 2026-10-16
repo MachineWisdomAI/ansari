@@ -5,10 +5,10 @@ phase: implement
 plan_phases:
   - id: phase_1
     title: Legacy contract tests pinned against today's implementation
-    status: in_progress
+    status: complete
   - id: phase_2
     title: Auth database schema, fresh journal and parity guard
-    status: pending
+    status: in_progress
   - id: phase_3
     title: 'Better Auth configuration: UUIDs, dual verify, sessions, JWT, admin columns'
     status: pending
@@ -42,7 +42,7 @@ plan_phases:
   - id: phase_13
     title: 'Staging verification: edge check, unmodified clients, full rehearsal'
     status: pending
-current_plan_phase: phase_1
+current_plan_phase: phase_2
 gates:
   spec-approval:
     status: approved
@@ -56,8 +56,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 2
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1
@@ -72,8 +72,10 @@ history:
         file: >-
           /Users/amrmohamed/repos/iaser/ansari/.builders/spir-300/codev/projects/300-better-auth-migration/300-phase_1-iter1-gemini.txt
 started_at: '2026-10-14T03:31:15.359Z'
-updated_at: '2026-10-16T05:59:54.810Z'
+updated_at: '2026-10-16T06:01:30.636Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-10-16T00:28:28.599Z'
     acknowledged_at: '2026-10-16T00:29:26.903Z'
+  - boundary: plan-phase:phase_2
+    at: '2026-10-16T06:01:30.636Z'
