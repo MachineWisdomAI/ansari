@@ -158,6 +158,11 @@ export const authTokenSchema = z.object({
   token: z.string().min(1),
 });
 
+/** `POST /api/auth/request-password-reset` and `POST /api/auth/reset-password`. */
+export const authStatusSchema = z.object({
+  status: z.literal(true),
+});
+
 /** `POST /api/auth/sign-out`. */
 export const signOutSchema = z.object({
   success: z.boolean(),
