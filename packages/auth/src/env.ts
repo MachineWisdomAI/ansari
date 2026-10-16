@@ -20,9 +20,41 @@ const envSchema = z.object({
   BETTER_AUTH_URL: z.string().url('BETTER_AUTH_URL must be a valid URL'),
   CORS_ORIGIN: z.string().url('CORS_ORIGIN must be a valid URL'),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+
+  // JWT claims (spec 300). `iss` is this service's public origin
+  // (https://auth.askansari.ai, or auth-staging in staging); `aud` names
+  // apps/api. Both are set explicitly so they never silently follow baseURL.
+  AUTH_JWT_ISSUER: z.string().url('AUTH_JWT_ISSUER must be a valid URL'),
+  AUTH_JWT_AUDIENCE: z.string().min(1, 'AUTH_JWT_AUDIENCE is required'),
+  // The credential only apps/api and apps/auth hold, for the internal
+  // endpoints and the forwarded client IP. Never logged.
+  AUTH_INTERNAL_SECRET: z
+    .string()
+    .min(32, 'AUTH_INTERNAL_SECRET must be at least 32 characters'),
+  // Reset emails are sent from here after cutover. Never logged.
+  RESEND_API_KEY: z.string().min(20, 'RESEND_API_KEY must be at least 20 characters'),
+  // Base of the emailed reset link: `${FRONTEND_URL}/reset-password?token=…`.
+  FRONTEND_URL: z.string().url('FRONTEND_URL must be a valid URL'),
+  // Comma-separated. Reserved at sign-up and asserted at boot; never an
+  // authorization source (admin is `auth.users.role`).
+  ADMIN_EMAILS: z
+    .string()
+    .optional()
+    .default('')
+    .transform((raw) =>
+      raw
+        .split(',')
+        .map((e) => e.trim().toLowerCase())
+        .filter((e) => e.length > 0)
+    ),
+  // P-3 / owner amendment G-1: how sign-in and sign-up are rate-limited.
+  // Defaults to `email`, the mode that cannot collapse into a global cap.
+  AUTH_RATE_LIMIT_MODE: z.enum(['ip', 'email']).default('email'),
+  // Optional newsletter integration; unset disables the opt-in subscribe.
+  MARKETMAKER_URL: z.string().url('MARKETMAKER_URL must be a valid URL').optional(),
 });
 
-export type AuthEnv = z.infer<typeof envSchema>;
+export type AuthEnv = z.output<typeof envSchema>;
 
 let cachedEnv: AuthEnv | null = null;
 
@@ -43,7 +75,8 @@ export function getEnv(): AuthEnv {
     throw new Error(
       `@ansari/auth env validation failed for: ${vars}. ` +
         `Set these before running the auth service — see apps/auth/.env.example ` +
-        `(BETTER_AUTH_SECRET must be >= 32 chars; BETTER_AUTH_URL and CORS_ORIGIN must be URLs).`
+        `(BETTER_AUTH_SECRET and AUTH_INTERNAL_SECRET must be >= 32 chars, RESEND_API_KEY >= 20; ` +
+        `BETTER_AUTH_URL, CORS_ORIGIN, AUTH_JWT_ISSUER and FRONTEND_URL must be URLs).`
     );
   }
 

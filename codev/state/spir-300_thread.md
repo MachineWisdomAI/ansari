@@ -154,3 +154,43 @@
   4. Bonus: with RELEASE.md restored, run 4 HIT c4abafb2a6ee4b17 again.
 - Phase 2 consult iter1: Gemini APPROVE. Codex REQUEST_CHANGES, whose single issue was the it.skip on thread-get-contract, now resolved by the develop merge (develop's deterministic fix, no skip). Both reports carry a "repository moved" banner: that is my merge (0dbdb7a to abeabf2) landing during the review, not a consultant commit.
 - Phase 2 consult iter2: Codex APPROVE, Gemini APPROVE (no issues).
+
+## Phase 3: Better Auth configuration (2026-10-16)
+
+- `createAuth()` now carries everything the cutover depends on, each piece pinned by a test:
+  - `password: {hash, verify}` from `src/password.ts`: `$2a$`/`$2b$` go to bcrypt, the rest to scrypt, and new hashes are always scrypt. Legacy apps/api had no explicit 72-byte truncation; bcrypt itself ignores bytes past 72, and that is the behaviour ported and tested (scenario 8).
+  - `revokeSessionsOnPasswordReset: true`. `requireEmailVerification` is unset. `emailVerification.sendOnSignUp: false`, with no sender.
+  - `session` 30d / 1d.
+  - Plugins: `expo`, `bearer()` (requireSignature unset), `jwt` (EdDSA, iss/aud from env, 15m, `definePayload` → `{sub, sid}`), `admin`.
+  - `additionalFields` `first_name`/`last_name`/`registered_via` (`input: false`). The keys are the snake_case API names, with `fieldName` mapping to the Drizzle properties.
+  - `changeEmail` and `deleteUser` are explicitly `enabled: false`.
+  - `rateLimit` is enabled with database storage, `customRules` = `ROUTER_RULES` from `src/limits.ts` (every P-2 number lives there), and `advanced.ipAddress.ipAddressHeaders: ['x-real-ip']`.
+- Hooks:
+  - `hooks.before /sign-up/email`: email + length validation first, then reserved-or-taken (one 409, `An account with this email already exists`), then strength (400, the legacy detail). The hook also injects the derived `name` when it is missing or blank. That injection is required, not cosmetic: better-auth's body schema demands `name`, so without it a nameless sign-up is a 400.
+  - `hooks.before /reset-password`: the token lookup comes first (400 `Invalid or expired reset token`), then strength. better-auth still consumes the token atomically afterwards.
+  - `hooks.after /sign-up/email`: the newsletter, only on `register_to_mail_list === true` and a created session.
+  - `databaseHooks.user.create.before`: the reservation again (defence in depth), `registered_via` through the shared parser, and the name if it is blank.
+- Shared parser: `packages/types/src/attribution.ts` (`parseClientId`). apps/api's `lib/attribution.ts` is now a thin Sentry wrapper over it, and its attribution tests are unchanged and green. apps/api gains the `@ansari/types` workspace dependency and `transpilePackages`.
+- Env (`src/env.ts`): `AUTH_JWT_ISSUER` (url), `AUTH_JWT_AUDIENCE`, `AUTH_INTERNAL_SECRET` (min 32), `RESEND_API_KEY` (min 20), `FRONTEND_URL` (url), `ADMIN_EMAILS` (normalized list), `AUTH_RATE_LIMIT_MODE` (`ip`|`email`, default `email`), and `MARKETMAKER_URL` (optional). The validation error names variables only, never values (tested). turbo `globalEnv` is untouched here: the plan puts the AUTH_* additions in phase 9. Four of the eight names already exist there: ADMIN_EMAILS, FRONTEND_URL, MARKETMAKER_URL and RESEND_API_KEY.
+- NOT updated: `apps/auth/.env.example` and `.env.ci`. My permissions deny reads of `.env*` files, so I cannot edit them safely. `pnpm auth dev` now needs the new variables, and the error names them. This is flagged to the architect for phase 9 or 11.
+- Newsletter departure (small): on failure it logs only the HTTP status or error name. Legacy logged the response body text, which can echo the email back.
+- Dependencies (lockfile hunk, MAIN review):
+  - packages/auth: `bcrypt ^6.0.0`, `resend ^6.9.3` (unused until phase 5's reset email, added here per the plan), `@ansari/types`, dev `@types/bcrypt`.
+  - apps/api: `@ansari/types`.
+  - apps/auth: `bcrypt ^6.0.0`.
+  - pnpm also re-keyed some better-auth snapshots between `better-call(zod@4.4.3)` and `(zod@4.6.5)`, with no version changes. HEAD already had two better-auth@1.7.7 snapshot variants (differing in the `next` peer context), so packages/auth and apps/auth resolve different copies. That predates this phase and fits #265.
+- FOUND AND FIXED a real deploy bug the new dependency would have caused: apps/auth's tsdown bundle inlined bcrypt's `node-gyp-build` loader, which resolves the native binding from `dist/` (and uses `__dirname` under ESM). The fix is `deps.neverBundle: ['bcrypt']` plus bcrypt as a direct apps/auth dependency. Verified: `dist/index.mjs` imports `bcrypt` externally, has 0 node-gyp-build copies, and the built service boots and listens.
+- Test load: the root `turbo run test` hit vitest's 10s hookTimeout in packages/auth `beforeAll` (pglite cold start) in 2 of 5 full runs. Added `packages/auth/vitest.config.ts` (30s, the same remedy and rationale as apps/api #292/#290). Afterwards 4 of 4 forced full runs were green: auth 143 + 1 deliberate skip, api 934 + 3, frontend 624.
+- Removal-fails demonstration (`scratchpad mutate.py`, one mutation at a time, the suites run, the file restored): 28 mutations, 28 caught. Highlights:
+  - bcrypt branch removed → 17 fail (incl. $2a$/$2b$, >72 bytes, mixed case)
+  - revokeSessionsOnPasswordReset removed → the reset test fails
+  - requireSignature on → the raw-session-token test (and 11 more) fail
+  - definePayload removed → the exact-key-set test fails
+  - expirationTime 1h → the 900s test fails
+  - expiresIn removed → 4 session tests fail; updateAge 3d → the slide test fails
+  - ipAddressHeaders removed → 38 fail (everything collapses into the test-fallback bucket)
+  - customRules removed / storage memory / enabled removed → the limit tests fail
+  - each sign-up guard step removed or reordered → its order test fails
+  - reset strength-before-token → 2 fail; reset strength removed → 1
+  - registered_via, name injection, newsletter, generateId, modelName, changeEmail, deleteUser, sendOnSignUp, admin → each caught
+- Limitation: `expirationTime` and `updateAge` equal better-auth's defaults (15m, 1d), so deleting them changes nothing observable. The tests pin the VALUES (a changed value fails), and the options test pins the explicit settings.

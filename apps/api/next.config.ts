@@ -2,6 +2,8 @@ import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
 
 const nextConfig: NextConfig = {
+  // @ansari/types exports raw `.ts` (no build step), so Next must compile it.
+  transpilePackages: ["@ansari/types"],
   // Lint runs as its own step (`pnpm lint`) and in CI; keep `next build`
   // decoupled from ESLint so the build gate isn't coupled to lint findings.
   eslint: {
