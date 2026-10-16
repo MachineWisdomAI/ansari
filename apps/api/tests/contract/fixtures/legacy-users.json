@@ -1,5 +1,5 @@
 {
-  "$comment": "Frozen wire contract of the legacy /v2/users/* surface and the two password-reset routes, pinned against the pre-migration apps/api (spec 300, plan phase 1). `shape` is the EXACT key set with each value's type (string | null | uuid | iso-datetime). `values` pins literal values. `detailOneOf` pins a 401 whose detail names a legacy failure cause that clients never parse: the status and the set are frozen, the specific member is not. Phase 8 must pass against these files unedited.",
+  "$comment": "Frozen wire contract of the legacy /v2/users/* surface and the two password-reset routes, pinned against the pre-migration apps/api (spec 300, plan phase 1). `shape` is the EXACT key set with each value's type (string | null | uuid | iso-datetime). `values` pins literal values. `detailOneOf` is used ONLY where the post-migration backend cannot recover today's distinct cause (a refresh 401 from apps/auth, or an opaque non-JWT bearer): the status and the set are frozen, the specific member is not. Every other detail is exact. Phase 8 must pass against these files unedited.",
 
   "register.ok": {
     "status": 200,
@@ -96,6 +96,11 @@
     "status": 200,
     "shape": { "access_token": "string", "refresh_token": "string", "token_type": "string" },
     "values": { "token_type": "bearer" }
+  },
+  "refresh_token.invalid": {
+    "status": 401,
+    "shape": { "detail": "string" },
+    "values": { "detail": "Invalid or expired refresh token" }
   },
   "refresh_token.rejected": {
     "status": 401,
@@ -212,6 +217,16 @@
     "status": 401,
     "shape": { "detail": "string" },
     "values": { "detail": "Not authenticated" }
+  },
+  "bearer.invalid_or_expired": {
+    "status": 401,
+    "shape": { "detail": "string" },
+    "values": { "detail": "Invalid or expired token" }
+  },
+  "bearer.token_not_found": {
+    "status": 401,
+    "shape": { "detail": "string" },
+    "values": { "detail": "Token not found or expired" }
   },
   "bearer.rejected": {
     "status": 401,

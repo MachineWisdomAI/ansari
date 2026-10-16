@@ -276,7 +276,7 @@ describe('POST /v2/users/refresh_token', () => {
   it('rejects a garbage token with 401', async () => {
     expectWire(
       await harness.call('refresh_token', { body: { refresh_token: 'not-a-token' } }),
-      'refresh_token.rejected'
+      'refresh_token.invalid'
     );
   });
 
@@ -326,7 +326,7 @@ describe('POST /v2/users/logout', () => {
   });
 
   it('rejects a garbage bearer token with 401', async () => {
-    expectWire(await harness.call('logout', { token: 'not-a-token' }), 'bearer.rejected');
+    expectWire(await harness.call('logout', { token: 'not-a-token' }), 'bearer.invalid_or_expired');
   });
 });
 
@@ -354,7 +354,7 @@ describe('GET /v2/users/me', () => {
   });
 
   it('rejects a garbage bearer token with 401', async () => {
-    expectWire(await harness.call('me.get', { token: 'not-a-token' }), 'bearer.rejected');
+    expectWire(await harness.call('me.get', { token: 'not-a-token' }), 'bearer.invalid_or_expired');
   });
 
   it('rejects a refresh token presented as the bearer with 401', async () => {
@@ -367,7 +367,7 @@ describe('GET /v2/users/me', () => {
     await harness.seedUser({ email: 'amina@example.com', password: PASSWORD });
     const { access_token } = await loginAs('amina@example.com');
     harness.expireAccessToken();
-    expectWire(await harness.call('me.get', { token: access_token }), 'bearer.rejected');
+    expectWire(await harness.call('me.get', { token: access_token }), 'bearer.invalid_or_expired');
   });
 });
 
@@ -382,7 +382,7 @@ describe('DELETE /v2/users/me', () => {
 
     expect(await harness.ownedRowCounts(id)).toEqual({ threads: 0, preferences: 0, feedback: 0 });
     expect(await harness.appUser('amina@example.com')).toBeUndefined();
-    expectWire(await harness.call('me.get', { token: access_token }), 'bearer.rejected');
+    expectWire(await harness.call('me.get', { token: access_token }), 'bearer.token_not_found');
     expectWire(await harness.call('refresh_token', { body: { refresh_token } }), 'refresh_token.rejected');
     expectWire(
       await harness.call('login', { body: { email: 'amina@example.com', password: PASSWORD } }),
@@ -405,7 +405,7 @@ describe('DELETE /v2/users/me', () => {
   });
 
   it('rejects a garbage bearer token with 401', async () => {
-    expectWire(await harness.call('me.delete', { token: 'not-a-token' }), 'bearer.rejected');
+    expectWire(await harness.call('me.delete', { token: 'not-a-token' }), 'bearer.invalid_or_expired');
   });
 });
 
@@ -534,7 +534,7 @@ describe('client flows, recorded as sequences', () => {
     expect((await harness.call('threads.get', { token: session.access_token })).status).toBe(200);
 
     harness.expireAccessToken();
-    expectWire(await harness.call('threads.get', { token: session.access_token }), 'bearer.rejected');
+    expectWire(await harness.call('threads.get', { token: session.access_token }), 'bearer.invalid_or_expired');
 
     const refreshed = expectWire(
       await harness.call('refresh_token', { body: { refresh_token: session.refresh_token } }),
