@@ -39,3 +39,27 @@ edge and proxy headers as staging).
 | `auth.askansari.ai` | window step 15 | | | | passive check before the merge (2026-10-17): no DNS record yet (attached in window step 15); it must not be Cloudflare-proxied |
 
 **Verdict for production `AUTH_RATE_LIMIT_MODE`:** _(recorded by phase 13)_
+
+## Finding: `api.askansari.ai` is Cloudflare-proxied (2026-10-17, open: the owner decides)
+
+The passive check above found Cloudflare in front of Railway's edge on `api.askansari.ai`. Railway's
+`X-Real-IP` there is one of a few Cloudflare egress addresses, shared by every user on that domain.
+
+**`AUTH_RATE_LIMIT_MODE=email` does not fix this on its own.** `routerRules()`
+(`packages/auth/src/index.ts`) only switches off the per-IP sign-in and sign-up rules. Everything
+else in `packages/auth/src/limits.ts` stays keyed by IP: the reset request cap
+(`RESET_REQUEST_PER_IP`, 5/15 min), the reset-consume rule, `/token` and `/get-session` (60/min),
+the internal endpoints and the global default. Behind Cloudflare these become **global** caps for
+all traffic on the domain. That includes the legacy layer, because apps/api forwards the
+Cloudflare address as the client's `X-Real-IP` on the internal hop.
+
+The candidate fixes (the owner and the security architect decide; nothing has been built):
+1. Turn Cloudflare proxying off (DNS-only) for the domain, so Railway's edge sees the client.
+2. Take the client IP from `CF-Connecting-IP` only when `X-Real-IP` falls inside Cloudflare's
+   published ranges.
+
+Email mode alone is not one of the options.
+
+The same applies to `auth.askansari.ai` when it is attached: it must not be Cloudflare-proxied
+unless fix 2 is built. Staging (`api-staging.askansari.ai`) goes straight to Railway, so the
+phase 13 staging edge check cannot stand in for this domain.
