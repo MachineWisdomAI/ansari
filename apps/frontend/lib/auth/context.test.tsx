@@ -139,3 +139,75 @@ describe('AuthProvider clears the query cache on principal transitions', () => {
     expect(queryClient.getQueryData(['conversations'])).toBeUndefined();
   });
 });
+
+/**
+ * Issue #307: a shared thread is public. A visitor with nothing stored who
+ * opens one must not have a guest account minted for them by viewing it; the
+ * provider holds at `loading` (the share page renders through it) and
+ * provisions only once the visitor moves on into the app.
+ */
+describe('AuthProvider defers the guest on a public page', () => {
+  function tree(queryClient: QueryClient, deferGuest: boolean) {
+    return (
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider deferGuest={deferGuest}>
+          <Probe />
+        </AuthProvider>
+      </QueryClientProvider>
+    );
+  }
+
+  it('mints no guest while deferred, then provisions once the page is left', async () => {
+    const queryClient = new QueryClient();
+    const { rerender } = render(tree(queryClient, true));
+    await waitFor(() => expect(loadSessionMock).toHaveBeenCalled());
+    await act(async () => {});
+
+    expect(authApi.status).toBe('loading');
+    expect(registerRequestMock).not.toHaveBeenCalled();
+
+    rerender(tree(queryClient, false));
+    await waitFor(() => expect(authApi.status).toBe('signedIn'));
+    expect(authApi.isGuest).toBe(true);
+    expect(registerRequestMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('still restores a stored session while deferred', async () => {
+    loadSessionMock.mockResolvedValueOnce({
+      accessToken: 'real-access',
+      refreshToken: 'real-refresh',
+      firstName: 'Real',
+      lastName: 'User',
+      isGuest: false,
+    });
+    const queryClient = new QueryClient();
+    render(tree(queryClient, true));
+    await waitFor(() => expect(authApi.status).toBe('signedIn'));
+    expect(authApi.isGuest).toBe(false);
+    expect(registerRequestMock).not.toHaveBeenCalled();
+  });
+
+  it('a session lost on the public page is not replaced by a guest until it is left', async () => {
+    loadSessionMock.mockResolvedValueOnce({
+      accessToken: 'real-access',
+      refreshToken: 'real-refresh',
+      firstName: 'Real',
+      lastName: 'User',
+      isGuest: false,
+    });
+    const queryClient = new QueryClient();
+    const { rerender } = render(tree(queryClient, true));
+    await waitFor(() => expect(authApi.status).toBe('signedIn'));
+
+    await act(async () => {
+      await authApi.logout();
+    });
+    expect(authApi.status).toBe('signedOut');
+    expect(registerRequestMock).not.toHaveBeenCalled();
+
+    rerender(tree(queryClient, false));
+    await waitFor(() => expect(authApi.isGuest).toBe(true));
+    expect(registerRequestMock).toHaveBeenCalledTimes(1);
+  });
+});
+
