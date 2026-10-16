@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminRole } from '@/lib/auth/require-admin-role';
-import { createErrorResponse } from '@/lib/auth/middleware';
+import { createErrorResponse } from '@/lib/error-response';
 import {
   getSummaryStats,
   getUsersPerDay,

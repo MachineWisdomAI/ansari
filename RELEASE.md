@@ -199,15 +199,19 @@ Order proven for migration `0003` on 2026-08-02:
    ```
 
 3. **Run bootstrap scripts** (after the migration, before the deploy):
-   - **Admins:** from `apps/api/`, `pnpm exec tsx scripts/grant-admin.ts <email>`
-     (securely prompts for a password; creates a login-capable admin, or
-     promotes an existing account while resetting its password and revoking
-     its sessions).
+   - **Admins** live in `apps/auth` (spec 300): from `apps/auth/`, with the
+     auth database's `DATABASE_URL`, `pnpm exec tsx scripts/grant-admin.ts <email>`.
+     It grants the admin role to an account that already exists; it never
+     creates an account or touches a password. A new admin therefore signs up
+     first, then their address joins `apps/auth`'s `ADMIN_EMAILS`, then the
+     script runs, then the deploy. Adding the address to `ADMIN_EMAILS` before
+     sign-up locks the person out (a reserved address is refused at sign-up)
+     and fails `apps/auth`'s boot assertion ("has no account").
    - **System accounts** (`ai-skill`, `leaderboard`) self-provision lazily by
      `system_key` — no manual step.
 4. **Then run the standard release checklist above.** The order matters:
-   production boot asserts that every `ADMIN_EMAILS` entry already exists as
-   an admin, so deploying before migration + bootstrap fails fast at startup
+   `apps/auth`'s production boot asserts that every `ADMIN_EMAILS` entry
+   already exists as an admin, so deploying before migration + bootstrap fails fast at startup
    — by design.
 
 Migrations must be backward-compatible with the currently-deployed code: the

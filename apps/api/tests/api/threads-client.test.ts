@@ -6,8 +6,7 @@ import { NextRequest } from 'next/server';
 // DB writes, the facilitator, thread-naming, and Sentry.
 
 const mockAuthenticateRequest = vi.fn();
-vi.mock('@/lib/auth/middleware', () => ({
-  authenticateRequest: (...a: unknown[]) => mockAuthenticateRequest(...a),
+vi.mock('@/lib/error-response', () => ({
   createErrorResponse: (message: string, status: number) =>
     new Response(JSON.stringify({ error: message }), {
       status,

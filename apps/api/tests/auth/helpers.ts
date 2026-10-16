@@ -35,10 +35,23 @@ export const TEST_AUDIENCE = 'ansari-api-test';
 export const TEST_LAYER_ORIGIN = 'https://api.test.example';
 export const LEGACY_JWT_SECRET = 'phase-7-legacy-jwt-secret-at-least-32-chars';
 
+/**
+ * A token as the retired legacy auth (apps/api/lib/auth/jwt.ts, removed in
+ * phase 9) minted it: HS256 over `{user_id, type, session_version}` with an
+ * expiry. Built here with jose, so the refusal tests keep a real legacy token
+ * after the code that signed them is gone.
+ */
+export async function legacyAccessToken(userId: string = randomUUID()): Promise<string> {
+  return new SignJWT({ user_id: userId, type: 'access', session_version: 0 })
+    .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
+    .setIssuedAt()
+    .setExpirationTime('2h')
+    .sign(new TextEncoder().encode(LEGACY_JWT_SECRET));
+}
+
 /** apps/api's own required env, plus apps/auth's coordinates. */
 export function setApiEnv(internalUrl: string, secret = INTERNAL_SECRET): void {
   process.env.DATABASE_URL = 'postgres://test:test@localhost:5432/test';
-  process.env.JWT_SECRET = LEGACY_JWT_SECRET;
   process.env.KALEMAT_API_KEY = 'placeholder';
   process.env.USUL_API_TOKEN = 'placeholder';
   process.env.AUTH_INTERNAL_URL = internalUrl;
@@ -183,6 +196,18 @@ export async function deadUrl(): Promise<string> {
 // App database
 
 const DRIZZLE_DIR = path.resolve(__dirname, '../../drizzle');
+
+/**
+ * A legacy app row: one the copy carried over, holding a password hash, under
+ * its own id. Raw SQL, because apps/api no longer writes credentials.
+ */
+export async function insertLegacyUserRow(app: PGlite, email: string): Promise<{ id: string }> {
+  const { rows } = await app.query<{ id: string }>(
+    "INSERT INTO users (email, password_hash) VALUES ($1, 'x') RETURNING id",
+    [email]
+  );
+  return rows[0]!;
+}
 
 export async function migrateAppDb(): Promise<PGlite> {
   const client = new PGlite();

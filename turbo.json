@@ -74,10 +74,11 @@
   // added because skipping it lost a real variable: step 3 is how
   // FACILITATOR_REQUEST_BUDGET_MS / FACILITATOR_SYNTHESIS_RESERVE_MS were missed,
   // and step 4 is how SENTRY_AUTH_TOKEN was missed:
-  //   1. The Zod schema in apps/api/lib/config.ts.
-  //   2. STATIC reads:  grep -rn "process\.env\.[A-Z]" apps
-  //      (FRONTEND_URL, MARKETMAKER_URL, NEXT_RUNTIME, RAILWAY_ENVIRONMENT,
-  //       RESEND_API_KEY, SENTRY_DSN, VITEST)
+  //   1. The Zod schemas: apps/api/lib/config.ts AND packages/auth/src/env.ts
+  //      (apps/auth's env; apps/auth reads nothing else).
+  //   2. STATIC reads:  grep -rn "process\.env\.[A-Z]" apps packages
+  //      (DATABASE_URL in both drizzle configs, NEXT_RUNTIME, NODE_ENV,
+  //       RAILWAY_ENVIRONMENT, SENTRY_DSN, VITEST)
   //   3. DYNAMIC reads: grep -rn "process\.env\[" apps  — then follow each
   //      call site to the string literals passed in. A static `process.env.X`
   //      pattern CANNOT see `process.env[name]`, and the failure is silent: the
@@ -102,9 +103,18 @@
     "BETTER_AUTH_SECRET",
     "BETTER_AUTH_URL",
     "CORS_ORIGIN",
-    "JWT_SECRET",
-    "ACCESS_TOKEN_EXPIRY_HOURS",
-    "REFRESH_TOKEN_EXPIRY_HOURS",
+    // apps/auth <-> apps/api (spec 300). The issuer, audience, internal secret
+    // and layer origin are in BOTH Zod schemas; AUTH_INTERNAL_URL is apps/api's,
+    // AUTH_RATE_LIMIT_MODE and INTERNAL_PORT are apps/auth's. The legacy
+    // JWT_SECRET / ACCESS_ / REFRESH_TOKEN_EXPIRY_HOURS left with the legacy
+    // auth code (phase 9).
+    "AUTH_INTERNAL_URL",
+    "AUTH_JWT_ISSUER",
+    "AUTH_JWT_AUDIENCE",
+    "AUTH_INTERNAL_SECRET",
+    "AUTH_LAYER_ORIGIN",
+    "AUTH_RATE_LIMIT_MODE",
+    "INTERNAL_PORT",
     "GEMINI_API_KEY",
     "GEMINI_MODEL",
     "GEMINI_FALLBACK_MODEL",
@@ -127,6 +137,8 @@
     "KALEMAT_API_KEY",
     "USUL_API_TOKEN",
     "USUL_BASE_URL",
+    // apps/auth's since spec 300 (packages/auth env), as are FRONTEND_URL,
+    // MARKETMAKER_URL and RESEND_API_KEY below.
     "ADMIN_EMAILS",
     "LEADERBOARD_API_KEY",
     "MAINTENANCE_MODE",

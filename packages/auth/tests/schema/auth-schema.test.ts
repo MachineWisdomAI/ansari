@@ -23,7 +23,7 @@ beforeAll(async () => {
   client = await migrate();
   setAuthEnv('http://localhost:3100');
   auth = createAuth(drizzleFor(client));
-}, 20_000);
+});
 
 afterAll(async () => {
   await client?.close();

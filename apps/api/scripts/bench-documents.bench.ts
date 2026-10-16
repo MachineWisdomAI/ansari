@@ -24,9 +24,8 @@ vi.mock('@/lib/db/index', () => ({
   },
   closeDb: async () => {},
 }));
-vi.mock('@/lib/auth/middleware', () => ({
-  authenticateRequest: async () => ({ user: { id: USER_ID } }),
-  createErrorResponse: (message: string, status: number) => new Response(JSON.stringify({ error: message }), { status }),
+vi.mock('@/lib/auth/require-user', () => ({
+  requireUser: async () => ({ user: { id: USER_ID } }),
 }));
 vi.mock('@/lib/ai/thread-naming', () => ({ maybeGenerateThreadName: vi.fn() }));
 vi.mock('@/lib/facilitator/agent', () => ({ runFacilitator: vi.fn() }));

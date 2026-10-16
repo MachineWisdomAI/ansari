@@ -12,24 +12,12 @@ const envSchema = z.object({
   // Database
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
 
-  // Auth
-  JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
-  ACCESS_TOKEN_EXPIRY_HOURS: z.coerce
-    .number()
-    .int('ACCESS_TOKEN_EXPIRY_HOURS must be an integer')
-    .positive('ACCESS_TOKEN_EXPIRY_HOURS must be greater than 0')
-    .default(2),
-  REFRESH_TOKEN_EXPIRY_HOURS: z.coerce
-    .number()
-    .int('REFRESH_TOKEN_EXPIRY_HOURS must be an integer')
-    .positive('REFRESH_TOKEN_EXPIRY_HOURS must be greater than 0')
-    .default(2160), // 90 days
-
   // apps/auth (spec 300). apps/api verifies apps/auth's JWTs against its JWKS
   // and calls its internal endpoints, both over the private-network listener
   // at AUTH_INTERNAL_URL with the shared AUTH_INTERNAL_SECRET. Optional here so
-  // the legacy path and its tests run without them; required in production by
-  // the refinement below, and checked again by `config.authService`.
+  // suites that never reach apps/auth run without them; required in production
+  // by the refinement below (checked at boot, lib/boot-check.ts), and checked
+  // again by `config.authService`.
   AUTH_INTERNAL_URL: z.string().url('AUTH_INTERNAL_URL must be a valid URL').optional(),
   AUTH_JWT_ISSUER: z.string().url('AUTH_JWT_ISSUER must be a valid URL').optional(),
   AUTH_JWT_AUDIENCE: z.string().min(1, 'AUTH_JWT_AUDIENCE must not be empty').optional(),
@@ -124,9 +112,6 @@ const envSchema = z.object({
   USUL_API_TOKEN: z.string().min(1, 'USUL_API_TOKEN is required'),
   USUL_BASE_URL: z.string().default('https://api.usul.ai/v1/vector-search'),
 
-  // Admin
-  ADMIN_EMAILS: z.string().optional().default(''),
-
   // External evaluation harnesses (e.g. IslamicMMLU leaderboard) authenticate
   // against /v1/chat/completions with this bearer token. Optional in dev.
   LEADERBOARD_API_KEY: z.string().min(32).optional(),
@@ -202,14 +187,6 @@ export const config = {
   get database() {
     return {
       url: getEnv().DATABASE_URL,
-    };
-  },
-
-  get auth() {
-    return {
-      jwtSecret: getEnv().JWT_SECRET,
-      accessTokenExpiryHours: getEnv().ACCESS_TOKEN_EXPIRY_HOURS,
-      refreshTokenExpiryHours: getEnv().REFRESH_TOKEN_EXPIRY_HOURS,
     };
   },
 
@@ -295,16 +272,6 @@ export const config = {
   get leaderboard() {
     return {
       apiKey: getEnv().LEADERBOARD_API_KEY,
-    };
-  },
-
-  get admin() {
-    const raw = getEnv().ADMIN_EMAILS;
-    return {
-      emails: raw
-        .split(',')
-        .map((e) => e.trim().toLowerCase())
-        .filter((e) => e.length > 0),
     };
   },
 

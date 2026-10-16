@@ -25,6 +25,56 @@ cutover (2026-10-16). None is pinned by the contract; each has a test in
 5. **System-account `DELETE /v2/users/me`** answers 403 `{detail: 'System accounts cannot be
    deleted'}` before anything is touched ("Two databases" rule 5, step 1).
 
+## Source scans and CORS (phase 9)
+
+The scans live in `apps/api/tests/source-scan/` and read code through the TypeScript parser, so a
+name in a comment never counts. Each is proven on planted known-bad lines and near-misses in the
+same suite, and asserts a file floor so an empty walk cannot pass. Hit counts on the tree at phase 9:
+
+| Scan | Files scanned | Hits |
+|---|---|---|
+| 1. `password_hash`, `is_admin`, `session_version`, the `tokens` table, or `SELECT *` on `users`, in a string or template literal (raw SQL) in `apps/api` runtime code | 77 | 0 |
+| 2. `APP_DATABASE_URL` / `AUTH_DATABASE_URL` named in code, or a literal `postgres://` URL, in `apps/api` and `apps/auth` runtime code (`packages/auth/src` included; `apps/auth/scripts/cutover/` excluded by path, and a test proves only that directory) | 102 | 0 |
+| 3. A `better-auth`, `@better-auth/*` or `@ansari/auth` import in `apps/api` runtime code | 77 | 0 |
+| 3. The same packages in `apps/api/package.json`'s dependency maps | 1 | 0 |
+
+Scan 1 guards raw SQL only. The Drizzle query builder can no longer name the legacy columns or
+`tokens` because they left `db/schema`, which the typecheck enforces; the legacy helpers that used
+them were query-builder code, so scan 1 would not have flagged them before phase 9 either.
+
+**CORS on `apps/api` (scenario 28, amended).** The security architect chose a static
+`Allow-Origin: *` with `Allow-Credentials` removed over a per-environment allowlist (spec,
+"Departures and their costs"). `apps/api/tests/cors/cors.test.ts` boots a real Next.js server over
+a temporary copy of `apps/api` (the real `next.config.ts`), sweeps all 23 route files × every
+exported method, preflight and actual request (69 tests), and judges each response by the Fetch
+standard's CORS check: a bearer request from any origin passes, a credentialed one is refused, and
+no response carries `Allow-Credentials`.
+
+**Removal/plant demonstration (phase 9): 20 of 20 as expected**, one at a time, each file
+restored: CORS (credentials planted, Authorization / X-Ansari-Client / PATCH dropped, origin
+pinned to one site); boot env check (instrumentation call removed, never runs, runs during
+`next build`, validation removed; production no longer requiring `AUTH_*`); scan 1 (legacy column,
+`tokens` table, `SELECT *` on users planted in `lib/db/users.ts`); scan 2 (`AUTH_DATABASE_URL` in
+apps/auth src, a `postgres://` literal in packages/auth src, `APP_DATABASE_URL` in an apps/auth
+script, the exclusion widened to all scripts; control: the same line under `scripts/cutover/`
+passes); scan 3 (a `better-auth` re-export in apps/api lib, an `@ansari/auth` dependency).
+
+## Flaky Tests
+
+Found during phase 9's full `npm test` runs. Before the fixes: 2 of 4 runs red with the new CORS
+suite, and 1 of 3 red with it excluded (the same hook timeouts), so they predate it. After the
+fixes: 3 of 3 green.
+
+- `packages/auth/tests/migration/auth-journal-parity.test.ts` and
+  `packages/auth/tests/schema/auth-schema.test.ts`: their hooks carried a hard-coded 20 s timeout
+  that overrode the package's 30 s (#292 rationale) and timed out under the full turbo run.
+  The overrides were removed.
+- `apps/api/tests/auth/resolve-user.test.ts` (one `ECONNRESET` in six runs): fetch reused a pooled
+  keep-alive socket just as the in-process apps/auth test server closed it at Node's 5 s default.
+  The test service (`apps/auth/tests/helpers/service.ts`) now keeps idle sockets for 30 s.
+
+No test was skipped.
+
 ## Consultation coverage
 
 From phase 8 iteration 2 onward the Gemini consult lane failed (the agy lane was out of quota

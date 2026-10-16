@@ -100,7 +100,7 @@ describe('Drizzle schema vs the auth journal', () => {
 
   beforeAll(async () => {
     columns = await journalColumns();
-  }, 20_000);
+  });
 
   it('every column the schema declares is created by the journal, in the auth schema', () => {
     const tables = declaredTables(schema);
@@ -194,7 +194,6 @@ describe('better-auth on the deployed auth journal', () => {
       } finally {
         await client.close();
       }
-    },
-    20_000
+    }
   );
 });

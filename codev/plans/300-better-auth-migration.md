@@ -845,7 +845,9 @@ pin the separation with scans.
   `JWT_SECRET`, `ACCESS_TOKEN_EXPIRY_HOURS` and `REFRESH_TOKEN_EXPIRY_HOURS` are removed, and
   `ADMIN_EMAILS` leaves `apps/api`. The four `AUTH_*` names (five with P-3) are added, by the
   four-way derivation.
-- `apps/api/next.config.ts`: no `Allow-Credentials`. `Allow-Origin` is the allowlist.
+- `apps/api/next.config.ts`: no `Allow-Credentials`. `Allow-Origin` is the allowlist. (Amended at
+  phase 9 by the security architect: `Allow-Origin` stays `*` with no `Allow-Credentials`; see the
+  spec's "Departures and their costs".)
 - `apps/api/tests/source-scan/` (new): the scans, each reporting **hit counts**, each with a planted
   known-bad line and a near-miss.
   - Runtime code in `apps/api` names no `password_hash`, `is_admin`, `session_version` or `tokens`

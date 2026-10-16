@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { createErrorResponse } from '@/lib/auth/middleware';
+import { createErrorResponse } from '@/lib/error-response';
 import { requireUser } from '@/lib/auth/require-user';
 import { upsertFeedback } from '@/lib/db/feedback';
 import { findMessageInOwnedThread } from '@/lib/db/threads';

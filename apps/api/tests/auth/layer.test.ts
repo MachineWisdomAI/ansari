@@ -42,7 +42,7 @@ import { GET as adminStats } from '../../src/app/api/v2/admin/stats/route';
 import { POST as chatCompletions } from '../../src/app/api/v1/chat/completions/route';
 import { resetEnvCache } from '@/lib/config';
 import { banUserByEmail } from '../../../../packages/auth/src/users';
-import { appDrizzle, migrateAppDb, setApiEnv, startAuth, type AuthService } from './helpers';
+import { appDrizzle, legacyAccessToken, migrateAppDb, setApiEnv, startAuth, type AuthService } from './helpers';
 import { send, signIn, signUp, STRONG_PASSWORD } from '../../../auth/tests/helpers/service';
 
 type Handler = (request: NextRequest, context?: never) => Promise<Response>;
@@ -550,9 +550,7 @@ describe('every switched route requires a verified JWT', () => {
   });
 
   it('every guarded handler answers 401 with no bearer and with a legacy HS256 token', async () => {
-    const legacy = (await import('@/lib/auth/jwt')).generateToken(
-      '00000000-0000-4000-8000-000000000000', 'access', 2, 'phase-7-legacy-jwt-secret-at-least-32-chars', 0
-    );
+    const legacy = await legacyAccessToken('00000000-0000-4000-8000-000000000000');
     const context = { params: Promise.resolve({ id: '00000000-0000-4000-8000-000000000001' }) };
     let checked = 0;
     for (const file of guarded) {
@@ -583,43 +581,5 @@ describe('every switched route requires a verified JWT', () => {
   });
 });
 
-describe('the layer reaches apps/auth over HTTP only', () => {
-  const IMPORT = /(?:from\s+|import\s*\(\s*|require\s*\(\s*)['"](?:better-auth|@better-auth\/[^'"]+|@ansari\/auth)(?:\/[^'"]*)?['"]/;
-
-  function sourceFiles(dir: string): string[] {
-    return readdirSync(dir).flatMap((name) => {
-      const full = path.join(dir, name);
-      if (statSync(full).isDirectory()) return sourceFiles(full);
-      return /\.(ts|tsx|js|mjs)$/.test(name) ? [full] : [];
-    });
-  }
-
-  it('the pattern catches a planted import and ignores near-misses', () => {
-    for (const bad of [
-      "import { betterAuth } from 'better-auth';",
-      "import { users } from '@ansari/auth';",
-      "const x = await import('better-auth/plugins');",
-      "const { createAuth } = require('@ansari/auth');",
-      "import { expo } from '@better-auth/expo';",
-    ]) {
-      expect(IMPORT.test(bad), bad).toBe(true);
-    }
-    for (const fine of [
-      "import { CLIENT_HEADER } from '@ansari/types/attribution';",
-      "// apps/auth runs better-auth; this file never imports it",
-      "import { x } from './better-auth-notes';",
-      "import { y } from '@ansari/authz';",
-    ]) {
-      expect(IMPORT.test(fine), fine).toBe(false);
-    }
-  });
-
-  it('no runtime file in apps/api imports better-auth or @ansari/auth', () => {
-    const root = path.resolve(__dirname, '../..');
-    const files = [...sourceFiles(path.join(root, 'lib')), ...sourceFiles(path.join(root, 'src'))];
-    const hits = files.filter((f) => IMPORT.test(readFileSync(f, 'utf8')));
-    // A floor, so an empty glob cannot pass: lib/ and src/ hold ~70 files.
-    expect(files.length).toBeGreaterThan(50);
-    expect(hits).toEqual([]);
-  });
-});
+// The no-import / no-dependency scan for better-auth and @ansari/auth lives in
+// tests/source-scan/ (scan 3).

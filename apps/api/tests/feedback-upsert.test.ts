@@ -17,8 +17,7 @@ vi.mock('@/lib/db/index', () => ({
 }));
 
 const mockAuthenticateRequest = vi.fn();
-vi.mock('@/lib/auth/middleware', () => ({
-  authenticateRequest: (...args: unknown[]) => mockAuthenticateRequest(...args),
+vi.mock('@/lib/error-response', () => ({
   createErrorResponse: (detail: string, status: number) =>
     NextResponse.json({ detail }, { status }),
 }));

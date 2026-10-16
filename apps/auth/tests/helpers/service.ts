@@ -45,6 +45,11 @@ export type ServiceOptions = {
 function listen(app: { listen: (port: number, cb: () => void) => Server }): Promise<Server> {
   return new Promise((resolve) => {
     const server = app.listen(0, () => resolve(server));
+    // fetch reuses pooled sockets; at Node's 5 s default the server can close
+    // an idle one just as the client reuses it (ECONNRESET), and event-loop lag
+    // under the full turbo run widens that window. close() still drops idle
+    // sockets at once.
+    server.keepAliveTimeout = 30_000;
   });
 }
 

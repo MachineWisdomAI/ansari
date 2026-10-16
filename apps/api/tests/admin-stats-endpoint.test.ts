@@ -8,8 +8,7 @@ vi.mock('@/lib/auth/require-admin-role', () => ({
 }));
 
 // Mock middleware for createErrorResponse
-vi.mock('@/lib/auth/middleware', () => ({
-  authenticateRequest: vi.fn(),
+vi.mock('@/lib/error-response', () => ({
   createErrorResponse: (detail: string, status: number) =>
     NextResponse.json({ detail }, { status }),
 }));

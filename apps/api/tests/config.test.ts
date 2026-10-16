@@ -5,11 +5,9 @@ import { getEnv, resetEnvCache, config } from '@/lib/config';
 // lib/config.ts. Because getEnv() memoizes the first successful parse, each case
 // calls resetEnvCache() (a test-only export) so it re-parses process.env.
 
-// A minimal env that satisfies every required var. Expiry vars are intentionally
-// left unset so their schema defaults (2 / 2160) apply unless a test overrides.
+// A minimal env that satisfies every required var outside production.
 const REQUIRED_ENV: Record<string, string> = {
   DATABASE_URL: 'postgresql://user:pass@localhost:5432/db',
-  JWT_SECRET: 'x'.repeat(32),
   KALEMAT_API_KEY: 'placeholder-key',
   USUL_API_TOKEN: 'placeholder-token',
 };
@@ -19,8 +17,6 @@ let savedEnv: NodeJS.ProcessEnv;
 beforeEach(() => {
   savedEnv = { ...process.env };
   // Start from a clean, known-good baseline.
-  delete process.env.ACCESS_TOKEN_EXPIRY_HOURS;
-  delete process.env.REFRESH_TOKEN_EXPIRY_HOURS;
   delete process.env.INKLING_MODEL;
   delete process.env.INKLING_MAX_TOKENS;
   delete process.env.INKLING_TIMEOUT_MS;
@@ -34,48 +30,20 @@ afterEach(() => {
 });
 
 describe('config env validation', () => {
-  it('accepts a valid environment and exposes the JWT secret via config.auth', () => {
+  it('accepts a valid environment', () => {
     expect(() => getEnv()).not.toThrow();
-    expect(config.auth.jwtSecret).toBe('x'.repeat(32));
-    // Defaults apply when the expiry vars are unset.
-    expect(config.auth.accessTokenExpiryHours).toBe(2);
-    expect(config.auth.refreshTokenExpiryHours).toBe(2160);
   });
 
-  it('rejects a JWT_SECRET shorter than 32 characters', () => {
-    process.env.JWT_SECRET = 'x'.repeat(31);
+  it('carries no legacy auth setting (spec 300): JWT_* and ADMIN_EMAILS left apps/api', () => {
+    process.env.ACCESS_TOKEN_EXPIRY_HOURS = '2';
+    process.env.ADMIN_EMAILS = 'admin@example.com';
     resetEnvCache();
-    expect(() => getEnv()).toThrow(/at least 32 characters/);
-  });
-
-  it('rejects an empty JWT_SECRET', () => {
-    process.env.JWT_SECRET = '';
-    resetEnvCache();
-    expect(() => getEnv()).toThrow(/Environment validation failed/);
-  });
-
-  it('rejects a zero access-token expiry', () => {
-    process.env.ACCESS_TOKEN_EXPIRY_HOURS = '0';
-    resetEnvCache();
-    expect(() => getEnv()).toThrow(/greater than 0/);
-  });
-
-  it('rejects a negative refresh-token expiry', () => {
-    process.env.REFRESH_TOKEN_EXPIRY_HOURS = '-5';
-    resetEnvCache();
-    expect(() => getEnv()).toThrow(/greater than 0/);
-  });
-
-  it('rejects a non-integer access-token expiry', () => {
-    process.env.ACCESS_TOKEN_EXPIRY_HOURS = '2.5';
-    resetEnvCache();
-    expect(() => getEnv()).toThrow(/integer/);
-  });
-
-  it('accepts a positive integer expiry override', () => {
-    process.env.ACCESS_TOKEN_EXPIRY_HOURS = '4';
-    resetEnvCache();
-    expect(getEnv().ACCESS_TOKEN_EXPIRY_HOURS).toBe(4);
+    const env = getEnv() as Record<string, unknown>;
+    for (const name of ['JWT_SECRET', 'ACCESS_TOKEN_EXPIRY_HOURS', 'REFRESH_TOKEN_EXPIRY_HOURS', 'ADMIN_EMAILS']) {
+      expect(env, name).not.toHaveProperty(name);
+    }
+    expect(config).not.toHaveProperty('auth');
+    expect(config).not.toHaveProperty('admin');
   });
 
   it('rejects a missing required var (DATABASE_URL)', () => {
@@ -175,11 +143,11 @@ describe('resetEnvCache', () => {
     // First parse succeeds and is memoized.
     expect(() => getEnv()).not.toThrow();
     // Corrupt the env; without a reset the memoized value would still be returned.
-    process.env.JWT_SECRET = 'too-short';
+    process.env.INKLING_MAX_TOKENS = '1';
     expect(() => getEnv()).not.toThrow(); // still cached
     // After a reset, the corrupted env is re-parsed and rejected.
     resetEnvCache();
-    expect(() => getEnv()).toThrow(/at least 32 characters/);
+    expect(() => getEnv()).toThrow(/8192-32768 window/);
   });
 });
 
@@ -258,8 +226,8 @@ describe('primary backend switch (issue #95)', () => {
   });
 });
 
-// Spec 300 phase 7: apps/auth's coordinates. Optional so the legacy path and
-// its tests run without them; required in production; `config.authService`
+// Spec 300 phase 7: apps/auth's coordinates. Optional so suites that never
+// reach apps/auth run without them; required in production; `config.authService`
 // refuses to hand out a partial set.
 describe('apps/auth config', () => {
   const AUTH_ENV: Record<string, string> = {

@@ -23,12 +23,11 @@ vi.mock('@sentry/nextjs', () => ({ captureMessage: () => {}, setUser: () => {} }
 
 import { requireUser } from '@/lib/auth/require-user';
 import { requireAdminRole } from '@/lib/auth/require-admin-role';
-import { generateToken } from '@/lib/auth/jwt';
-import { createUser } from '@/lib/db/users';
 import { resetEnvCache } from '@/lib/config';
 import {
   appDrizzle,
-  LEGACY_JWT_SECRET,
+  insertLegacyUserRow,
+  legacyAccessToken,
   migrateAppDb,
   setApiEnv,
   startAuth,
@@ -103,7 +102,7 @@ describe('requireUser', () => {
   });
 
   it('a token that does not verify: 401 Invalid or expired token', async () => {
-    const legacy = generateToken(randomUUID(), 'access', 2, LEGACY_JWT_SECRET, 0);
+    const legacy = await legacyAccessToken();
     for (const token of ['garbage', legacy]) {
       expect(await errorOf(await requireUser(request(token)))).toEqual({
         status: 401,
@@ -125,7 +124,7 @@ describe('requireUser', () => {
 
   it('an email conflict: 401, no row, never a 500', async () => {
     const email = nextEmail('conflict');
-    await createUser({ email, passwordHash: 'x' });
+    await insertLegacyUserRow(app, email);
     const { id, jwt } = await signUpTokens(service, email);
     vi.spyOn(console, 'warn').mockImplementationOnce(() => {});
     expect(await errorOf(await requireUser(request(jwt)))).toEqual({

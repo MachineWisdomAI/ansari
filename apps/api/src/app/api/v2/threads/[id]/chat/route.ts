@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import * as Sentry from '@sentry/nextjs';
 import { z } from 'zod';
-import { createErrorResponse } from '@/lib/auth/middleware';
+import { createErrorResponse } from '@/lib/error-response';
 import { requireUser } from '@/lib/auth/require-user';
 import { findThreadById, createMessage, findMessagesByThread, persistOrphanToolCalls } from '@/lib/db/threads';
 import { getClientId } from '@/lib/attribution';

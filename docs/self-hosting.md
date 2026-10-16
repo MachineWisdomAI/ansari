@@ -32,16 +32,34 @@ be consulted. You get a functioning assistant with degraded search rather than a
 
 The source of truth is the strict Zod schema in `apps/api/lib/config.ts` plus a few
 direct `process.env` reads. `apps/api/.env.example` mirrors this contract. Validation
-runs at first config access; missing required values fail loudly at startup.
+runs at first config access, and a production server also runs it at boot
+(`apps/api/lib/boot-check.ts`), so missing required values fail loudly at startup.
+
+Accounts, passwords, sessions, roles, password-reset email and `ADMIN_EMAILS` belong
+to the auth service, `apps/auth` (spec 300). `apps/api` holds no credential and no
+signing secret: it verifies `apps/auth`'s JWTs against its JWKS and calls its
+internal endpoints.
 
 ### Required (validation throws when absent)
 
 | Variable | Notes |
 |----------|-------|
 | `DATABASE_URL` | Postgres connection string |
-| `JWT_SECRET` | Min 32 characters. Generate with `openssl rand -hex 32` |
 | `KALEMAT_API_KEY` | Non-empty required — see caveat above |
 | `USUL_API_TOKEN` | Non-empty required — see caveat above |
+
+### Auth service (`apps/auth`; required when `NODE_ENV=production`)
+
+Optional in development and test (suites that never reach `apps/auth` run without
+them); a production server refuses to boot when any is unset, naming the missing ones.
+
+| Variable | Notes |
+|----------|-------|
+| `AUTH_INTERNAL_URL` | `apps/auth`'s INTERNAL listener (private network, no public domain). The JWKS and the internal endpoints are fetched here |
+| `AUTH_JWT_ISSUER` | Must equal `apps/auth`'s `AUTH_JWT_ISSUER` |
+| `AUTH_JWT_AUDIENCE` | Must equal `apps/auth`'s `AUTH_JWT_AUDIENCE` |
+| `AUTH_INTERNAL_SECRET` | Min 32 characters; the same value as `apps/auth`'s. Sent on every internal call, the JWKS fetch included |
+| `AUTH_LAYER_ORIGIN` | `apps/api`'s own public origin, sent as `Origin` on the `/v2/users/*` layer's calls. `apps/auth` trusts it for CSRF only, never for CORS; the same value as `apps/auth`'s |
 
 ### Gemini facilitator (one of two paths, checked at first use)
 
@@ -87,10 +105,7 @@ empty-final retry ladder still applies as same-model retries.
 | `INKLING_MODEL` | `thinkingmachines/Inkling` | Which Inkling model the backup requests — e.g. a fine-tuned LoRA via a `tinker://...` sampler-weights id |
 | `INKLING_MAX_TOKENS` | `8192` | Inkling completion cap (budgets thinking+answer). Must be within 8192–32768: below 8K the hidden reasoning pass starves the visible answer. Out-of-window values fail validation (no clamping) |
 | `INKLING_TIMEOUT_MS` | `180000` | Per-call timeout for Inkling requests: the default when a caller passes no timeout, and a cap on the facilitator's budget-derived Inkling call timeouts (`min(remaining request budget, this value)`) — it can shorten Inkling calls, never lengthen them past the request budget. Must be within 30000–600000; out-of-window values fail validation (no clamping) |
-| `ACCESS_TOKEN_EXPIRY_HOURS` | `2` | JWT access-token lifetime |
-| `REFRESH_TOKEN_EXPIRY_HOURS` | `2160` | Refresh-token lifetime (90 days) |
 | `USUL_BASE_URL` | `https://api.usul.ai/v1/vector-search` | |
-| `ADMIN_EMAILS` | empty | Comma-separated addresses that are **reserved** (public registration of them is refused) and **asserted at production boot** to already exist as admins. It does **not** grant admin on its own — admin access is gated on the durable `users.is_admin` DB flag. See the admin-provisioning note below. |
 | `TINKER_API_KEY` | unset | Enables the Inkling off-Vertex fallback rung and terminal-error rescue (issues #74/#79). When unset (and `INKLING_API_KEY` too), both are skipped cleanly |
 | `LEADERBOARD_API_KEY` | unset | Bearer token for `/api/v1/chat/completions` (OpenAI-compat endpoint for evaluation harnesses). Min 32 chars when set; the endpoint returns 503 when unset |
 | `MAINTENANCE_MODE` | `false` | Served by `/api/v2/app-check` |
@@ -104,20 +119,17 @@ empty-final retry ladder still applies as same-model retries.
 
 | Variable | Where used | Notes |
 |----------|-----------|-------|
-| `RESEND_API_KEY` | `lib/email.ts` | Password-reset email via [Resend](https://resend.com). Password reset fails cleanly when unset |
-| `FRONTEND_URL` | `lib/email.ts` | Base URL for password-reset links (defaults to `https://askansari.ai` — set this to YOUR frontend) |
-| `MARKETMAKER_URL` | `lib/newsletter.ts` | Optional newsletter-subscribe endpoint. **When unset, newsletter subscriptions are skipped entirely** (logged once). Self-hosters should leave this unset unless they run their own newsletter service |
 | `SENTRY_DSN` | `sentry.*.config.ts` | Optional. Sentry is disabled when unset (and always disabled under test). No user content is ever sent to Sentry |
 | `RAILWAY_ENVIRONMENT` | `sentry.server.config.ts` | Auto-injected by Railway; used as the Sentry environment tag. Falls back to `NODE_ENV`; never set manually |
 | `SENTRY_AUTH_TOKEN` | build-time only | Optional — source-map uploads during `next build`. The build succeeds without it |
 
 ### Provisioning admins
 
-Admin access is gated on the durable `users.is_admin` DB flag, not on `ADMIN_EMAILS`. Because public registration of an `ADMIN_EMAILS` address is refused and a production server asserts at boot that every configured admin account exists, the **only** way to create an admin is the bootstrap script. Deploy in this order:
-
-1. **Apply the migration** (`pnpm db:migrate` from `apps/api/`, or your managed-DB apply step). Before applying, inspect for any pre-existing account holding a reserved admin/system address and remediate it.
-2. **Bootstrap each admin**: `pnpm exec tsx scripts/grant-admin.ts <email>` (from `apps/api/`). You are securely prompted for the password (input is hidden). This creates the account with that password (or promotes and password-resets an existing one, revoking its old sessions).
-3. **Deploy.** Production boot then asserts the configured admins exist; if the bootstrap step was skipped it fails fast (identifying the missing entry by its position in `ADMIN_EMAILS`, not by address). The same check also fails when the database is unreachable at boot — see [Troubleshooting: crash loop at boot](#troubleshooting-crash-loop-at-boot-admin-bootstrap-check) before assuming a provisioning error.
+Admins are an `apps/auth` concern: admin access is the auth user's `role`, set out of
+band with `apps/auth/scripts/grant-admin.ts`, and `ADMIN_EMAILS` (reserved at sign-up,
+asserted at `apps/auth`'s production boot) is configured on `apps/auth`. `apps/api`
+asks `apps/auth` for the role on every admin request. RELEASE.md carries the
+onboarding order.
 
 ## Running it
 
@@ -183,33 +195,28 @@ the production `DATABASE_URL` (never `db:push`).
 
 ### Troubleshooting: crash loop at boot (admin bootstrap check)
 
-A production server (`NODE_ENV=production`) runs the admin bootstrap check at boot
-(`assertConfiguredAdminsExist` in `apps/api/lib/auth/startup-checks.ts`): it queries
-the database to verify that every `ADMIN_EMAILS` entry already exists as an admin,
-and **throws if it cannot verify this** — including when the database is simply
-unreachable. Coupling boot to database reachability is deliberate fail-fast
-behavior: a server that cannot verify its admins refuses to start rather than
-serving with unknown admin state.
+The admin bootstrap check runs at `apps/auth`'s production boot
+(`assertConfiguredAdminsExist` in `apps/auth/src/startup-checks.ts`), not at
+`apps/api`'s: it queries the auth database to verify that every `ADMIN_EMAILS` entry
+already exists as an admin, and **throws if it cannot verify this** — including when
+the database is simply unreachable. Coupling boot to database reachability is
+deliberate fail-fast behavior: a server that cannot verify its admins refuses to start
+rather than serving with unknown admin state.
 
 **Symptom.** On platforms that restart on crash (e.g. Railway with
-`restartPolicyType = "ON_FAILURE"`), a database blip while the process boots
-presents as a **crash loop** that looks identical to a mis-provisioned deploy. The
-check runs only on a real production boot — never during `next build`, dev, or
-tests — so this only ever appears in production.
+`restartPolicyType = "ON_FAILURE"`), a database blip while `apps/auth` boots presents
+as a **crash loop** that looks identical to a mis-provisioned deploy. The check runs
+only on a production boot — never in dev or tests.
 
 **Triage: read the boot error text — it distinguishes the two cases.**
 
 | Boot error contains | Meaning | What to do |
 |---|---|---|
-| `Admin bootstrap check could not reach the database` | The database was unreachable when boot ran. This is an **outage, not a provisioning error** — do not re-run the bootstrap script. | Restore database reachability (`DATABASE_URL` correct, network path open, database up). The next restart succeeds once the database answers; on restart-on-crash platforms recovery is automatic. |
-| `has no account` or `exists but is not flagged is_admin` | A real provisioning gap: the configured admin was never bootstrapped, or was deleted/demoted since. Restarting will not fix it. | Run `pnpm exec tsx scripts/grant-admin.ts <email>` for the identified entry (see [Provisioning admins](#provisioning-admins)), then restart. |
+| `Admin bootstrap check could not reach the database` | The auth database was unreachable when boot ran. This is an **outage, not a provisioning error** — do not re-run the bootstrap script. | Restore database reachability (`apps/auth`'s `DATABASE_URL` correct, network path open, database up). The next restart succeeds once the database answers; on restart-on-crash platforms recovery is automatic. |
+| `has no account` or `role is not admin` | A real provisioning gap: the configured admin never signed up, was never granted, or was deleted/demoted since. Restarting will not fix it. | Run `pnpm exec tsx scripts/grant-admin.ts <email>` from `apps/auth/` for the identified entry (see [Provisioning admins](#provisioning-admins)), then restart. |
 
 The error identifies the failing entry by its **position** in `ADMIN_EMAILS`
 (e.g. `configured admin #2 of 3`), never by the address itself — boot logs carry
 no email content. Map the index back to your configured list.
 
-Timing note: during a fresh deploy, a database outage surfaces as a failed
-`/api/health` healthcheck and a rollback (the old version keeps serving). The
-crash-loop presentation above is what you see when an **already-deployed** instance
-restarts (crash, platform maintenance, scale event) while the database is
-unreachable.
+`apps/api`'s own boot check is the environment validation above; it queries nothing.

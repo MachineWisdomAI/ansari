@@ -23,29 +23,15 @@ vi.mock('@/lib/db/index', () => ({
   closeDb: async () => {},
 }));
 
-// issueTokenPair reads the JWT settings; the suite must pass with no env set.
-vi.mock('@/lib/config', () => ({
-  config: {
-    auth: {
-      jwtSecret: 'window-migration-secret-at-least-32-characters',
-      accessTokenExpiryHours: 2,
-      refreshTokenExpiryHours: 2160,
-    },
-  },
-}));
-
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import * as schema from '@/db/schema';
+import { randomUUID } from 'node:crypto';
 import {
-  createUser,
-  findUserByEmail,
   findUserById,
-  updateUser,
-  bumpSessionVersion,
-  issueTokenPair,
-  findToken,
-  deleteUser,
+  getOrCreateSystemUser,
+  insertAppUserRow,
+  isUniqueViolation,
 } from '@/lib/db/users';
 import { createThread, createMessage, getThreadWithMessages } from '@/lib/db/threads';
 
@@ -323,38 +309,51 @@ describe('the scaffold cleanup and tombstones leave legacy foreign keys alone', 
   });
 });
 
-describe('legacy apps/api code after the window migration', () => {
-  it('still registers, signs in, issues tokens, writes threads and deletes', async () => {
+describe('apps/api code after the window migration', () => {
+  it('writes an app row with no credential, provisions a system account, writes threads and deletes', async () => {
     await migrateThrough(client, WINDOW);
     h.db = drizzle(client, { schema });
 
-    const created = await createUser({ email: 'Legacy@Example.com', passwordHash: 'bcrypt-hash' });
-    expect(created.email).toBe('legacy@example.com');
-    expect((await findUserByEmail('LEGACY@example.com'))?.id).toBe(created.id);
+    const id = randomUUID();
+    await insertAppUserRow({
+      id,
+      email: ' New@Example.com ',
+      firstName: 'N',
+      lastName: null,
+      registeredVia: 'web',
+    });
+    const user = await findUserById(id);
+    expect(user?.email).toBe('new@example.com');
+    const { rows: hash } = await client.query(`SELECT password_hash FROM users WHERE id = $1`, [id]);
+    expect(hash).toEqual([{ password_hash: null }]);
 
-    await updateUser(created.id, { firstName: 'L' });
-    await bumpSessionVersion(created.id);
-    const user = await findUserById(created.id);
-    expect(user?.sessionVersion).toBe(1);
+    // A system account is provisioned with no credential either (0011 dropped the NOT NULL).
+    const system = await getOrCreateSystemUser('ai-skill');
+    expect(system.systemKey).toBe('ai-skill');
 
-    const { refreshToken } = await issueTokenPair(created.id, user!.sessionVersion);
-    expect((await findToken(refreshToken))?.user.id).toBe(created.id);
-
-    const thread = await createThread({ userId: created.id, name: 'legacy' });
+    const thread = await createThread({ userId: id, name: 'after' });
     await createMessage({ threadId: thread.id, role: 'user', content: [{ type: 'text', text: 'q' }] });
-    expect((await getThreadWithMessages(thread.id, created.id))?.messages).toHaveLength(1);
+    expect((await getThreadWithMessages(thread.id, id))?.messages).toHaveLength(1);
 
-    expect(await deleteUser(created.id)).toBe(true);
-    const { rows } = await client.query(`SELECT 1 FROM threads WHERE user_id = $1`, [created.id]);
+    await client.query(`DELETE FROM users WHERE id = $1`, [id]);
+    const { rows } = await client.query(`SELECT 1 FROM threads WHERE user_id = $1`, [id]);
     expect(rows).toEqual([]);
   });
 
-  it('finds a row the migration normalized', async () => {
+  it('a row the migration normalized holds its address against a new app row', async () => {
     await migrateThrough(client, TOMBSTONES);
     const id = await insertUser(client, '  Alice@Example.COM');
     await apply(client, WINDOW);
     h.db = drizzle(client, { schema });
 
-    expect((await findUserByEmail('ALICE@example.com'))?.id).toBe(id);
+    const err = await insertAppUserRow({
+      id: randomUUID(),
+      email: 'ALICE@example.com',
+      firstName: null,
+      lastName: null,
+      registeredVia: null,
+    }).catch((e: unknown) => e);
+    expect(isUniqueViolation(err)).toBe(true);
+    expect((await findUserById(id))?.email).toBe('alice@example.com');
   });
 });

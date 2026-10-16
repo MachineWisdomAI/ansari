@@ -459,6 +459,7 @@ wrong origin.
 | JWT via JWKS in `apps/api` | Issue decided item "apps/api authenticates with the bearer plugin"; reference plan "How apps/api authenticates" | Revocation lags by up to the JWT lifetime (Desired State item 11). Key management (`auth.jwks`, rotation). An extra token exchange on every refresh |
 | Layer calls `apps/auth` over HTTP | Reference plan's in-process `auth.api.*` calls | An authenticated internal hop that carries the client IP. A network dependency on `apps/auth` for every legacy sign-in |
 | `apps/frontend` on `apps/auth` at cutover | (none; matches the reference) | An app-architect-agreed client change ships inside the window (I-6) |
+| `apps/api` CORS is a static wildcard with no credentials (security architect, 2026-10-16, phase 9) | Plan phase 9 "`Allow-Origin` is the allowlist"; scenario 28's "no allow response" for `apps/api` | Any origin may read an `apps/api` response to a request it can already make with a token it holds. No credentialed CORS: `Allow-Credentials` is never sent, so a browser refuses every credentialed cross-origin request. The allowlist was dropped because `next.config.ts` headers are compiled at build (the image builds with the dummy `.env.ci`) and a runtime list would need the global middleware the spec forbids plus a variable whose misconfiguration takes the web app down in the window. `apps/auth` keeps its exact allowlist |
 | Separate auth database from the start (2026-10-16) | Issue decided item "FKs on `threads`, `preferences`, `feedback` repointed to `auth.users.id`"; the reference's single database | A second Railway Postgres with its own backups; a cross-database copy that is ordered and gated, not atomic; app rows created on first use; deletion through a tombstone; admin role over HTTP |
 
 
@@ -1067,7 +1068,9 @@ rollback deadline passing, and the contract PR's release.
 
 - [ ] `apps/api/next.config.ts` no longer sends `Allow-Origin: *` together with
   `Allow-Credentials: true`. Authentication is a bearer JWT, so credentials are not needed for
-  `/api/*`. Any allowlist matches the `apps/frontend` web origins.
+  `/api/*`: `Allow-Credentials` is never sent, `Allow-Origin` stays `*`, and `Allow-Headers` lists
+  `Authorization`, `Content-Type` and `X-Ansari-Client` (amended 2026-10-16, phase 9, by the security
+  architect; see "Departures and their costs").
 
 **Cutover and operations**
 
@@ -1418,10 +1421,12 @@ This was the first draft's proposal.
     `/api/v2/mcp-complete` keeps its IP limit, now keyed by `X-Real-IP`.
 27. Removing the bcrypt branch, or `revokeSessionsOnPasswordReset`, makes a named test fail. The
     builder demonstrates this once and records it in the review.
-28. A credentialed CORS request from a disallowed origin to `apps/auth` or `apps/api` gets no allow
-    response. With a valid admin session, every admin plugin endpoint (`/admin/set-role`,
-    `/ADMIN/set-role`, `/admin/set-role/`, `/%61dmin/set-role`, impersonation included) gets the
-    block response.
+28. A credentialed CORS request from a disallowed origin to `apps/auth` gets no allow response.
+    `apps/api` does no credentialed CORS: `Allow-Credentials` is never set and `Allow-Origin` is `*`,
+    so a credentialed cross-origin request is refused by the browser, while a bearer request from any
+    origin passes its preflight (amended 2026-10-16, phase 9). With a valid admin session, every
+    admin plugin endpoint (`/admin/set-role`, `/ADMIN/set-role`, `/admin/set-role/`,
+    `/%61dmin/set-role`, impersonation included) gets the block response.
 29. A raw session token from `/v2/users/login` mints a JWT at `apps/auth`. Turning on
     `requireSignature: true` makes that test fail.
 30. The JWT payload contains exactly the pinned claims, and no email, names, `system_key` or role.

@@ -158,7 +158,6 @@ async function migratedPglite(): Promise<PGlite> {
 
 /** apps/api's env, pointed at the in-process apps/auth (whose env startService set). */
 function setApiEnv(service: Service): void {
-  process.env.JWT_SECRET = 'contract-testing-secret-for-purposes-only-32chars';
   process.env.DATABASE_URL = 'postgresql://placeholder:placeholder@localhost:5432/placeholder';
   process.env.KALEMAT_API_KEY = 'placeholder';
   process.env.USUL_API_TOKEN = 'placeholder';

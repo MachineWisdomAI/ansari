@@ -86,9 +86,11 @@ describe('RELEASE.md consistency', () => {
       expect(doc, `expected RELEASE.md to reference ${rel}`).toContain(rel);
       expect(existsSync(resolve(repoRoot, rel)), `${rel} referenced but missing`).toBe(true);
     }
-    // Referenced relative to apps/api/ in the doc:
+    // Referenced relative to apps/auth/ in the doc (spec 300 moved it there):
+    expect(doc).toContain('from `apps/auth/`');
     expect(doc).toContain('scripts/grant-admin.ts');
-    expect(existsSync(resolve(apiDir, 'scripts/grant-admin.ts'))).toBe(true);
+    expect(existsSync(resolve(repoRoot, 'apps/auth/scripts/grant-admin.ts'))).toBe(true);
+    expect(existsSync(resolve(apiDir, 'scripts/grant-admin.ts'))).toBe(false);
   });
 
   it('pins exactly the two production health-check domains', () => {

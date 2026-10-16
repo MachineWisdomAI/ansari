@@ -29,10 +29,11 @@ vi.mock('@sentry/nextjs', () => ({
 }));
 
 import { resolveUser } from '@/lib/auth/resolve-user';
-import { createUser, getOrCreateSystemUser } from '@/lib/db/users';
+import { getOrCreateSystemUser } from '@/lib/db/users';
 import { resetEnvCache } from '@/lib/config';
 import {
   appDrizzle,
+  insertLegacyUserRow,
   deadUrl,
   migrateAppDb,
   startAuth,
@@ -170,7 +171,7 @@ describe('scenario 9c: first-use app row', () => {
 describe('scenario 9f: an email the app database already holds', () => {
   it('a legacy row under another id: refused, no row, ids-only log, alert', async () => {
     const email = nextEmail('legacy');
-    const legacy = await createUser({ email, passwordHash: 'x' });
+    const legacy = await insertLegacyUserRow(app, email);
     const id = await signUpDirect(email);
     const warnings = captureWarnings();
 
@@ -228,7 +229,7 @@ describe('scenario 9f: an email the app database already holds', () => {
 
   it('the email is compared normalized', async () => {
     const email = nextEmail('case');
-    const legacy = await createUser({ email, passwordHash: 'x' });
+    const legacy = await insertLegacyUserRow(app, email);
     const id = await signUpDirect(email);
     await service.client.query('update auth.users set email = $1 where id = $2', [
       `  ${email.toUpperCase()} `,

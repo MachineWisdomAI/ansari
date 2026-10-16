@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findShareById, createThreadSnapshot } from '@/lib/db/shares';
-import { createErrorResponse } from '@/lib/auth/middleware';
+import { createErrorResponse } from '@/lib/error-response';
 import { requireUser } from '@/lib/auth/require-user';
 import type { ContentBlock } from '@/db/schema/messages';
 

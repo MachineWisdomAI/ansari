@@ -7,9 +7,8 @@ import {
   JWKS_CACHE_MAX_AGE_MS,
   JWKS_STALE_GRACE_MS,
 } from '@/lib/auth/verify-jwt';
-import { generateToken } from '@/lib/auth/jwt';
 import {
-  LEGACY_JWT_SECRET,
+  legacyAccessToken,
   newKey,
   setApiEnv,
   signToken,
@@ -132,7 +131,7 @@ describe('scenario 23: the rejection matrix', () => {
   });
 
   it('a legacy HS256 token from today\'s jwt.ts', async () => {
-    const legacy = generateToken(randomUUID(), 'access', 2, LEGACY_JWT_SECRET, 0);
+    const legacy = await legacyAccessToken();
     expect(await verifyAccessToken(legacy)).toBeNull();
   });
 
