@@ -656,8 +656,9 @@ backfill inserts nothing, because of the unique `(user_id, provider_id)`.
 | `apps/api` | `DATABASE_URL` = **app database**, Railway default account (unchanged) | `AUTH_INTERNAL_URL`, `AUTH_JWT_ISSUER`, `AUTH_JWT_AUDIENCE`, `AUTH_INTERNAL_SECRET`. The cutover PR removes `JWT_SECRET`, `ACCESS_TOKEN_EXPIRY_HOURS`, `REFRESH_TOKEN_EXPIRY_HOURS` and `ADMIN_EMAILS` |
 
 For the copy, the operator's Railway shell holds both databases' URLs as `APP_DATABASE_URL` and
-`AUTH_DATABASE_URL`, for that session only: never set on a Railway service, never in `turbo.json`,
-never written to a file. `RELEASE.md`'s `psql` steps name them. The source scan fails on either
+`AUTH_DATABASE_URL`, for that session only: never set on a Railway service, **never added to
+`turbo.json` `globalEnv`** (they are operator-shell variables, not task inputs), never written to a
+file. `RELEASE.md`'s `psql` steps name them. The source scan fails on either
 name in runtime code.
 
 `DATABASE_URL` keeps one name, with a different database per Railway service, so `turbo.json`
@@ -1283,7 +1284,9 @@ This was the first draft's proposal.
    `created_at`, and a redeploy of the previous image, a migrated user signs in with the legacy
    password through the legacy code, and no post-cutover user remains.
 9l. The source scan fails on a planted `APP_DATABASE_URL` or `AUTH_DATABASE_URL` in runtime code,
-   on a planted read of `password_hash`, and on a planted `SELECT *` from `users`.
+   on a planted read of `password_hash`, and on a planted `SELECT *` from `users`. The near-miss
+   half: it **ignores a plain `DATABASE_URL`**, and a near-miss line for each pattern does not trip
+   it. The scan **reports hit counts**, not a verdict.
 10. Re-running the `account` backfill inserts zero rows. The auth-database copy transaction run
     against a non-empty `auth.users` aborts with no changes.
 11. A fresh empty app database migrated through the full `apps/api` journal, and a fresh auth
