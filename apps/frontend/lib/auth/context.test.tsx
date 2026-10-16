@@ -186,4 +186,28 @@ describe('AuthProvider defers the guest on a public page', () => {
     expect(authApi.isGuest).toBe(false);
     expect(registerRequestMock).not.toHaveBeenCalled();
   });
+
+  it('a session lost on the public page is not replaced by a guest until it is left', async () => {
+    loadSessionMock.mockResolvedValueOnce({
+      accessToken: 'real-access',
+      refreshToken: 'real-refresh',
+      firstName: 'Real',
+      lastName: 'User',
+      isGuest: false,
+    });
+    const queryClient = new QueryClient();
+    const { rerender } = render(tree(queryClient, true));
+    await waitFor(() => expect(authApi.status).toBe('signedIn'));
+
+    await act(async () => {
+      await authApi.logout();
+    });
+    expect(authApi.status).toBe('signedOut');
+    expect(registerRequestMock).not.toHaveBeenCalled();
+
+    rerender(tree(queryClient, false));
+    await waitFor(() => expect(authApi.isGuest).toBe(true));
+    expect(registerRequestMock).toHaveBeenCalledTimes(1);
+  });
 });
+

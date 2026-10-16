@@ -93,7 +93,7 @@ export function decodeSharedThread(
         })),
       }
     : rawDocuments; // undefined (request failed) or a bad shape the decoder logs
-  return decodeConversationDetail(detail, threadDocuments);
+  return decodeConversationDetail(detail, threadDocuments, { samples: false });
 }
 
 /**

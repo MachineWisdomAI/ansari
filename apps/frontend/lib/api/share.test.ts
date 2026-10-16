@@ -72,6 +72,7 @@ describe('loadSharedThread', () => {
       });
       await loadSharedThread(SHARE_ID, fetchImpl, BASE);
 
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
       for (const [, init] of fetchImpl.mock.calls) {
         const headers = new Headers(init.headers);
         expect(headers.has('authorization')).toBe(false);
@@ -119,6 +120,32 @@ describe('loadSharedThread', () => {
     expect(thread.messages[1].citations).toEqual([]);
     // Unbacked marker text is stripped, as on a thread without documents.
     expect(thread.messages[1].content).not.toContain('[1]');
+    warn.mockRestore();
+  });
+
+  it('shows exactly what was shared, never the khushu’ sample answer', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const khushu = {
+      ...shareBody,
+      messages: [
+        { role: 'user', content: 'How do I develop khushu in prayer?' },
+        { role: 'assistant', content: 'The answer the sharer actually got.' },
+      ],
+    };
+    // Both ways an answer can arrive without sources: no entry for it, and a
+    // failed documents request.
+    for (const documents of [
+      () => json(200, { id: SHARE_ID, messages: [] }),
+      () => json(503, {}),
+    ]) {
+      const fetchImpl = fetchDouble({
+        [`/api/v2/share/${SHARE_ID}`]: () => json(200, khushu),
+        [`/api/v2/share/${SHARE_ID}/documents`]: documents,
+      });
+      const thread = await loadSharedThread(SHARE_ID, fetchImpl, BASE);
+      expect(thread.messages[1].content).toBe('The answer the sharer actually got.');
+      expect(thread.messages[1].citations).toEqual([]);
+    }
     warn.mockRestore();
   });
 });

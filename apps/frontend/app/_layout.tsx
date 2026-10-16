@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
+import { isSharePath } from '@/lib/share-link';
 import { ZodError } from 'zod';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -315,7 +316,6 @@ export default function RootLayout() {
   // immediately ready and the first paint is not withheld while several
   // megabytes of type download. See `hooks/useAppFonts.web.ts`.
   const fontsReady = useAppFonts();
-  const path = usePathname();
 
   useEffect(() => {
     if (fontsReady) {
@@ -333,7 +333,7 @@ export default function RootLayout() {
               attach + 401 refresh) for both `custom-fetch` and the SSE
               path. Inside the query client because a principal change
               clears its cache. */}
-          <AuthProvider deferGuest={isSharePath(path)}>
+          <RouteAuthProvider>
             <GestureHandlerRootView>
               <KeyboardProvider>
                 <WebManners />
@@ -358,21 +358,26 @@ export default function RootLayout() {
                 <AuthSheet />
               </KeyboardProvider>
             </GestureHandlerRootView>
-          </AuthProvider>
+          </RouteAuthProvider>
         </QueryClientProvider>
       </ErrorBoundary>
     </SafeAreaProvider>
   );
 }
 
+
 /**
- * A shared thread (`/share/<id>`, the path apps/api hands out in
- * `share_url`) is the one page that needs no identity: it is read without
- * a bearer, renders while the session is still being restored, and must
- * not provision a guest for a visitor who only came to read it.
+ * `AuthProvider`, told whether the current route is a shared thread. The
+ * route is read here, not in `RootLayout`, so a navigation re-renders this
+ * one component rather than the whole provider tree it wraps.
  */
-function isSharePath(path: string): boolean {
-  return path.startsWith('/share/');
+function RouteAuthProvider({ children }: { children: React.ReactNode }) {
+  const path = usePathname();
+  return (
+    <AuthProvider deferGuest={isSharePath(path)}>
+      {children}
+    </AuthProvider>
+  );
 }
 
 /**

@@ -240,12 +240,14 @@ export function AuthProvider({
   // ref guards re-entry; a persistent failure waits for the next transition).
   const reguesting = useRef(false);
   useEffect(() => {
-    if (status !== 'signedOut' || reguesting.current) return;
+    // Not on a public page (`deferGuest`): viewing a share never mints an
+    // account. Leaving it re-runs this, and the guest comes then.
+    if (status !== 'signedOut' || deferGuest || reguesting.current) return;
     reguesting.current = true;
     void loginAsGuest().finally(() => {
       reguesting.current = false;
     });
-  }, [status, loginAsGuest]);
+  }, [status, deferGuest, loginAsGuest]);
 
   const logout = useCallback(async () => {
     try {

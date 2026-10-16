@@ -57,17 +57,18 @@ export function decodeConversation(raw: unknown): Conversation {
 export function decodeConversationDetail(
   raw: unknown,
   rawDocuments?: unknown,
+  options?: { samples?: boolean },
 ): ConversationDetail {
   const detail = threadDetailSchema.parse(raw);
-  if (rawDocuments === undefined) return mapConversationDetail(detail);
+  if (rawDocuments === undefined) return mapConversationDetail(detail, undefined, options);
   const docs = threadDocumentsSchema.safeParse(rawDocuments);
   if (!docs.success) {
     console.error('Thread documents response did not match its schema:', {
       issues: docs.error.issues.map((i) => ({ path: i.path.join('.'), code: i.code })),
     });
-    return mapConversationDetail(detail);
+    return mapConversationDetail(detail, undefined, options);
   }
-  return mapConversationDetail(detail, joinThreadDocuments(detail, docs.data));
+  return mapConversationDetail(detail, joinThreadDocuments(detail, docs.data), options);
 }
 
 /**
