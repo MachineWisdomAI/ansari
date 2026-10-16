@@ -173,6 +173,19 @@ describe('registered_via (X-Ansari-Client, through the shared parser)', () => {
     expect((await userRow('via-web@example.com'))?.registeredVia).toBe('askansari-web');
   });
 
+  // The ids apps/frontend sends (apps/frontend/lib/auth/client-id.ts, whose
+  // test pins the same three against the shared parser). A value the parser
+  // refused would be recorded as `invalid`, silently.
+  it.each(['askansari-web', 'askansari-ios', 'askansari-android'])(
+    'records the apps/frontend id %s as sent',
+    async (id) => {
+      const email = `via-${id}@example.com`;
+      const res = await signUp({ email, password: STRONG, name: 'X' }, { 'X-Ansari-Client': id });
+      expect(res.status).toBe(200);
+      expect((await userRow(email))?.registeredVia).toBe(id);
+    }
+  );
+
   it('records the sentinel for a malformed header', async () => {
     await signUp(
       { email: 'via-bad@example.com', password: STRONG, name: 'X' },

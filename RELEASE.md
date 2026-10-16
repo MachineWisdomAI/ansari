@@ -54,6 +54,13 @@ migration runbook were both proven in real releases on 2026-08-02.
 > **Deploy settings** — backend healthcheck `/api/health` (timeout 300s), frontend
 > healthcheck `/`; restart ON_FAILURE, max 3 retries.
 >
+> **frontend (web) build variables** — `Dockerfile.web` bakes `EXPO_PUBLIC_API_URL`
+> and `EXPO_PUBLIC_AUTH_URL` into the bundle at build time, so both are set on the
+> Railway service and a change needs a redeploy. They name the SAME environment:
+> production `https://api.askansari.ai` + `https://auth.askansari.ai`, staging
+> `https://api-staging.askansari.ai` + `https://auth-staging.askansari.ai` (the
+> defaults when unset). The web app signs in at `EXPO_PUBLIC_AUTH_URL` (spec 300).
+>
 > **`apps/*/railway.toml` are not read by Railway here.** This project configures
 > deployment through the dashboard with a Dockerfile path (confirmed by the operator,
 > 2026-08-21). Railway does support a config-as-code path setting; this project does

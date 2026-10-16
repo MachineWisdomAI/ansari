@@ -32,17 +32,17 @@ plan_phases:
     status: complete
   - id: phase_10
     title: apps/frontend signs in at apps/auth
-    status: in_progress
+    status: complete
   - id: phase_11
     title: 'apps/auth deployment: Dockerfile, Railway service, CI and env'
-    status: pending
+    status: in_progress
   - id: phase_12
     title: 'Cutover tooling: copy, audits, rollback SQL and runbooks'
     status: pending
   - id: phase_13
     title: 'Staging verification: edge check, unmodified clients, full rehearsal'
     status: pending
-current_plan_phase: phase_10
+current_plan_phase: phase_11
 gates:
   spec-approval:
     status: approved
@@ -155,8 +155,20 @@ history:
         verdict: COMMENT
         file: >-
           /Users/amrmohamed/repos/iaser/ansari/.builders/spir-300/codev/projects/300-better-auth-migration/300-phase_8-iter2-gemini.txt
+  - iteration: 1
+    plan_phase: phase_10
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/amrmohamed/repos/iaser/ansari/.builders/spir-300/codev/projects/300-better-auth-migration/300-phase_10-iter1-codex.txt
+      - model: gemini
+        verdict: COMMENT
+        file: >-
+          /Users/amrmohamed/repos/iaser/ansari/.builders/spir-300/codev/projects/300-better-auth-migration/300-phase_10-iter1-gemini.txt
 started_at: '2026-10-14T03:31:15.359Z'
-updated_at: '2026-10-16T10:21:14.982Z'
+updated_at: '2026-10-16T11:09:59.744Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-10-16T00:28:28.599Z'
@@ -188,6 +200,8 @@ context_refreshes:
   - boundary: plan-phase:phase_10
     at: '2026-10-16T10:20:14.170Z'
     acknowledged_at: '2026-10-16T10:21:14.981Z'
+  - boundary: plan-phase:phase_11
+    at: '2026-10-16T11:09:59.744Z'
 force_advanced:
   phase: phase_7
   iteration: 3
