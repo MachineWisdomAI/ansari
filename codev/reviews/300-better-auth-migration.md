@@ -25,6 +25,18 @@ cutover (2026-10-16). None is pinned by the contract; each has a test in
 5. **System-account `DELETE /v2/users/me`** answers 403 `{detail: 'System accounts cannot be
    deleted'}` before anything is touched ("Two databases" rule 5, step 1).
 
+## Consultation coverage
+
+From phase 8 iteration 2 onward the Gemini consult lane failed (the agy lane was out of quota
+until about 2026-10-22; consult records the failure as a COMMENT/LOW verdict with exit 0, and
+porch counts the round). Those rounds are **Codex-only**: no Gemini skip is counted as a review
+anywhere in this project. Per main's rule, a REQUEST_CHANGES fix is accepted as reviewed only
+once Codex has seen it. Phase 8: iteration 1 had both lanes (Gemini APPROVE, Codex
+REQUEST_CHANGES); iterations 2 and 3 were Codex-only; Codex approved the final state in
+iteration 3. Phase 7's last fix (583b045) had no consult round of its own because porch's
+3-iteration ceiling force-advanced; the security architect spot-checked it, and its code was in
+the tree Codex approved in phase 8 iteration 3.
+
 ## Lessons for the lessons-learned pass
 
 - **A rule that exists only in production needs a production-mode test** (phase 8, found by the
