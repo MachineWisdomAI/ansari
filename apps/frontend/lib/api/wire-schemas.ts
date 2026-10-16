@@ -106,6 +106,37 @@ export const threadDocumentsSchema = z.object({
 });
 export type WireThreadDocuments = z.infer<typeof threadDocumentsSchema>;
 
+/**
+ * `GET /share/{id}` — a shared thread's snapshot. Public. Its messages carry
+ * no ids; the snapshot is all there is.
+ */
+export const sharedThreadSchema = z.object({
+  id: z.string(),
+  thread_name: z.string().nullable().optional(),
+  messages: z.array(
+    z.object({
+      role: z.string(),
+      content: messageContentSchema,
+      created_at: z.string().nullable().optional(),
+    }),
+  ),
+  created_at: z.string().optional(),
+});
+
+/**
+ * `GET /share/{id}/documents` (spec 168) — the citable sources copied into the
+ * snapshot at share time, keyed by `message_index` alone (a position in share
+ * GET's `messages`).
+ */
+export const sharedDocumentsSchema = z.object({
+  messages: z.array(
+    z.object({
+      message_index: z.number().int().nonnegative(),
+      documents: z.array(documentBlockSchema),
+    }),
+  ),
+});
+
 // --- Auth (apps/auth, better-auth 1.7.7) -------------------------------------
 
 /**

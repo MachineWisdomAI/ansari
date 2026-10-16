@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
+import { isSharePath } from '@/lib/share-link';
 import { ZodError } from 'zod';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -212,6 +213,7 @@ function AppFrame({ children }: { children: React.ReactNode }) {
   const reading =
     leaving ||
     path.startsWith('/chat') ||
+    isSharePath(path) ||
     path.startsWith('/about') ||
     path.startsWith('/terms') ||
     path.startsWith('/privacy');
@@ -240,8 +242,11 @@ function AppFrame({ children }: { children: React.ReactNode }) {
       {/* One rail, two ways of standing. A desktop keeps it beside the
           page; a phone has no width to give it, so the same component
           arrives over the page and leaves again. */}
-      {desktop ? <Sidebar /> : <SidebarDrawer />}
-      {desktop && <AccountChrome />}
+      {/* Not over a shared thread: it is a public page, and the rail
+          and account cluster are the viewer's own threads and identity,
+          which a visitor may not have (see `isSharePath`). */}
+      {!isSharePath(path) && (desktop ? <Sidebar /> : <SidebarDrawer />)}
+      {!isSharePath(path) && desktop && <AccountChrome />}
     </PaperBackground>
   );
 }
@@ -251,13 +256,15 @@ function AppFrame({ children }: { children: React.ReactNode }) {
  * restored, so no screen (and none of its data queries) mounts before
  * the transport knows whether it has a token. Ansari works signed-out —
  * `apps/api` serves guest and anonymous threads — so there is no forced
- * redirect: signing in is an optional add-on reached from the rail.
+ * redirect: signing in is an optional add-on reached from the rail. A
+ * shared thread is let through: it needs no token at all.
  */
 function AuthGate({ children }: { children: React.ReactNode }) {
   const { status } = useAuth();
   const colors = useColors();
+  const path = usePathname();
 
-  if (status === 'loading') {
+  if (status === 'loading' && !isSharePath(path)) {
     return (
       <View style={[styles.authGate, { backgroundColor: colors.background }]}>
         <ActivityIndicator color={colors.primary} />
@@ -290,6 +297,7 @@ function RootLayoutNav() {
       >
         <Stack.Screen name="index" />
         <Stack.Screen name="chat/[id]" />
+        <Stack.Screen name="share/[id]" />
         <Stack.Screen name="about" />
         <Stack.Screen name="terms" />
         <Stack.Screen name="privacy" />
@@ -325,7 +333,7 @@ export default function RootLayout() {
               attach + 401 refresh) for both `custom-fetch` and the SSE
               path. Inside the query client because a principal change
               clears its cache. */}
-          <AuthProvider>
+          <RouteAuthProvider>
             <GestureHandlerRootView>
               <KeyboardProvider>
                 <WebManners />
@@ -350,10 +358,25 @@ export default function RootLayout() {
                 <AuthSheet />
               </KeyboardProvider>
             </GestureHandlerRootView>
-          </AuthProvider>
+          </RouteAuthProvider>
         </QueryClientProvider>
       </ErrorBoundary>
     </SafeAreaProvider>
+  );
+}
+
+
+/**
+ * `AuthProvider`, told whether the current route is a shared thread. The
+ * route is read here, not in `RootLayout`, so a navigation re-renders this
+ * one component rather than the whole provider tree it wraps.
+ */
+function RouteAuthProvider({ children }: { children: React.ReactNode }) {
+  const path = usePathname();
+  return (
+    <AuthProvider deferGuest={isSharePath(path)}>
+      {children}
+    </AuthProvider>
   );
 }
 

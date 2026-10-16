@@ -1,6 +1,8 @@
 import {
   healthSchema,
   messageResponseSchema,
+  sharedDocumentsSchema,
+  sharedThreadSchema,
   threadDetailSchema,
   threadDocumentsSchema,
   threadListSchema,
@@ -57,17 +59,18 @@ export function decodeConversation(raw: unknown): Conversation {
 export function decodeConversationDetail(
   raw: unknown,
   rawDocuments?: unknown,
+  options?: { samples?: boolean },
 ): ConversationDetail {
   const detail = threadDetailSchema.parse(raw);
-  if (rawDocuments === undefined) return mapConversationDetail(detail);
+  if (rawDocuments === undefined) return mapConversationDetail(detail, undefined, options);
   const docs = threadDocumentsSchema.safeParse(rawDocuments);
   if (!docs.success) {
     console.error('Thread documents response did not match its schema:', {
       issues: docs.error.issues.map((i) => ({ path: i.path.join('.'), code: i.code })),
     });
-    return mapConversationDetail(detail);
+    return mapConversationDetail(detail, undefined, options);
   }
-  return mapConversationDetail(detail, joinThreadDocuments(detail, docs.data));
+  return mapConversationDetail(detail, joinThreadDocuments(detail, docs.data), options);
 }
 
 /**
@@ -94,6 +97,44 @@ export async function loadConversationDetail(
     }),
   ]);
   return decodeConversationDetail(raw, rawDocuments);
+}
+
+/**
+ * A shared thread and, when available, its `/documents` (spec 168). A share's
+ * messages have no ids and its documents are keyed by `message_index` alone,
+ * so both get the same synthetic id (`<shareId>:<index>`) and the thread's own
+ * pipeline — citations, unbacked-marker stripping, the documents degrade path —
+ * runs unchanged. Never with the khushu' sample: a visitor sees exactly what
+ * was shared.
+ */
+export function decodeSharedThread(
+  raw: unknown,
+  rawDocuments?: unknown,
+): ConversationDetail {
+  const share = sharedThreadSchema.parse(raw);
+  const idAt = (index: number) => `${share.id}:${index}`;
+  const detail = {
+    thread_id: share.id,
+    thread_name: share.thread_name,
+    created_at: share.created_at,
+    messages: share.messages.map((m, index) => ({
+      id: idAt(index),
+      role: m.role,
+      content: m.content,
+      created_at: m.created_at ?? undefined,
+    })),
+  };
+  const docs = sharedDocumentsSchema.safeParse(rawDocuments);
+  const threadDocuments = docs.success
+    ? {
+        thread_id: share.id,
+        messages: docs.data.messages.map((entry) => ({
+          message_id: idAt(entry.message_index),
+          ...entry,
+        })),
+      }
+    : rawDocuments; // undefined (request failed) or a bad shape the decoder logs
+  return decodeConversationDetail(detail, threadDocuments, { samples: false });
 }
 
 export function decodeHealth(raw: unknown): HealthStatus {
