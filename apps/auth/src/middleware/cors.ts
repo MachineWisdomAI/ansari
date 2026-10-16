@@ -1,12 +1,16 @@
 // CORS for the public listener (plan phase 4; scenario 28). Exact origins only,
-// no credentials (bearer transport on every platform), and the two headers a
+// no credentials (bearer transport on every platform), and the headers a
 // browser client must read.
 import { CLIENT_HEADER } from '@ansari/auth';
 import cors from 'cors';
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 
-/** The headers a browser may read: the session token and the JWT. */
-export const EXPOSED_HEADERS = ['set-auth-token', 'set-auth-jwt'];
+/**
+ * The headers a browser may read: the session token, the JWT, and how long a
+ * 429 asks it to wait (`tooManyRequests` sets `X-Retry-After`; unexposed, a
+ * browser client could never honour it).
+ */
+export const EXPOSED_HEADERS = ['set-auth-token', 'set-auth-jwt', 'X-Retry-After'];
 /** `X-Ansari-Client` must pass the preflight, or browser sign-ups lose attribution. */
 export const ALLOWED_HEADERS = ['Content-Type', 'Authorization', CLIENT_HEADER];
 
