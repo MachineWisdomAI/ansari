@@ -25,7 +25,8 @@ const ACCESS_KEY = 'ansari.accessToken';
 const SESSION_KEY = 'ansari.sessionToken';
 // The legacy apps/api refresh token (before the apps/auth cutover). Never read:
 // it means nothing to apps/auth, so a device holding one starts over (signed
-// out → its stored guest). Deleted whenever the session is cleared.
+// out → its stored guest). Deleted whenever the session is cleared, and on the
+// first load that finds no apps/auth session (the upgrade path).
 const LEGACY_REFRESH_KEY = 'ansari.refreshToken';
 const NAME_KEY = 'ansari.userName';
 // Guest email+password persist ACROSS logout (unlike the session keys above) so a
@@ -98,7 +99,15 @@ export async function loadSession(): Promise<StoredSession | null> {
     getItem(SESSION_KEY),
     getItem(NAME_KEY),
   ]);
-  if (!accessToken || !sessionToken) return null;
+  if (!accessToken || !sessionToken) {
+    // No apps/auth session. Whatever partial state is here is dead, and on a
+    // device upgraded across the apps/auth cutover it includes the legacy
+    // apps/api refresh token, still a live credential until the window: delete
+    // it now, since this path goes straight to the guest and never reaches a
+    // sign-out. The guest credentials are kept.
+    await clearSession();
+    return null;
+  }
   let firstName = '';
   let lastName = '';
   let isGuest = false;

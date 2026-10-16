@@ -166,9 +166,12 @@ describe('the legacy refresh token after the cutover', () => {
     };
   }
 
-  it('a legacy pair alone loads as no session', async () => {
+  it('a legacy pair alone loads as no session, and the load deletes it (the upgrade path)', async () => {
     storeLegacyPair();
     expect(await loadSession()).toBeNull();
+    // The startup path goes straight to the guest and never signs out, so the
+    // load itself must remove the live legacy credential; the guest stays.
+    expect([...backing.keys()]).toEqual(['ansari.guestCredentials']);
   });
 
   it('clearSession removes the legacy refresh token and keeps the guest', async () => {

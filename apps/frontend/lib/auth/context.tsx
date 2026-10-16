@@ -99,6 +99,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!current) return null;
       try {
         const accessToken = await authApi.mintJwt(current.sessionToken);
+        // A sign-out or sign-in landed during the await: the result belongs
+        // to a principal that is gone, so writing it back would re-persist
+        // cleared tokens or revert the new principal.
+        if (sessionRef.current !== current) return null;
         const updated: StoredSession = { ...current, accessToken };
         sessionRef.current = updated;
         await saveSession(updated);
@@ -106,6 +110,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return accessToken;
       } catch (error) {
         if (!(error instanceof AuthError && error.status === 401)) return null;
+        // Same guard: only the session that failed may be signed out.
+        if (sessionRef.current !== current) return null;
         // Failed refresh is a principal transition (→ signed out): clear the
         // cache too, so a subsequent sign-in never inherits stale threads.
         queryClient.clear();
@@ -176,20 +182,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // none is stored, or when apps/auth refuses the stored credentials (401 from
   // sign-in). Every other failure is thrown with the stored credentials kept, so
   // a rate limit or an outage never mints a new guest and orphans the old one.
-  const loginAsGuest = useCallback(async () => {
-    const stored = await loadGuestCredentials();
-    if (stored) {
-      try {
-        await login(stored.email, stored.password, { guest: true });
-        return;
-      } catch (error) {
-        if (!storedGuestRejected(error)) throw error;
+  //
+  // Single-flight: the re-guest effect and the sheet's "Continue as guest" can
+  // both call this; concurrent callers share one attempt, so a device with no
+  // stored guest never signs up two. And the new guest's credentials are saved
+  // the moment apps/auth creates the account, BEFORE the `/token` exchange: if
+  // that exchange fails, the next attempt signs back into the same guest
+  // instead of signing up another (and spending the sign-up budget).
+  const guestInFlight = useRef<Promise<void> | null>(null);
+  const loginAsGuest = useCallback((): Promise<void> => {
+    if (guestInFlight.current) return guestInFlight.current;
+    guestInFlight.current = (async () => {
+      const stored = await loadGuestCredentials();
+      if (stored) {
+        try {
+          await login(stored.email, stored.password, { guest: true });
+          return;
+        } catch (error) {
+          if (!storedGuestRejected(error)) throw error;
+        }
       }
-    }
-    const creds = generateGuestCredentials();
-    await register(creds, { guest: true });
-    await saveGuestCredentials({ email: creds.email, password: creds.password });
-  }, [login, register]);
+      const creds = generateGuestCredentials();
+      const auth = await authApi.signUp(creds);
+      await saveGuestCredentials({ email: creds.email, password: creds.password });
+      await startSession(auth, true);
+    })().finally(() => {
+      guestInFlight.current = null;
+    });
+    return guestInFlight.current;
+  }, [login, startSession]);
 
   // Restore any persisted session on startup. With nothing stored, provision a
   // guest rather than sit tokenless: `apps/api` has NO anonymous path — every

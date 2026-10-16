@@ -289,6 +289,175 @@ describe('refresh on 401 through /token', () => {
   });
 });
 
+/** A promise the test settles by hand, to force an interleaving. */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+/**
+ * Guest provisioning is atomic and single-flight (app architect, #309 review).
+ * A new guest's credentials are stored the moment apps/auth creates it, before
+ * `/token`, so a failed exchange never orphans it; and concurrent callers
+ * share one attempt, so a device never signs up two guests at once.
+ */
+describe('guest provisioning: atomic and single-flight', () => {
+  it('sign-up ok, /token 503: the guest is stored, and the retry signs back into it', async () => {
+    const stored: { email: string; password: string }[] = [];
+    saveGuestMock.mockImplementation(async (credentials) => {
+      stored.push(credentials);
+    });
+    loadGuestMock.mockImplementation(async () => stored.at(-1) ?? null);
+    mintJwt.mockRejectedValueOnce(new AuthError('Sign-in is unavailable.', 503, 'token'));
+    await mount();
+
+    // Startup: sign-up succeeded and the guest was stored, /token failed →
+    // signed out; the re-guest retry then signs back into THAT guest.
+    await waitFor(() => expect(authApi.status).toBe('signedIn'));
+    expect(stored).toHaveLength(1);
+    expect(signUp).toHaveBeenCalledTimes(1);
+    expect(signIn).toHaveBeenCalledWith(stored[0]!.email, stored[0]!.password);
+    expect(authApi.isGuest).toBe(true);
+
+    // A later "Continue as guest" reuses it too.
+    await act(async () => {
+      await authApi.loginAsGuest();
+    });
+    expect(signUp).toHaveBeenCalledTimes(1);
+    expect(saveGuestMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('the guest is stored BEFORE the /token exchange starts', async () => {
+    const order: string[] = [];
+    saveGuestMock.mockImplementation(async () => {
+      order.push('save guest');
+    });
+    mintJwt.mockImplementation(async (token: string) => {
+      order.push('token');
+      return `jwt-for-${token}`;
+    });
+    await mount();
+    expect(order).toEqual(['save guest', 'token']);
+  });
+
+  it('concurrent calls on a device with no stored guest sign up ONE guest', async () => {
+    const pendingSignUp = deferred<{ sessionToken: string; firstName: string; lastName: string }>();
+    signUp.mockImplementationOnce(() => pendingSignUp.promise);
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <AuthProvider>
+          <Probe />
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+    // Startup's attempt is in flight (sign-up pending); the sheet's
+    // "Continue as guest" and a second caller arrive meanwhile.
+    await waitFor(() => expect(signUp).toHaveBeenCalledTimes(1));
+    let both!: Promise<unknown>;
+    act(() => {
+      both = Promise.all([authApi.loginAsGuest(), authApi.loginAsGuest()]);
+    });
+    await act(async () => {
+      pendingSignUp.resolve({ sessionToken: 'session-one', firstName: 'Welcome', lastName: 'Guest' });
+      await both;
+    });
+
+    expect(signUp).toHaveBeenCalledTimes(1);
+    expect(saveGuestMock).toHaveBeenCalledTimes(1);
+    expect(authApi.session?.sessionToken).toBe('session-one');
+  });
+});
+
+/**
+ * refresh() must not write a result back over a principal change that landed
+ * while `/token` was awaited (app architect, #309 review).
+ */
+describe('refresh during a principal change', () => {
+  async function mountSignedIn() {
+    loadSessionMock.mockResolvedValueOnce({
+      accessToken: 'old-jwt',
+      sessionToken: 'old-session',
+      firstName: 'Old',
+      lastName: 'User',
+      isGuest: false,
+    });
+    await mount();
+  }
+
+  it('sign-out during the await: the old tokens are not re-persisted', async () => {
+    await mountSignedIn();
+    const pending = deferred<string>();
+    mintJwt.mockImplementationOnce(() => pending.promise);
+
+    let refreshed!: Promise<string | null>;
+    act(() => {
+      refreshed = handleUnauthorized();
+    });
+    await act(async () => {
+      await authApi.logout();
+    });
+    await act(async () => {
+      pending.resolve('jwt-for-the-old-session');
+      expect(await refreshed).toBeNull();
+    });
+
+    await waitFor(() => expect(authApi.isGuest).toBe(true));
+    const persisted = saveSessionMock.mock.calls.map(([session]) => session.sessionToken);
+    expect(persisted).not.toContain('old-session');
+    expect(authApi.session?.accessToken).not.toBe('jwt-for-the-old-session');
+  });
+
+  it('sign-in during the await: the new principal is kept', async () => {
+    await mountSignedIn();
+    const pending = deferred<string>();
+    mintJwt.mockImplementationOnce(() => pending.promise);
+
+    let refreshed!: Promise<string | null>;
+    act(() => {
+      refreshed = handleUnauthorized();
+    });
+    await act(async () => {
+      await authApi.login('b@example.com', 'pw');
+    });
+    await act(async () => {
+      pending.resolve('jwt-for-the-old-session');
+      expect(await refreshed).toBeNull();
+    });
+
+    expect(authApi.session).toMatchObject({
+      sessionToken: 'session-b@example.com',
+      accessToken: 'jwt-for-session-b@example.com',
+      isGuest: false,
+    });
+  });
+
+  it('a 401 for the OLD session after a sign-in does not sign the new principal out', async () => {
+    await mountSignedIn();
+    const pending = deferred<string>();
+    mintJwt.mockImplementationOnce(() => pending.promise);
+
+    let refreshed!: Promise<string | null>;
+    act(() => {
+      refreshed = handleUnauthorized();
+    });
+    await act(async () => {
+      await authApi.login('b@example.com', 'pw');
+    });
+    await act(async () => {
+      pending.reject(new AuthError('Session ended.', 401, 'token'));
+      expect(await refreshed).toBeNull();
+    });
+
+    expect(clearSessionMock).not.toHaveBeenCalled();
+    expect(authApi.session?.sessionToken).toBe('session-b@example.com');
+  });
+});
+
 describe('sign-in, sign-up and sign-out', () => {
   it('sign-in stores the session token and its JWT', async () => {
     await mount();
