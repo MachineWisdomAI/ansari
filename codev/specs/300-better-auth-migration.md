@@ -212,6 +212,12 @@ After the cutover:
    as today, because `apps/api` writes its own database.
 10. **Rate limits are configured as decided:** sign-in 5/60s, sign-up 3/60s, database storage,
     `enabled: true`.
+    - **Password-reset requests have their own limit** (security review of c19f247), because
+      `apps/auth` now sends the emails and an unlimited path would be a mail-bombing and cost
+      channel against any known address. The request path is limited **per client IP**
+      (`X-Real-IP`, as for sign-in) **and per normalized email**, with the numbers set in the plan.
+      **Every request counts**, not only failures. An unknown email gets the identical response and
+      consumes the same budget, so the limit reveals nothing about which addresses exist.
     - They are enforced by `apps/auth`'s Better Auth router, and are keyed by the **real client
       IP**, which comes from `X-Real-IP` (see Client IP below).
     - Calls from the compatibility layer reach that same router, so one database-backed limiter
@@ -311,7 +317,8 @@ counts its sign-in limit.
   out of sign-in.
   - Bound: one 60-second window per burst of five failures. A sustained lockout needs a sustained
     five failures per minute against that email, and the list-walk alert surfaces it.
-  - Existing sessions are unaffected. Password reset stays available, under its own limit.
+  - Existing sessions are unaffected. Password reset stays available, under its own limit
+    (Desired State item 10).
 - The fallback is implemented in `apps/auth`. Every sign-in, direct or through the layer, passes
   through it. The IP finding is written into `arch.md`.
 - The security architect is told before the PR proceeds, and the fallback is the configuration the
@@ -673,8 +680,9 @@ name in runtime code.
 
 `DATABASE_URL` keeps one name, with a different database per Railway service, so `turbo.json`
 gains no database variable. The four `AUTH_*` names go into `globalEnv`, and the three `JWT_*`
-names leave it in the cutover PR. `AUTH_INTERNAL_SECRET` is a secret: it has a Zod minimum length, is never
-logged, and uses the placeholder-not-a-real-* convention in `.env.ci`. Local development uses two
+names leave it in the cutover PR. `AUTH_INTERNAL_SECRET` and `RESEND_API_KEY` are secrets: each has
+a Zod minimum length, is never logged, and uses the placeholder-not-a-real-* convention in
+`.env.ci`. Local development uses two
 databases on one local Postgres, both with owner URLs.
 
 **Reviewers.** The main architect reviews both journals, their numbering and markers, the new
@@ -928,6 +936,11 @@ rollback deadline passing, and the contract PR's release.
 - [ ] Password reset:
   - The emailed link has the legacy shape `${FRONTEND_URL}/reset-password?token=<token>`.
   - Unknown emails get the identical response.
+  - Reset requests are limited per client IP and per normalized email, counting every request;
+    an unknown email consumes the same budget. A test shows that the per-email cap holds across two
+    client IPs, and that the IP cap holds across many emails.
+  - `RESEND_API_KEY` and `AUTH_INTERNAL_SECRET` have Zod minimum lengths, and a test shows neither
+    appears in logs or error output.
   - A system account receives no email and cannot gain a credential.
   - `checkPasswordStrength` runs before reset and before register.
 - [ ] Reserved addresses (`@system.ansari.chat`) and the `system_key` guards return the same 409 as
