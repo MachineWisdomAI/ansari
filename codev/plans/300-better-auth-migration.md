@@ -130,7 +130,10 @@ dashboard. The operator runs them, and the results go into this file, amended be
 - **B-1, sign-up rate.** Peak and p99 sign-ups per minute and per hour over 90 days, from
   `public.users.created_at`, shown separately for guest-shaped emails. It sizes the fallback
   sign-up ceiling, and it tests the decided 3/60s per-IP limit against any IP that registers many
-  accounts.
+  accounts. **Guest counts are reported separately**, as the total migrated guest rows and as the
+  guest sign-up rate (app architect): web private windows and cleared storage mean a sign-up
+  each time. The email shape is the only guest signal until `X-Ansari-Client` attribution exists
+  on sign-ups.
 - **B-2, sign-in failure rate.** There is no history, because legacy logs no failed logins. This
   plan uses Railway HTTP logs of `POST /api/v2/users/login` with status 401, as counts per minute
   over 14 days. That is the only source of distinct-email failure rates.
@@ -877,14 +880,31 @@ The whole `apps/api` suite, and the scans.
 
 ### Phase 10: apps/frontend signs in at apps/auth
 
-**Dependencies**: Phases 4 and 7. **Blocked on the app architect's agreement** (spec I-6), which is
-sought at plan approval with this phase's design.
+**Dependencies**: Phases 4 and 7. **Agreed by the app architect** (I-6, issue #300 comment of
+2026-10-16T00:48Z), with the four changes below folded in.
+
+**Delivery: a stacked PR, not a commit straight onto the branch.** The app architect reviews this
+phase as its own PR and integrates it. That fits the owner's one-PR decision as follows:
+
+- The phase is built on `builder/spir-300-frontend`, branched from `builder/spir-300` at a commit
+  that **already carries phases 4 and 7**, so `apps/auth` and `apps/api` run locally from one tree.
+- Its PR has **base `builder/spir-300`**, never `develop`.
+- The app architect reviews it, runs the real path (below), and **approves on the PR**. **The
+  builder** then merges it into `builder/spir-300`, before the cutover PR merges.
+- The cutover PR to `develop` stays the **only** PR to `develop`. No second PR to `develop` is
+  opened.
 
 #### Objective
 
-`apps/frontend` signs in, signs up (guests included), resets passwords and signs out through
-`apps/auth`. It sends the JWT to `apps/api` and refreshes the JWT from the session, with no
-third-party cookies on the web.
+`apps/frontend` signs in, signs up (guests included) and signs out through `apps/auth`. It sends
+the JWT to `apps/api` and refreshes the JWT from the session. All three platforms use one bearer
+transport, with no cookies.
+
+**Out of scope: password reset in `apps/frontend`.** It has no reset screens today. Its routes are
+index, `chat/[id]`, login, register, about, terms and privacy, and nothing reads `?token=`. The
+new-client reset screens are **issue #304**, which depends on #300 and consumes the `?token=`
+link shape unchanged. The `?token=` link shape stays a constraint on the email `apps/auth` sends (phase 5),
+because legacy web, still in production, consumes it.
 
 #### Files to Create / Modify
 
@@ -892,40 +912,69 @@ third-party cookies on the web.
   in `packages/auth`). Neither is a dependency today. This is a lockfile hunk, and #265's stale
   `expo-router` peer is re-checked here.
 - `apps/frontend/lib/auth/api.ts`: replaces the `/v2/users/*` calls with `better-auth/react`
-  `createAuthClient`, with `bearer` handling: the token from `set-auth-token` is stored where
-  `store.ts` keeps it today (SecureStore on native, `localStorage` on web). On native it adds the
-  `@better-auth/expo` client.
+  `createAuthClient`. **One transport on web, iOS and Android:**
+  - The better-auth session token is sent as `Authorization: Bearer` to `apps/auth` through the
+    same `customFetch` that sends the JWT to `apps/api`.
+  - The token from `set-auth-token` is stored where `store.ts` keeps tokens today (SecureStore on
+    native, `localStorage` on web).
+  - `@better-auth/expo` is used **only** for SecureStore storage and scheme handling, never for
+    cookie forwarding. So native and web share one code path, and `credentials: 'omit'` holds
+    everywhere.
 - JWT acquisition: `GET /api/auth/token` with the session bearer. The existing single-flight
   refresh on 401 is kept, and it now calls `/token`.
 - Registration sends `register_to_mail_list` in the sign-up body, and `apps/auth`'s hook
   subscribes (phase 3), so the opt-in is kept. Every call to `apps/auth` sends `X-Ansari-Client`,
   which the phase 4 CORS config allows.
-- `apps/frontend/lib/auth/guest.ts`: guest sign-up goes to `/api/auth/sign-up/email` with the same
-  shape.
-- Reset screens call `request-password-reset` and `reset-password` at `apps/auth`, and keep the
-  `?token=` link shape.
-- Env: `EXPO_PUBLIC_AUTH_URL` (`auth.askansari.ai`, `auth-staging.askansari.ai`, localhost). It
-  goes through `turbo.json` by the four-way rule.
+- `apps/frontend/lib/auth/guest.ts` and `lib/auth/context.tsx`. Guest sign-up goes to
+  `/api/auth/sign-up/email` with the same shape. **The guest fall-through is narrowed.**
+  - Today `loginAsGuest` signs in with the stored guest credentials, and a bare `catch` turns any
+    failure into a fresh sign-up: a 429, a 5xx and a network error all orphan the device's guest
+    and its threads.
+  - After this phase, a new guest is signed up **only** when no guest is stored, or when the stored
+    sign-in fails **authentication**: the account no longer exists, or the password no longer
+    verifies (401 from `apps/auth`).
+  - Every other failure (429, 5xx, network) is surfaced as a transient error that **keeps** the
+    stored credentials.
+- Env: `EXPO_PUBLIC_AUTH_URL` (`auth.askansari.ai`, `auth-staging.askansari.ai`, localhost).
+  - It needs **no `turbo.json` edit**, because `EXPO_PUBLIC_*` is already declared.
+  - Its default matches `EXPO_PUBLIC_API_URL`'s staging default in `lib/api/config.ts`, so an
+    env-less dev build points both at the same environment.
+  - It is set in the Railway dashboard for the web service, because `Dockerfile.web` bakes it at
+    build time. This is recorded in the runbook and in `apps/frontend/railway.toml`.
 - The existing tests (`context.test.tsx`, `store.test.ts`, `guest.test.ts`) are updated, plus new
-  ones for the refresh and expiry cycle.
+  ones for the refresh and expiry cycle and for the narrowed fall-through.
 
 #### Deliverables
 
-- [ ] Web: sign-in, a bearer call, expiry, `/token`, retry. There are no cookies in the flow; a
-  test asserts that `credentials` is `omit`.
-- [ ] Native: the Expo client stores the session in SecureStore.
-- [ ] Sign-out calls `/sign-out` and clears storage.
-- [ ] A native release decision recorded with the app architect (I-6): whether any native build
-  pointing at `apps/auth` ships before the rollback deadline. The default proposed is **no**.
+- [ ] Web, iOS and Android share one transport: sign-in, a bearer call, expiry, `/token`, retry.
+  There are no cookies; a test asserts `credentials: 'omit'` on every request path.
+- [ ] Native: the session token is stored in SecureStore.
+- [ ] Sign-out calls `/sign-out`, clears storage, and returns automatically to a guest.
+- [ ] The guest fall-through, tested case by case: 401 means a new guest. 429, 503 and a network
+  error mean the **same** stored guest is kept, an error is surfaced, and no sign-up request is
+  made.
+- [ ] Native release (I-6, agreed): **no** native build pointing at `apps/auth` ships before the
+  rollback deadline. No production native build exists today, and the EAS preview builds point at
+  staging. The preview build is rebuilt from a tree that includes phase 10 only after staging
+  flips to `apps/auth`.
 
 #### Acceptance Criteria
 
-Frontend tests are green, plus a manual run on iOS Simulator and web against a local `apps/auth`
-and `apps/api` (lessons: verify the real user path).
+- [ ] Frontend tests are green.
+- [ ] **The app architect runs the real path** on web and the iOS Simulator, against local
+  `apps/auth` and `apps/api`, and approves on the stacked PR. The builder then merges it into
+  `builder/spir-300`. The path covers:
+  - guest provisioning on a clean install
+  - stored-guest sign-in on relaunch
+  - sign-in and sign-up with the mail-list flag
+  - a 401 followed by the single-flight `/token` refresh
+  - sign-out followed by the automatic return to the guest
+- [ ] The builder runs the same path first and records it in the thread.
 
 #### Test Plan
 
-Unit tests with a fetch double for the client. Manual end-to-end against local services.
+Unit tests with a fetch double for the client. Manual end-to-end against local services, by the
+builder and then by the app architect.
 
 ### Phase 11: apps/auth deployment: Dockerfile, Railway service, CI and env
 
@@ -949,7 +998,7 @@ it.
   architect prefers, the copy-script tests (phase 12) run there too.
 - `apps/auth/.env.example`, `apps/auth/.env.ci`: every new variable, with
   `placeholder-not-a-real-*` values for secrets.
-- `turbo.json` `globalEnv`: the additions from phases 3, 7 and 10, by the four-way derivation,
+- `turbo.json` `globalEnv`: the additions from phases 3, 4 and 7 (`EXPO_PUBLIC_AUTH_URL` needs none), by the four-way derivation,
   recorded in the commit message.
 - `CONTRIBUTING.md`: dev and CI use **two local databases** (for example `ansari` and
   `ansari_auth`) with owner URLs, and developers who ran the old `packages/auth` `0000` must drop
@@ -1129,6 +1178,9 @@ Produce the evidence the spec requires before the merge, and commit it.
   smoke tests. Then the **rollback**: post-cutover users are removed, the previous image is
   redeployed, a migrated user signs in with the legacy password through the legacy code, and no
   post-cutover user remains.
+- [ ] A **stored-guest sign-in** against the migrated database: a guest created on the legacy
+  stack before the copy signs in from the phase 10 client after it, and gets the same id and
+  threads, with no new sign-up (G-5).
 - [ ] The rehearsal is re-run after the last `develop` merge before the window.
 
 #### Acceptance Criteria
@@ -1174,9 +1226,9 @@ The spec's risk table stands. These are the risks this plan adds or sharpens.
 | The private-network peer residual (P-1) | Low | Medium | Recorded in `arch.md`; the production 400 rule removes the shared bucket |
 | Rate-limit numbers are wrong for real traffic | Medium | Medium | B-1 to B-4 before merge; one constants module; the fallback ceiling floor |
 | A long-lived branch drifts; migration numbering collides | Medium | Medium | `develop` merges at each phase boundary; the numbering re-check is recorded in the thread every time |
-| The app architect does not agree to the phase 10 design in time | Medium | High | Sought at plan approval; phase 10 depends only on 4 and 7, so it can move without blocking 11 and 12 |
+| The phase 10 stacked PR is not integrated before the window | Medium | High | The app architect agreed the design; it depends only on phases 4 and 7, so it is built early; the cutover PR does not merge until it is in `builder/spir-300` |
 | Logout needs the fourth internal route (G-3) | Certain | Low | Subject-bound like delete; built in phase 5; the gate decides, and a rejection goes back to the owner |
-| Guest provisioning hits the decided sign-up limit (G-5) | Medium | Medium | B-1 measures it; owner decision with data before merge |
+| A sign-in failure mints a new guest, orphaning the device's threads and turning throttling into sign-ups (G-5) | High today | Medium | Phase 10 narrows the fall-through to authentication failure only; B-1 reports guest counts; the rehearsal includes a stored-guest sign-in |
 
 ## Documentation Updates
 
@@ -1204,11 +1256,19 @@ The spec's risk table stands. These are the risks this plan adds or sharpens.
   `POST /internal/users/:id/revoke-sessions` (built in phase 5), which is
   subject-JWT bound, for legacy logout?
 - **G-4.** The P-2 numbers, pending B-1 to B-4.
-- **G-5 (an observation on a decided item; Gemini).** Sign-up 3/60s per IP is decided. But
-  `apps/frontend` registers a **guest** on every cold launch with no stored session
-  (`lib/auth/context.tsx`). So one person who launches, then registers with one retry, uses the
-  whole budget, and three devices behind one NAT launching in the same minute hit it. The plan
-  keeps the decided number. B-1 measures the real guest rate, and the owner decides with that
-  data whether guest sign-ups need their own rule.
+- **G-5 (an observation on a decided item; restated after the app architect's correction).**
+  Sign-up 3/60s per IP is decided.
+  - `apps/frontend` does **not** sign up on every cold launch. `loginAsGuest`
+    (`lib/auth/context.tsx`) signs **in** with the stored guest, and signs **up** only when none is
+    stored or the stored sign-in throws. The steady state is one sign-up per install.
+  - The real exposure is the bare `catch`. It turns a 429 from the 5/60s sign-in limit, a 5xx or a
+    network error into a fresh sign-up, which converts sign-in throttling into sign-up pressure
+    and orphans the device's guest.
+  - Phase 10 narrows the fall-through to the no-session and authentication-failure cases.
+  - The cutover burst: every installed client tries its stored guest on first launch after the
+    window. That is sign-in traffic only, as long as migrated guest hashes verify. Phase 13's
+    rehearsal includes a stored-guest sign-in against the migrated database.
+  - **Position:** keep the decided 3/60s, narrow the catch, and let B-1 measure.
 - **Still open from the spec:** C-3 (the staging database) and C-4 (the auth Postgres) block
-  phase 13 only. I-4 (the operator and the window). I-6 (the app architect, for phase 10).
+  phase 13 only. I-4 (the operator and the window). I-6 is **resolved**: the app architect agreed
+  to phase 10 with four changes, now folded in.
