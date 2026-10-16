@@ -34,9 +34,11 @@ No client parses these details. `legacy/frontend-app` branches on `response.ok` 
 the exact key set `{detail}`, and the closed set of strings are still frozen. The fixture comment
 now says `detailOneOf` is used only where the cause cannot be recovered.
 
-Mutation check after the change: the suite still passes against today's code (58/58), and every
-exact detail above is caught when mutated (run 2 already caught these strings, and they are now
-exact).
+Mutation check after the change: the suite still passes against today's code (58/58). Run 2 of
+the mutation script caught `Invalid or expired token` and `Token not found or expired`. That
+script did not mutate `validateRefreshToken`'s `return { error }` strings, so those two were
+mutated separately afterwards: `Invalid or expired refresh token` CAUGHT, and
+`Refresh token not found or expired` CAUGHT.
 
 ## Gemini (APPROVE): note for phases 7–8
 
