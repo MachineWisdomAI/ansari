@@ -16,6 +16,8 @@ This spec defines WHAT and WHY. The plan defines HOW and WHEN.
 > **Owner decisions, 2026-10-16.** Better Auth has **its own database from the start**. Only
 > `apps/auth` can reach it. `apps/api` keeps the existing database, where `public.users` stays for
 > referential integrity with its auth-only columns removed. See "Two databases from the start".
+> Also: **one PR** (C-2), merged at the window; the JWT lifetime is **Better Auth's default, 15
+> minutes**; `apps/api` uses **plain JWKS validation with no per-request session check** (I-7).
 >
 > **Lineage.** This spec is written for issue #300. Its evidence base is the issue #60 reference
 > spec and plan (`codev/specs/60-better-auth-migration-reference.md`,
@@ -209,14 +211,21 @@ After the cutover:
       user's sessions, as today), a ban, and account deletion each kill the **session token** at
       once, so no new JWT can be minted from it.
     - A JWT already issued stays valid at `apps/api` **until it expires**. The access-token lifetime
-      therefore *is* the revocation window: the plugin default of **15 minutes**, which the plan may
-      only lower.
+      therefore *is* the revocation window: Better Auth's default of **15 minutes** (owner,
+      2026-10-16; `sign.mjs:81`). There is **no per-request session check** (owner, on the security
+      architect's recommendation), because with two databases it would be an HTTP call on every
+      request and a hard dependency of all of `apps/api` on `apps/auth`.
     - Two kinds of request close that window: admin authorization, which asks `apps/auth` (item 8),
       and any request whose `sub` has no `public.users` row or is tombstoned (deletion).
-12. **Sessions** last 30 days and are refreshed daily (`expiresIn` 30d, `updateAge` 1d).
-13. **Production releases are never blocked.** Until the window, every merged change is safe to
-    promote while the legacy JWT code still serves. In particular, `apps/auth` is deployed with **no
-    public sign-up or sign-in reachable** before the window.
+12. **Sessions** last 30 days and are refreshed daily (`expiresIn` 30d, `updateAge` 1d), as the
+    issue decided. Better Auth 1.7.7's own defaults are 7 days (`internal-adapter.mjs:23`) and 1 day
+    (`create-context.mjs:147`). The session is what keeps a user signed in: the client exchanges it
+    for a fresh JWT whenever the JWT expires, and each exchange after `updateAge` slides the
+    session's expiry forward. A user is asked to sign in again only after 30 days without using the
+    app, or after a logout, password reset, ban or deletion.
+13. **Production releases are never blocked.** Nothing from this project merges before the window
+    (one PR), so every other change keeps promoting normally. `apps/auth` is **not deployed to
+    production before the window**.
 
 ### Client IP for rate limiting (resolves an issue "must be resolved" item)
 
@@ -252,8 +261,8 @@ Evidence:
 The documentation establishes only that the header exists. The overwrite guarantee is a staff
 statement, staff answers on the forum conflict, and Help Station threads report `X-Real-IP`
 sometimes carrying **Railway infrastructure IPs** instead of the client's. So the header **must be
-verified empirically on the deployed service, as part of PR A's work** — not left until the
-window. The check passes only if it proves both properties:
+verified empirically on a deployed service before the PR merges** (staging, deployed from the
+branch), not left until the window. The check passes only if it proves both properties:
 
 1. **Overwrite.** Forged `X-Real-IP` and `X-Forwarded-For` values sent through each public domain
    (both production domains and the `*.up.railway.app` domain), over IPv4 and over IPv6 where
@@ -264,7 +273,7 @@ window. The check passes only if it proves both properties:
    for both clients, or that falls in a non-public range, fails the check.
 
 The method, raw observations and verdict are recorded in the plan and the review. Until the check
-passes, PR B does not merge.
+passes, the PR does not merge.
 
 **Fallback if the check fails** (either property). Per-IP limiting is then not trustworthy: it is
 either spoofable or collapses into a shared bucket. The fallback changes how the layer keys and
@@ -292,8 +301,8 @@ counts its sign-in limit.
   - Existing sessions are unaffected. Password reset stays available, under its own limit.
 - The fallback is implemented in `apps/auth`. Every sign-in, direct or through the layer, passes
   through it. The IP finding is written into `arch.md`.
-- The security architect is told before PR B proceeds, and the fallback is the configuration PR B
-  ships with.
+- The security architect is told before the PR proceeds, and the fallback is the configuration the
+  PR ships with.
 
 **The layer-to-`apps/auth` hop carries the client IP, so that hop must be authenticated.** When a
 `/v2/users/*` route calls `apps/auth`, the TCP peer is `apps/api`, not the user. If the route went
@@ -329,12 +338,13 @@ project adds:
 - Production config through `@ansari/auth` `getEnv()`, with any new variables added to `turbo.json`
   `globalEnv` by the four-way rule.
 
-**Dark until the window.** The auth database exists in production ahead of the window, so a
-reachable `apps/auth` would accept sign-ups into `auth.users`. That would break the cutover's emptiness guard
-and create identities that the legacy system cannot see. Before the window, `apps/auth` therefore
-runs in production with **no public domain attached, or with sign-in and sign-up refusing**. The
-plan chooses which, and a check proves it. The domain is attached in the window, after the cutover
-migration.
+**Not in production before the window.** With one PR, `apps/auth`'s code, Dockerfile and service
+reach production only when the PR merges, at the window. Its auth database is created empty ahead
+of time, and nothing reads it. In the window, `apps/auth` is deployed after the copy and its
+audits, and its **public domain is attached last**, after the smoke tests on the private network. A
+reachable `apps/auth` before the copy would accept sign-ups into `auth.users`, which the copy's
+emptiness guard would then refuse. The edge check and the rehearsal use staging deployments from
+the branch.
 
 **Token model: JWT via JWKS** (Better Auth's `jwt` plugin on `apps/auth`), alongside `bearer()` so
 native and web clients can carry the session token without third-party cookies. Verified on the
@@ -488,9 +498,9 @@ issue's dedicated-schema decision): `auth.users`, `auth.session`, `auth.account`
    - `apps/api` reaches profile, role and delete through `AUTH_INTERNAL_URL` over **Railway's private
      network**, never the public domain. The layer's sign-in hop, which forwards the client IP,
      stays as specified under Client IP.
-9. **The per-request session check**, if the owner chooses it, becomes an HTTP call to `apps/auth`
-   on every request and a hard dependency of all of `apps/api` on `apps/auth`. The cost is recorded
-   under I-7.
+9. **No per-request session check** (owner, I-7). `apps/api` validates the JWT against the JWKS
+   only. A check would be an HTTP call to `apps/auth` on every request and a hard dependency of all
+   of `apps/api` on `apps/auth`.
 
 **Database principals** (security review of 388371b, carried over per database). Each database has
 a **migrator** (its owner) and **one runtime role**:
@@ -498,10 +508,11 @@ a **migrator** (its owner) and **one runtime role**:
 - **App database.** The existing owner becomes the migrator and is **not** re-owned
   (`ALTER … OWNER` on production tables is avoidable risk; the owner confirms ownership with
   `\dt public.*` and `\du`). The `apps/api` runtime role gets DML on `public` and no DDL. Today's
-  `apps/api` `DATABASE_URL` **is** the migrator credential, so PR A has a **re-point release step**:
-  `apps/api` moves to the runtime role, on staging first with a soak, then production. The step
-  ends with the migrator URL **in no service environment** and the migrator password **rotated**.
-  Rollback before rotation is restoring the old URL in Railway, with no code change.
+  `apps/api` `DATABASE_URL` **is** the migrator credential, so there is a **re-point step**:
+  `apps/api` moves to the runtime role on staging first, from the branch, with a soak; on
+  production it runs in the window, before `apps/api` is deployed. The step ends with the migrator
+  URL **in no service environment** and the migrator password **rotated**. Rollback before rotation
+  is restoring the old URL in Railway, with no code change.
 - **Auth database.** It is new, and its default user is the migrator. The `apps/auth` runtime role
   gets DML on `auth.*` and no DDL. `apps/auth` never receives the migrator URL.
 - **Provisioning, not migrations.** Roles and grants live in reviewed provisioning SQL outside both
@@ -545,29 +556,30 @@ schema) is dropped. Condition 6 (retire the `packages/auth` journal) is reversed
 - **A drift guard covers it.** An auth-journal parity test, like
   `migration-schema-parity.test.ts`, with its own deployed-through marker, so the auth journal is
   never outside every check (the #165 outage class). The main architect owns the marker.
-- It is applied ahead of the window to the empty auth database, like any additive migration.
+- It is applied in the window, first, to the empty auth database. With one PR, nothing of this
+  project is applied to production before the window.
 
 **App database journal: `apps/api/drizzle/`.**
 
-- **Scaffold cleanup (PR A).** If the #59 scaffold tables (`public.user`, `session`, `account`,
+- **Scaffold cleanup.** If the #59 scaffold tables (`public.user`, `session`, `account`,
   `verification`) were ever applied to the app database (a `psql \dt` question for the owner), a
   migration drops them with `IF EXISTS`, behind an **in-migration guard that aborts if any of them
   holds a row**.
-- **Tombstones (PR A, additive).** `public.deleted_users`.
-- **Cutover (PR B, applied in the offline window).** In one transaction, with guards:
+- **Tombstones (additive).** `public.deleted_users`.
+- **Cutover (applied in the offline window).** In one transaction, with guards:
   - normalize `email` to `lower(trim(email))`, aborting on any collision (the same guard as the
     copy below)
   - drop `password_hash`, `is_admin` and `session_version`
   - drop `tokens`
 
   It is **not** backward-compatible, so it is the one named exception to `RELEASE.md`'s rule. A
-  **schema freeze** runs from PR B's merge to the end of the window, and **the owner** bumps
+  **schema freeze** runs from the PR's merge to the end of the window, and **the owner** bumps
   `DEPLOYED_THROUGH`.
 - **Numbering rule** (main architect's option (a)), unchanged: merge `develop`, run `drizzle-kit
   generate`, rename the `.sql` file and its journal tag by hand to the next real number, leave the
   snapshot named by index, and re-check after every `develop` merge. The dry run of 2026-10-14
   showed generate emitting `0008_*`, which collides with `0008_model_provenance.sql`.
-- **pglite DDL.** More than twenty test files hand-write `users` or `tokens` DDL. PR B updates the
+- **pglite DDL.** More than twenty test files hand-write `users` or `tokens` DDL. The PR updates the
   ones that touch the dropped columns and `tokens`, coordinated with #292.
 
 **The cutover data copy** (owner: "a plain SQL query selecting from the old database into the new
@@ -599,7 +611,7 @@ Neither URL is stored in either database.
 
 The copy is **not atomic across the two databases**, so ordering and gates replace atomicity. A
 failure in step 2 changes nothing. A failure in step 4 rolls back its own transaction and is
-retried, with `apps/auth` still dark. Rolling back within 24 hours means restoring the app
+retried, with `apps/auth` not yet deployed. Rolling back within 24 hours means restoring the app
 database's pre-window snapshot, returning the auth database to its pre-window state (empty), and
 redeploying the previous services. That snapshot is the only post-window copy of the legacy
 password hashes, and nothing is restored from it after the deadline.
@@ -618,11 +630,11 @@ backfill inserts nothing, because of the unique `(user_id, provider_id)`.
 | app migrator | operator-held URL of the app database's owner, used for `psql` applies, provisioning and audits; **never in any service's environment** | none |
 | auth migrator | operator-held URL of the auth database's owner, used for its journal, provisioning, `grant-admin.ts` and audits; **never in any service's environment** | none |
 | `apps/auth` | `DATABASE_URL` = **auth database**, runtime role | `AUTH_INTERNAL_SECRET`, `AUTH_JWT_ISSUER`, `AUTH_JWT_AUDIENCE`, `ADMIN_EMAILS` (moved), plus the existing `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `CORS_ORIGIN` |
-| `apps/api` | `DATABASE_URL` = **app database**, re-pointed to the runtime role | `AUTH_INTERNAL_URL`, `AUTH_JWT_ISSUER`, `AUTH_JWT_AUDIENCE`, `AUTH_INTERNAL_SECRET`. PR B removes `JWT_SECRET`, `ACCESS_TOKEN_EXPIRY_HOURS`, `REFRESH_TOKEN_EXPIRY_HOURS` and `ADMIN_EMAILS` |
+| `apps/api` | `DATABASE_URL` = **app database**, re-pointed to the runtime role | `AUTH_INTERNAL_URL`, `AUTH_JWT_ISSUER`, `AUTH_JWT_AUDIENCE`, `AUTH_INTERNAL_SECRET`. The PR removes `JWT_SECRET`, `ACCESS_TOKEN_EXPIRY_HOURS`, `REFRESH_TOKEN_EXPIRY_HOURS` and `ADMIN_EMAILS` |
 
 `DATABASE_URL` keeps one name, with a different database per Railway service, so `turbo.json`
 gains no database variable. The four `AUTH_*` names go into `globalEnv`, and the three `JWT_*`
-names leave it in PR B. `AUTH_INTERNAL_SECRET` is a secret: it has a Zod minimum length, is never
+names leave it in the PR. `AUTH_INTERNAL_SECRET` is a secret: it has a Zod minimum length, is never
 logged, and uses the placeholder-not-a-real-* convention in `.env.ci`. Local development uses two
 databases on one local Postgres, both with owner URLs.
 
@@ -630,45 +642,41 @@ databases on one local Postgres, both with owner URLs.
 Railway Postgres service, the provisioning SQL (High tier), the lockfile, `turbo.json` and CI. The
 security architect reviews everything. The migration and copy SQL are High tier.
 
-### Phasing (resolves an issue "must be resolved" item; proposal — owner decides at spec-approval)
+### Phasing (resolves an issue "must be resolved" item; owner decision, 2026-10-16: one PR)
 
-The reference plan's Phases 0–5 map onto this project as **two PRs** inside one SPIR project.
-`develop` fast-forwards into `main`, so the split point is chosen so that nothing merged early can
-block a release.
+**One PR**, merged to `develop` and promoted to `main` **in the window**. It is the porch default.
+Nothing from this project reaches production before the window, so no other release is ever
+blocked by half-shipped cutover code.
 
-| This project | Reference phases | Production-safe while legacy JWT serves? |
+| Stage | Reference phases | What happens |
 |---|---|---|
-| **PR A: Prepare** | 0, 1 and the code half of 2. **Databases:** the new auth database (Railway Postgres) with its regenerated `packages/auth` baseline, `auth.jwks` included; in the app database, the scaffold cleanup and `public.deleted_users`; provisioning SQL for both, and the `apps/api` re-point step. **`apps/auth`:** `createAuth()` config (UUIDs, `auth` schema, dual verify, `bearer()`, `jwt()`, `admin()` kept for its columns with its whole HTTP surface blocked, rate limiting and client IP, the authenticated internal hop), its Dockerfile and Railway service, deployed **dark**. **`apps/api`:** the JWKS verifier (unwired), the compatibility layer as an HTTP client of `apps/auth` (unwired), the profile, role and delete client calls, the CORS fix, contract tests. **Cutover:** the copy script and the app cutover SQL, **staged and rehearsed outside the journal** | **Yes.** The auth database is new and empty, and nothing in production reads it. `apps/auth` runs with no public sign-in. The new `apps/api` code is not wired to production routes. PR A can merge and promote normally. |
-| Rehearsal (production-data clone) | 2 | Runs from PR B's branch on a clone of production, taken after PR A's migration was applied, with `apps/auth` and `apps/api` both pointed at the clone. Does not touch production. |
-| **PR B: Cutover** | 3, plus the code half of 4 | **No.** Merged to `develop` immediately before the window and promoted **in** the window. It holds the app cutover migration (generated last in the journal; schema freeze from merge to window close), the owner's `DEPLOYED_THROUGH` bump, the `RELEASE.md` exception, the pglite DDL update, the route switch to JWT verification with app rows created on first use, the `apps/frontend` switch to `apps/auth` (agreed with the app architect), and removal of the legacy JWT code, `tokens`, `session_version`, `is_admin`, `password_hash` and the `JWT_*` config (with the three `JWT_*` names leaving `globalEnv` and the Zod schema), and `grant-admin.ts` and `ADMIN_EMAILS` moving to `apps/auth`. |
-| Out of this project (follow-up issues) | 4 triggers, 5 | Remove the layer (its trigger). A profile sync design before `change-email` or `update-user` is enabled. |
+| **Build, on the branch** | 0 to 2 (code) | All of it: the `apps/auth` config (UUIDs, `auth` schema, dual verify, `bearer()`, `jwt()`, `admin()` kept for its columns with its whole HTTP surface blocked, `change-email` and `update-user` blocked, rate limiting and client IP, the internal hop and endpoints), its Dockerfile and service; the `packages/auth` baseline; the app migrations (scaffold cleanup, `public.deleted_users`, the cutover); the provisioning SQL; the copy script and audits; the `apps/api` JWKS verification, app-row creation, tombstoned deletion, role calls and compatibility layer; the CORS fix; contract tests written first against today's implementation; the pglite DDL update; removal of the legacy JWT code, `tokens`, `session_version`, `is_admin`, `password_hash`, the `JWT_*` config (and their `globalEnv` names), with `grant-admin.ts` and `ADMIN_EMAILS` moving to `apps/auth`; the `apps/frontend` switch to `apps/auth` (agreed with the app architect); `RELEASE.md` and `CONTRIBUTING.md` |
+| **Before the window, nothing in production changes** | 2 | Staging deployments from the branch: the empirical edge check, the staging re-point and soak, and the **rehearsal** on a clone of the production app database plus a fresh auth database. The empty production auth database is created on Railway (C-4). The branch is kept current with `develop`, with the numbering re-checked after every merge, and the rehearsal is re-run after the last rebase |
+| **The window** | 3, plus 4's code removal | Merge and promote, with `apps/api` offline: snapshots, auth baseline, provisioning, the copy and its audits, the app cutover migration, the production re-point and password rotation, admin roles, deploy `apps/auth`, `apps/api` and `apps/frontend`, smoke tests, then `apps/auth`'s public domain |
+| Out of this project (follow-up issues) | 4 triggers, 5 | Remove the layer (its trigger). A profile sync design before `change-email` or `update-user` is enabled |
 
-**Why a feature flag cannot replace PR B.** The obvious alternative is to merge the cutover code
-behind a flag and flip it in the window. It does not work here, because **the cutover migration
-cannot sit in the journal on `develop`**:
+**Why not a feature flag.** The cutover migration cannot sit in the journal on `develop` ahead of
+the window:
 
 - Everything in the `apps/api` journal on `develop` is, by `RELEASE.md` practice and the
   `DEPLOYED_THROUGH` assertion, applied to production before the next promote. The cutover
-  migration drops `password_hash`, `is_admin`, `session_version` and `tokens`. Applying it ahead of
-  the window breaks the legacy code still serving, and it is not backward-compatible by design.
-- A fresh `pnpm db:migrate` (the `RELEASE.md` smoke test, pglite suites, the parity test) would
-  build the post-cutover schema, which flag-off code cannot run against.
-- The Drizzle schema in `apps/api` either has the legacy auth columns or does not. Flag-off code
-  needs them, and flag-on code runs against a schema without them.
+  migration drops `password_hash`, `is_admin`, `session_version` and `tokens`, which breaks the
+  legacy code still serving.
+- The Drizzle schema in `apps/api` either has the legacy auth columns or does not.
 
-So the migration has to land on `develop` at the window, and the code that depends on it has to
-land with it. That is PR B. A flag could at most gate PR A's new, unwired code paths, which do not
-need one.
+So the migration and the code that depends on it land together, at the window. The PR also removes
+the legacy JWT code, which the reference plan defers to Phase 4. Rollback is a snapshot restore
+plus a redeploy of the previous Railway deployments, never a code toggle.
 
-PR B also removes the legacy JWT code, which the reference plan defers to Phase 4. Rollback is a
-snapshot restore plus a redeploy of the previous Railway deployments, never a code toggle, so dead
-code adds risk and buys nothing.
+**Costs of one PR, accepted by the owner.**
 
-**Two PRs depart from the porch default of one PR per project**, so they need the owner's explicit
-decision at spec-approval (Open Question C-2). The fallback is one PR holding everything, merged at
-the window. It also works, but it keeps a large branch alive across the rehearsal, and it delays
-creating the auth database until the window. The issue's decisions rule that out ("migrated before
-the window").
+- A long-lived branch must be kept current with `develop`. The numbering rule's re-check after
+  every merge applies, and the rehearsal is re-run after the last rebase.
+- The issue's "migrated before the window" for the `auth` tables no longer holds. The auth database
+  is created empty beforehand, and its tables are created in the window's first step, which is
+  quick on an empty database.
+- `develop` must be releasable at the window, because promotion fast-forwards `main` to a `develop`
+  tip that includes everything merged before this PR.
 
 The **verify** phase of this project is the cutover itself: smoke tests, the 24-hour watch, and the
 rollback deadline passing.
@@ -735,7 +743,7 @@ rollback deadline passing.
     case-insensitive duplicate group. It runs in the rehearsal and again by the operator before the
     window.
   - The **owner decides every collision before the window**. The guards then find none.
-- [ ] `DEPLOYED_THROUGH` moves once per app migration, the cutover bump by the owner in PR B. Every
+- [ ] `DEPLOYED_THROUGH` moves once per app migration, the cutover bump by the owner, in the PR. Every
   app migration follows the numbering rule (merge `develop`, run generate, rename the `.sql` file
   and its journal tag by hand, keep the snapshot's index name, re-check after every `develop` merge).
 - [ ] The pglite DDL in `apps/api` tests that names the dropped columns or `tokens` is updated,
@@ -811,7 +819,7 @@ rollback deadline passing.
 
 - [ ] `apps/auth` issues EdDSA JWTs with:
   - an explicit `iss` (the `apps/auth` origin) and an explicit `aud` (the `apps/api` audience)
-  - a lifetime of **15 minutes or less**
+  - a lifetime of **15 minutes**, Better Auth's default (owner), pinned by a test
   - a payload restricted by `definePayload` to `sub` (user UUID) and the session id
 
   No email, names, `system_key` or role go in the payload, and a test pins its exact key set.
@@ -839,7 +847,7 @@ rollback deadline passing.
 **`apps/api` authorization**
 
 - [ ] Every route that used `authenticateRequest` or `requireAdmin` resolves its user from a
-  verified JWT. The route set comes from a grep at PR B time, not from this list.
+  verified JWT. The route set comes from a grep before merge, not from this list.
   - **Ownership checks are unchanged:** a user cannot read another user's thread.
   - Admin routes ask `apps/auth`'s internal role endpoint **on each request**, and return the same
     401 and 403 codes as today. When `apps/auth` is unreachable they return 503 and never grant.
@@ -906,8 +914,9 @@ rollback deadline passing.
 - [ ] `apps/auth` has a Dockerfile and a Railway service, with its own Railway Postgres (snapshot or
   PITR enabled). Its watch paths include `packages/**`, and its healthcheck answers only when the
   auth database answers.
-- [ ] Before the window, a check against production proves that `apps/auth` accepts no public
-  sign-up or sign-in.
+- [ ] `apps/auth` is not deployed to production before the window. In the window its public domain
+  is attached only after the copy, the audits and the smoke tests. Before that, a check proves it
+  is unreachable from the public internet.
 - [ ] `apps/auth` CORS allowlists exactly the `apps/frontend` web origins, and exposes
   `set-auth-token` and `set-auth-jwt` to them. `trustedOrigins` matches. #266's origin test is made
   to fail on a wrong origin.
@@ -929,13 +938,13 @@ rollback deadline passing.
 - [ ] `apps/api`'s `getClientIp` (used by `mcp-complete`, and by the layer to forward) reads
   `X-Real-IP` only. `tests/rate-limit.test.ts`, which asserts the opposite preference today, is
   updated.
-- [ ] **Empirical edge verification is done during PR A's work and recorded** (method, raw
+- [ ] **Empirical edge verification is done before the PR merges and recorded** (method, raw
   observations, verdict). It covers each production domain, `apps/auth`'s domain once attached, and
   the `*.up.railway.app` domains, and proves both properties from the Client IP section:
   - forged `X-Real-IP` and `X-Forwarded-For` values never appear as the observed `X-Real-IP`
   - two clients on different networks see distinct `X-Real-IP` values equal to their own public
     addresses, never a Railway or private-range address
-- [ ] If either property fails, PR B ships the documented fallback in `apps/auth`, and tests pin
+- [ ] If either property fails, the PR ships the documented fallback in `apps/auth`, and tests pin
   each part:
   - sign-in is keyed by email and counts failures only
   - a correct password is rejected while the email is locked
@@ -955,26 +964,26 @@ rollback deadline passing.
 - [ ] A cutover runbook exists. It covers:
   - the downtime mechanism (remove both public domains from `backend`, or pause it, chosen in the
     rehearsal)
-  - keeping `apps/auth` dark until after the migration
+  - deploying `apps/auth` only after the copy and audits, and attaching its domain last
   - alert silencing and the snapshot or PITR baseline **of both databases**
   - the cross-database copy, its audits, the app cutover migration, admin roles, and attaching
     `apps/auth`'s domain
   - deploying `apps/api` and `apps/frontend`, then the smoke tests
   - the **24-hour rollback deadline**: restore the app database's snapshot, return the auth
     database to its pre-window state, redeploy the previous `apps/api` and `apps/frontend`
-    deployments, and take `apps/auth` dark again. After the deadline, fix forward.
+    deployments, and detach `apps/auth`'s public domain. After the deadline, fix forward.
 - [ ] The rehearsal of the full runbook runs on a clone of the production app database and a fresh
-  auth database, never a database production uses. It passes all audits, then boots PR B's
+  auth database, never a database production uses. It passes all audits, then boots the PR's
   `apps/api` and `apps/auth` against the rehearsed databases and passes the smoke tests.
-- [ ] PR A amends `RELEASE.md` with the auth database, the provisioning step and the deploy order
-  **roles SQL → migration → grants → boot** for each database, ahead of the dark `apps/auth` deploy
-  and `apps/api`'s re-pointed `DATABASE_URL`. Every `psql` apply, the smoke test and the admin
+- [ ] The PR amends `RELEASE.md` with the auth database, the provisioning step and the deploy order
+  **roles SQL → migration → grants → boot** for each database, ahead of the `apps/auth` deploy and
+  `apps/api`'s re-pointed `DATABASE_URL`. Every `psql` apply, the smoke test and the admin
   bootstrap step use the operator-held migrator URL of the right database; `CONTRIBUTING.md` states
   that dev and CI use one owner URL per database, on two local databases.
-- [ ] The **re-point** is its own release step, staging first with a soak, then production. It ends
+- [ ] The **re-point** is its own step, staging first with a soak, then production in the window. It ends
   with the migrator URL in no service environment (checked on every Railway service) and the
   migrator password rotated. A source scan finds no fallback connection string in runtime code.
-- [ ] PR B amends `RELEASE.md`:
+- [ ] The PR also amends `RELEASE.md`:
   - it names the cutover migration as the one exception to the backward-compatible rule, applied
     only in the offline window
   - it records the schema freeze
@@ -1019,7 +1028,9 @@ HTTP. **Owner override, 2026-10-16.** In the third item, "FKs on `threads`, `pre
 repointed to `auth.users.id`" is replaced: the auth tables live in **their own database**, and the
 foreign keys stay on `public.users`, which keeps the same UUIDs. "A dedicated `auth` Postgres schema,
 migrated before the window" stands, inside the auth database. "`is_admin` and `session_version`
-dropped" stands, together with `password_hash`.
+dropped" stands, together with `password_hash`. Under the owner's one-PR decision, "migrated
+before the window" no longer holds for the auth tables: they are created in the window's first
+step, in the empty auth database.
 
 Every other item is carried forward unchanged. Under the owner's hosting decision, the
 decided rate limits apply to every production sign-in, because all of them pass through `apps/auth`.
@@ -1049,7 +1060,7 @@ decided rate limits apply to every production sign-in, because all of them pass 
 
 - `main` is promoted only by fast-forward from `develop`.
 - Normal migrations must be backward-compatible with the code serving traffic. The cutover
-  migration is the one documented exception, applied with `apps/api` offline and `apps/auth` dark,
+  migration is the one documented exception, applied with `apps/api` offline and `apps/auth` not yet deployed,
   after the cross-database copy and its audits.
 
 ### Pinned dependency
@@ -1057,12 +1068,12 @@ decided rate limits apply to every production sign-in, because all of them pass 
 - better-auth and `@better-auth/expo` stay pinned at **1.7.7**. Every behavioural claim here is
   cited against 1.7.7, and any upgrade re-verifies those claims first.
 
-### `arch-critical.md` delta (applied at PR B)
+### `arch-critical.md` delta (applied in the PR)
 
 | Current | After |
 |---|---|
 | Admin = `users.is_admin` | Admin = admin-plugin `role` on `auth.users` in the auth database, asked of `apps/auth` on each admin request (fail closed), never from a token claim. `ADMIN_EMAILS` (in `apps/auth`) = reservation + boot assertion only |
-| `session_version` = the "kill all sessions" primitive | Deleting a user's Better Auth session rows is the primitive. Already-issued JWTs live until `exp` (15 minutes or less), which is the documented revocation window |
+| `session_version` = the "kill all sessions" primitive | Deleting a user's Better Auth session rows is the primitive. Already-issued JWTs live until `exp` (15 minutes, Better Auth's default), which is the documented revocation window. No per-request session check |
 | JWT config through `config` | `apps/auth` is the only issuer (EdDSA, `auth.jwks`). `apps/api` only verifies, against the JWKS, with `alg`, `iss`, `aud` and `exp` pinned. `apps/api` never imports `better-auth` |
 | Token rotation in `db.transaction` with `exec` | Retired with `tokens`. Each cutover step is one transaction |
 | Users in `public.users` | Two databases: the auth database (only `apps/auth`) holds every Better Auth table; the app database keeps `public.users` (same UUIDs, no auth columns) for referential integrity. No service holds the other's credential |
@@ -1086,7 +1097,7 @@ decided rate limits apply to every production sign-in, because all of them pass 
   app database within the 24-hour deadline. Railway can host a second Postgres for `apps/auth`
   (C-4).
 - Railway's `X-Real-IP` behaviour as stated by staff holds on our domains. It is verified during
-  PR A's work, not assumed, and the spec carries a fallback if it does not hold.
+  before the PR merges, not assumed, and the spec carries a fallback if it does not hold.
 - `apps/api` can reach `apps/auth` reliably, over the public domain or the private network (the plan
   chooses). The internal credential protects either.
 - Released mobile builds send `Authorization: Bearer` on every authenticated call, treat
@@ -1098,7 +1109,7 @@ decided rate limits apply to every production sign-in, because all of them pass 
 ## Solution Approaches
 
 The owner settled hosting and the token model at the spec-approval gate on 2026-10-15. The
-approaches below record what was considered and why. The PR shape (C-2) is still open.
+approaches below record what was considered and why. The PR shape is one PR (C-2, owner).
 
 ### Approach 1: Separate `apps/auth` service, JWT/JWKS verification in `apps/api`, layer as an HTTP client (chosen by the owner)
 
@@ -1112,15 +1123,15 @@ As described in Desired State, with the auth tables in their own database (owner
   - One limiter, database-backed, covers every sign-in path.
   - `apps/frontend` uses Better Auth natively, so the layer's removal trigger becomes meaningful.
 - **Cons:**
-  - The **revocation window** equals the JWT lifetime (15 minutes or less).
+  - The **revocation window** equals the JWT lifetime (15 minutes, Better Auth's default).
   - A new service, domain and Dockerfile.
   - Key management (`auth.jwks`, rotation, caching).
   - An authenticated internal hop for the layer, which also carries profile, role and delete.
   - A second database: a cross-database copy, app rows created on first use, deletion through a
     tombstone.
   - A client change for `apps/frontend` inside the window.
-- **Risk:** medium-high. More moving parts land in the window. The dark pre-deployment of
-  `apps/auth`, a full rehearsal with both services, and the snapshot rollback mitigate it.
+- **Risk:** medium-high. More moving parts land in the window. Staging deployments from the
+  branch, a full rehearsal with both services, and the snapshot rollback mitigate it.
 
 ### Approach 2: Separate `apps/auth`, with `apps/api` validating Better Auth session tokens through the bearer plugin
 
@@ -1142,8 +1153,7 @@ This was the first draft's proposal.
 - **Cons:** auth stays inside `apps/api`.
 - **Not chosen:** rejected by the owner.
 
-**PR shape (independent of the above):** two PRs (recommended; see Phasing), or a single PR merged
-at the window.
+**PR shape (independent of the above):** one PR, merged at the window (owner, C-2).
 
 ## Open Questions
 
@@ -1154,14 +1164,12 @@ at the window.
   database. The main architect's seven conditions were written for a single journal and need
   re-review; the spec states which carry over. No external migration framework is needed and
   Waleed is not a reviewer (owner).
-- **C-2: Two PRs (owner, at spec-approval).** May this project ship PR A (prepare) and PR B
-  (cutover) instead of the porch default of one PR? The reasons, including why a feature flag
-  cannot replace PR B, are in Phasing.
+- **C-2 (resolved, owner, 2026-10-16):** one PR, merged at the window. See Phasing.
 - **C-4: The auth database on Railway** (owner and main architect). A new Railway Postgres service
   for `apps/auth` in staging and production, with snapshots or PITR, and its cost.
 - **C-3: Staging database.** `api-staging.askansari.ai` exists (plan 124). Does it have its own
   database that a production clone can be restored into, with room for an `apps/auth` staging
-  instance? If not, who provisions one? The rehearsal is a hard prerequisite for PR B.
+  instance? If not, who provisions one? The rehearsal is a hard prerequisite for merging.
 
 **Important (shapes design)**
 
@@ -1173,7 +1181,7 @@ at the window.
   first", owner Amr, carried from the reference. Is it measured by `/v2/users/*` traffic share or by
   released build versions? This affects only the follow-up issue.
 - **I-4: Cutover timing.** Who is the operator, and what is the window? This is needed for the
-  runbook, not for PR A.
+  runbook.
 - **I-5: `apps/auth` domain** (owner and main architect), for example `auth.askansari.ai`. Should
   `apps/api` reach it over that domain or over Railway's private network?
 - **I-6: `apps/frontend` change and release timing** (app architect).
@@ -1181,11 +1189,9 @@ at the window.
   - If a native `apps/frontend` build pointed at `apps/auth` is released to the stores, a snapshot
     rollback leaves it talking to an `apps/auth` with fewer users.
   - Does any native `apps/frontend` build ship before the rollback deadline passes?
-- **I-7: JWT lifetime and the per-request session check** (owner). 15 minutes, the default and the
-  ceiling this spec allows, or shorter? It trades the revocation window against refresh traffic to
-  `apps/auth`. With two databases, a per-request session check would be an HTTP call to `apps/auth`
-  on **every** request and would make **all** of `apps/api` hard-dependent on `apps/auth` being up,
-  where today only sign-in, refresh, admin routes and new users' first requests depend on it.
+- **I-7 (resolved, owner, 2026-10-16):** the JWT lifetime is Better Auth's default, 15 minutes.
+  `apps/api` uses plain JWKS validation with no per-request session check. Sessions stay at the
+  issue's 30 days, refreshed daily.
 
 **Nice-to-know**
 
@@ -1299,7 +1305,8 @@ at the window.
 29. A raw session token from `/v2/users/login` mints a JWT at `apps/auth`. Turning on
     `requireSignature: true` makes that test fail.
 30. The JWT payload contains exactly the pinned claims, and no email, names, `system_key` or role.
-31. Before the window, production `apps/auth` refuses public sign-up and sign-in.
+31. In the window, before its domain is attached, `apps/auth` is unreachable from the public
+    internet, and after the domain is attached, sign-up and sign-in work.
 32. IP fallback (only if the edge check fails):
     - Five wrong passwords for one email within 60 seconds, then the right password: 429.
     - After the window ends, the right password succeeds.
@@ -1320,19 +1327,20 @@ at the window.
 |------|-------------|--------|------------|
 | Mass lockout after cutover | Low | Critical | Dual verify with a removal-detecting test; legacy-row login test on both paths; full rehearsal with both services; 24-hour snapshot rollback |
 | Released mobile users stranded | Low | High | Contract tests written against today's implementation pass unchanged; unmodified-client run in staging, including the expire-refresh-retry cycle |
-| Revoked user keeps access until JWT `exp` | Certain (by design) | Medium | 15 minutes or less (I-7); admin role asked of `apps/auth` per request; deleted `sub` rejected through the tombstone; window documented in arch-critical |
+| Revoked user keeps access until JWT `exp` | Certain (by design) | Medium | 15 minutes, Better Auth's default (I-7, owner); admin role asked of `apps/auth` per request; deleted `sub` rejected through the tombstone; window documented in arch-critical |
 | JWT verification misconfigured (alg confusion, missing `aud` or `iss` check) | Low | Critical | Pinned `alg`, `iss`, `aud`, `exp`; rejection-matrix tests |
 | Token payload leaks PII | Medium if the default is kept | Medium | `definePayload` restricted to `sub` and the session id; key-set test |
 | `apps/auth` outage blocks sign-in and refresh | Medium | High | Cached JWKS keeps issued tokens working; healthcheck and alerting on `apps/auth`; rollback runbook |
 | JWKS fetch amplification via random `kid` | Low | Medium | Rate-limited re-fetch; test |
-| `apps/auth` reachable before the window, accepting sign-ups | Medium if overlooked | High | Deployed dark; production check before the window; the copy guard aborts on a non-empty `auth.users` |
+| `apps/auth` reachable before the copy, accepting sign-ups | Low | High | Not deployed to production before the window; deployed after the copy; domain attached last; the copy guard aborts on a non-empty `auth.users` |
 | Rate limit collapses into one global login bucket (edge or internal hop) | Medium without the fix | High | `X-Real-IP` only; authenticated forwarded IP on the hop; multi-entry XFF and two-client tests; empirical edge verification |
 | Internal credential leaked | Low | High (any user's profile and role readable by id; rate-limit key chosen) | Constant-time compare; internal routes outside the Better Auth handler path; rate-limited; delete bound to the subject's JWT; profile, role and delete only over the private network; held in two service environments, rotated with them, never logged |
 | Railway changes `X-Real-IP` semantics later | Low | Medium | Documented header; re-verify on any Railway networking change; an arch-critical fact makes the dependency visible |
 | Admin HTTP surface abused (stolen admin token or frontend XSS leads to account takeover) | Low | Critical | Whole admin surface blocked: `disabledPaths` plus a case-insensitive prefix middleware before `toNodeHandler`; variant tests; enumerating regression test |
 | `apps/frontend` client change slips or breaks in the window | Medium | High | Agreed with the app architect up front; rehearsed; web rollback by redeploy; native release timing decided (I-6) |
-| Cutover code merged early freezes releases | Medium under one PR | High | Two-PR split; PR A is production-safe by construction |
-| Cross-database copy half-done (auth database filled, app migration failed) | Low | High | Ordered, gated steps; each step one transaction; audits before the app migration; `apps/auth` dark until both succeed; rehearsed on a clone |
+| Long-lived branch drifts from `develop` | Medium | Medium | Regular `develop` merges; numbering re-check after each; rehearsal re-run after the last rebase; nothing merges early, so releases never freeze |
+| More lands in one window | Medium | High | Full rehearsal on a production clone; ordered, gated runbook; 24-hour snapshot rollback |
+| Cross-database copy half-done (auth database filled, app migration failed) | Low | High | Ordered, gated steps; each step one transaction; audits before the app migration; `apps/auth` not deployed until both succeed; rehearsed on a clone |
 | App row and auth user drift apart (missing row, orphan, resurrected deleted user) | Medium if unguarded | High | Same UUID; app row created on first use from the profile endpoint; tombstone blocks re-creation; pending deletions completed on access and by an operator script; profile-changing endpoints blocked |
 | `apps/auth` outage blocks admin routes and first requests of new users | Medium | Medium | Admin fails closed (503); existing users unaffected (their row exists); alerting on `apps/auth` |
 | Admin boot assertion crash-loops | Low | High | Role script runs before the deploy; the assertion is checked in the rehearsal |
@@ -1341,7 +1349,7 @@ at the window.
 | Mixed-case legacy email becomes unfindable | Unknown (older rows unverified) | High | Copy `lower(trim(email))`; in-transaction collision guard; pre-window audit with owner decisions; mixed-case sign-in test |
 | A journal drifts from its database | Medium | High | One journal per database, each with a parity test and its own marker |
 | Migrator credential left in a service environment | Medium if overlooked | High | Re-point step ends with every service checked and the password rotated; no runtime fallback (scan) |
-| Migration numbering collides after a concurrent merge | Medium | Medium | Numbering rule: merge `develop`, run generate, rename, re-check after every merge; schema freeze from PR B's merge to window close |
+| Migration numbering collides after a concurrent merge | Medium | Medium | Numbering rule: merge `develop`, run generate, rename, re-check after every merge; schema freeze from the PR's merge to window close |
 | #59 scaffold tables hold data at drop time | Low | Medium | In-migration guard aborts on any row |
 | Targeted sign-in lockout under the IP fallback | Medium (fallback only) | Low | Failed-only counting, bounded to one 60s window per five failures; list-walk alert; reset unaffected |
 | better-auth behaviour differs from the 1.7.7 citations | Low | High | Pin 1.7.7; tests pin each relied-on behaviour |
