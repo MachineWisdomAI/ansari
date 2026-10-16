@@ -56,8 +56,9 @@ The goal is to make Better Auth the **only** auth model without locking anyone o
 - Everyone signs in once more after the cutover. Nobody needs a password reset.
 - The **released mobile build**, which cannot be changed without a store release, keeps working.
   It has `/v2/users/login` and `/v2/users/refresh_token` compiled in, and logs the user out
-  whenever `refresh_token` returns non-OK. The **legacy web frontend** (`legacy/frontend-web`),
-  still in production, uses the same routes and keeps working too.
+  whenever `refresh_token` returns non-OK. The **legacy web frontend** (`legacy/frontend-web`) is
+  retired at go-live: the `apps/frontend` web build replaces it in the same window (owner,
+  2026-10-16; see Current State).
 
 The primary failure mode is **silent mass lockout**. Every irreversible step in this spec is
 weighed against it. Secondary failure modes are a weakened security posture (rate limiting
@@ -140,8 +141,23 @@ Verified on this branch, `develop` at `2eb3fdc` plus the porch init commit.
   contains **no** Better Auth client.
 - **Legacy web frontend** (`legacy/frontend-web`): also a `/v2/users/*` client with JWT bearer and
   refresh (`src/services/ApiService.ts`, `src/store/slices/authSlice.ts`). **It is in production**
-  (owner, 2026-10-16), so it gets the same coverage as the released mobile build: the frozen
-  contract, the unmodified-client staging run, and the expire-refresh-retry cycle.
+  (owner, 2026-10-16) until the window, where it is **retired**: the `apps/frontend` web build
+  replaces it in the same window, and the rollback restores the previous legacy web deployment
+  (owner decision, 2026-10-16). It is therefore not a frozen-contract client and not part of the
+  unmodified-client staging run.
+  - Finding (plan phase 1, 2026-10-16): its `refreshAccessToken` throws unless the refresh
+    response carries `status === 'success'` (`src/services/ApiService.ts:110-112`), while
+    `apps/api`'s `refresh_token` returns no `status`. So every refresh succeeds on the server
+    (rotating the refresh token), the client discards the new pair and dispatches `resetAuth`,
+    and the user is logged out at each access-token expiry (2 hours by default). With a
+    15-minute JWT that would be every 15 minutes.
+  - Decision (owner, 2026-10-16): option (a). The refresh shape stays frozen with no `status`,
+    and legacy web is retired at go-live rather than accommodated.
+  - Consequence (owner, 2026-10-16, path A): `apps/frontend` must serve the pages live links
+    point at before the window, as plan phases 10b and 10c and window preconditions: #304
+    (forgot-password, and `/reset-password?token=` in the exact legacy shape) and #306
+    (`/delete-account`). The `/v2/users/*` layer and the two reset routes on `apps/api` remain
+    after cutover for the released mobile app.
 - **No outside service calls Ansari with a user's token** (owner, 2026-10-16). Outside callers use
   the machine paths below, so nothing outside the listed clients needs to sign in again.
 - **Admin analytics page** (`apps/api/src/app/admin/analytics/page.tsx`): posts to
@@ -978,8 +994,7 @@ rollback deadline passing, and the contract PR's release.
   - the released mobile flow: login, then a bearer call, then a 401 when the JWT expires, then
     refresh, then a retry
   - the admin analytics login
-  - `legacy/frontend-web` (in production): login, a bearer call, a 401 when the JWT expires,
-    refresh, then a retry
+  (`legacy/frontend-web` is retired at go-live and is not in this run; see Current State.)
 - [ ] **Machine callers are unchanged and cannot be confused with users.** The leaderboard key and
   a user JWT share the `Authorization: Bearer` header, so tests pin both directions: on
   `/api/v1/chat/completions`, a valid user JWT gets 401 and the key is never parsed as a JWT; on
@@ -1418,7 +1433,7 @@ This was the first draft's proposal.
 | Risk | Probability | Impact | Mitigation |
 |------|-------------|--------|------------|
 | Mass lockout after cutover | Low | Critical | Dual verify with a removal-detecting test; legacy-row login test on both paths; full rehearsal with both services; 24-hour snapshot rollback |
-| Released mobile and legacy web users stranded | Low | High | Contract tests written against today's implementation pass unchanged; unmodified-client run in staging for both, including the expire-refresh-retry cycle |
+| Released mobile users stranded | Low | High | Contract tests written against today's implementation pass unchanged; unmodified-client run in staging, including the expire-refresh-retry cycle. Legacy web is retired at go-live and replaced by the `apps/frontend` web build in the window |
 | Revoked user keeps access until JWT `exp` | Certain (by design) | Medium | 15 minutes, Better Auth's default (I-7, owner); admin role asked of `apps/auth` per request; deleted `sub` rejected through the tombstone; window documented in arch-critical |
 | JWT verification misconfigured (alg confusion, missing `aud` or `iss` check) | Low | Critical | Pinned `alg`, `iss`, `aud`, `exp`; rejection-matrix tests |
 | Token payload leaks PII | Medium if the default is kept | Medium | `definePayload` restricted to `sub` and the session id; key-set test |

@@ -900,11 +900,11 @@ phase as its own PR and integrates it. That fits the owner's one-PR decision as 
 the JWT to `apps/api` and refreshes the JWT from the session. All three platforms use one bearer
 transport, with no cookies.
 
-**Out of scope: password reset in `apps/frontend`.** It has no reset screens today. Its routes are
-index, `chat/[id]`, login, register, about, terms and privacy, and nothing reads `?token=`. The
-new-client reset screens are **issue #304**, which depends on #300 and consumes the `?token=`
-link shape unchanged. The `?token=` link shape stays a constraint on the email `apps/auth` sends (phase 5),
-because legacy web, still in production, consumes it.
+**Not in this phase: password reset and account deletion in `apps/frontend`.** It has neither
+today. Its routes are index, `chat/[id]`, login, register, about, terms and privacy, and nothing
+reads `?token=`. Both come as phases 10b (#304) and 10c (#306), because legacy web,
+which serves those pages today, is retired at go-live (owner, 2026-10-16). The `?token=` link
+shape stays a constraint on the email `apps/auth` sends (phase 5), because #304 consumes it.
 
 #### Files to Create / Modify
 
@@ -975,6 +975,97 @@ because legacy web, still in production, consumes it.
 
 Unit tests with a fetch double for the client. Manual end-to-end against local services, by the
 builder and then by the app architect.
+
+### Phase 10b: apps/frontend reset screens (#304)
+
+**Dependencies**: Phase 10. **Decided by the owner** (2026-10-16, path A): legacy web is retired in
+the window, so `apps/frontend` must serve the reset pages that live links already point at.
+
+**Delivery**: a further stacked PR on `builder/spir-300-frontend`, after phase 10, with base
+`builder/spir-300-frontend` (or `builder/spir-300` once phase 10 has merged into it). The builder
+builds it. The app architect reviews it with the real-path run and approves on the PR, and the
+builder then merges it, as for phase 10. **It is a window precondition** (runbook step 1).
+
+**Porch tracking**: porch fixed the phase list at plan approval, and it has no command to add a
+phase without rewinding to the plan gate. So this phase and phase 10c are tracked by the runbook
+precondition and the thread, not as porch plan phases (see the thread, 2026-10-16).
+
+#### Files to Create / Modify
+
+- `apps/frontend/app/forgot-password.tsx` (new): an email field → `POST /api/v2/request_password_reset`.
+  It shows the same confirmation for every email.
+- `apps/frontend/app/reset-password.tsx` (new): served at `/reset-password?token=…`, the **exact
+  legacy path shape** of the emailed link (`${FRONTEND_URL}/reset-password?token=…`). It reads
+  `token`, takes the new password and calls `POST /api/v2/reset_password`.
+- `apps/frontend/lib/auth/api.ts`: `requestPasswordReset` and `resetPassword`, over the legacy
+  routes on `apps/api`, which stay.
+- `apps/frontend/app/login.tsx`: a "Forgot password?" link.
+- Tests next to each file.
+
+#### Deliverables
+
+- [ ] The path and query shape match the legacy link exactly. A test builds the link the way
+  `apps/auth` does (phase 5) and resolves it to the reset screen with the token intact.
+- [ ] Every email gets the identical confirmation on the forgot-password page.
+- [ ] The legacy `detail` strings are shown for an invalid or expired token and a weak password.
+  On success the user is sent to login, with no session kept from before.
+- [ ] A missing or empty `token` shows the invalid-link state and makes no request.
+
+#### Acceptance Criteria
+
+- [ ] Frontend tests are green.
+- [ ] **The app architect's approval on the PR is the acceptance**, after their real-path run on
+  web and the iOS Simulator: request a reset, open the emailed link, reset, then sign in with the
+  new password. The builder runs the same path first and records it in the thread.
+
+#### Test Plan
+
+Unit tests with a fetch double, plus a route test for the link shape. Manual end-to-end against
+local `apps/auth` and `apps/api`, with the reset email captured locally.
+
+### Phase 10c: apps/frontend delete-account page (#306)
+
+**Dependencies**: Phase 10. **Decided by the owner** (2026-10-16, path A). Delivery and porch
+tracking are the same as phase 10b: a further stacked PR after phase 10, the app architect's
+review, and a **window precondition**.
+
+#### Files to Create / Modify
+
+- `apps/frontend/app/delete-account.tsx` (new), at `/delete-account`.
+- `apps/frontend/lib/auth/api.ts`: `deleteAccount`, which calls `DELETE /api/v2/users/me` with the
+  JWT **and nothing else** (no session token and no other call).
+- `apps/frontend/lib/auth/context.tsx`: after a 200, discard **both** the session token and the JWT,
+  then return to the guest flow.
+- Tests next to each file.
+
+#### Deliverables
+
+- [ ] A test pins the request: one `DELETE /api/v2/users/me` whose only credential is
+  `Authorization: Bearer <JWT>`.
+- [ ] After a 200, both stored tokens are gone (SecureStore on native, `localStorage` on web), and
+  a test asserts it.
+- [ ] A non-200 keeps both tokens and shows the error. A guest gets no delete action.
+- [ ] An explicit confirmation step comes before the call.
+
+#### Acceptance Criteria
+
+- [ ] Frontend tests are green.
+- [ ] **The app architect's approval on the PR is the acceptance**, after their real-path run on
+  web and the iOS Simulator: sign in, delete the account, check that the old JWT gets 401 and that
+  sign-in with the old password fails. The builder runs the same path first and records it in the
+  thread.
+
+#### Test Plan
+
+Unit tests with a fetch double and a storage double. Manual end-to-end against local `apps/auth`
+and `apps/api`.
+
+**Not on this stack**: #307 (the share page) is built separately by the app architect from
+`develop`.
+
+**Unchanged by 10b and 10c**: the `/v2/users/*` layer and the two reset routes on `apps/api`
+**remain after cutover**, because the released mobile app depends on them. Removing the layer is
+a follow-up gated on I-3, as the spec says.
 
 ### Phase 11: apps/auth deployment: Dockerfile, Railway service, CI and env
 
@@ -1087,8 +1178,9 @@ runs scripts, not typed SQL.
   - Scenario 9i: `email_verified = true`, and no email is sent.
 - `docs/cutover/better-auth-cutover.md`, the window runbook, in this order. Each step names its
   file, the commit on `develop` it is applied from, its success check and its abort action.
-  1. Preconditions: the rehearsal is signed off, baselines are in, the admin list is approved, and
-     collisions are decided.
+  1. Preconditions: the rehearsal is signed off, baselines are in, the admin list is approved,
+     collisions are decided, and phases 10b (#304) and 10c (#306) are merged into
+     `builder/spir-300`.
   2. Comms and alert silencing.
   3. `apps/api` offline, by the mechanism chosen in the rehearsal.
   4. Snapshots or PITR marks of both databases.
@@ -1100,17 +1192,22 @@ runs scripts, not typed SQL.
   10. The private-network smoke tests.
   11. Deploy `apps/api` and `apps/frontend`.
   12. Re-attach `apps/api`'s domains.
-  13. The edge probe on the production domains (P-4).
-  14. Attach `auth.askansari.ai`.
-  15. The public smoke tests (scenario 31).
-  16. Re-enable alerting, and record `cutover_at`.
+  13. Replace legacy web with the `apps/frontend` web deployment: the web domain moves from the
+     legacy web service to the `apps/frontend` web service (owner, 2026-10-16: legacy web is
+     retired at go-live).
+  14. The edge probe on the production domains (P-4).
+  15. Attach `auth.askansari.ai`.
+  16. The public smoke tests (scenario 31).
+  17. Re-enable alerting, and record `cutover_at`.
 - `docs/cutover/rollback.md`, the rollback runbook. It is valid until `cutover_at + 24h`.
   1. `apps/api` offline.
   2. Remove the post-cutover users (dry run, then the delete).
   3. Redeploy the previous `apps/api` and `apps/frontend` deployments.
-  4. Detach `auth.askansari.ai`.
-  5. Smoke-test a legacy login.
-  6. Record it.
+  4. Restore the previous legacy web deployment: the web domain moves back to the legacy web
+     service.
+  5. Detach `auth.askansari.ai`.
+  6. Smoke-test a legacy login.
+  7. Record it.
   It also gives the restart procedure: empty the auth database, then re-run from step 5. After the
   deadline, the runbook says to fix forward.
 - `RELEASE.md`:
@@ -1177,7 +1274,7 @@ Produce the evidence the spec requires before the merge, and commit it.
   - the released mobile build (or its build pointed at staging): login, bearer call, the 401
     after 15 minutes, refresh, retry
   - the admin analytics login
-  - `legacy/frontend-web`, with the same cycle
+  (`legacy/frontend-web` is retired at go-live and is not run; the window replaces it.)
 - [ ] The full rehearsal on a **clone of production** plus a fresh auth database, following the
   runbook exactly: all audits pass, and both services boot on the rehearsed databases and pass the
   smoke tests. Then the **rollback**: post-cutover users are removed, the previous image is
@@ -1232,6 +1329,7 @@ The spec's risk table stands. These are the risks this plan adds or sharpens.
 | Rate-limit numbers are wrong for real traffic | Medium | Medium | B-1 to B-4 before merge; one constants module; the fallback ceiling floor |
 | A long-lived branch drifts; migration numbering collides | Medium | Medium | `develop` merges at each phase boundary; the numbering re-check is recorded in the thread every time |
 | The phase 10 stacked PR is not integrated before the window | Medium | High | The app architect agreed the design; it depends only on phases 4 and 7, so it is built early; the cutover PR does not merge until it is in `builder/spir-300` |
+| Live reset and delete-account links break when legacy web is retired | Certain without #304/#306 | High | Phases 10b (#304) and 10c (#306) are window preconditions (owner, path A); the runbook's step 1 checks they are merged |
 | Logout needs the fourth internal route (G-3) | Certain | Low | Subject-bound like delete; built in phase 5; the gate decides, and a rejection goes back to the owner |
 | A sign-in failure mints a new guest, orphaning the device's threads and turning throttling into sign-ups (G-5) | High today | Medium | Phase 10 narrows the fall-through to authentication failure only; B-1 reports guest counts; the rehearsal includes a stored-guest sign-in |
 

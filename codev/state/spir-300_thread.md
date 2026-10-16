@@ -86,3 +86,42 @@
   - EXPO_PUBLIC_AUTH_URL needs no turbo edit, defaults to staging like the API URL, and is set in the Railway dashboard for the web service.
   - Phase 10 is a STACKED PR: base builder/spir-300 at a commit carrying phases 4 and 7. The app architect runs the real path on web and iOS Simulator and approves; the builder merges it into builder/spir-300. The cutover PR is still the only PR to develop.
 - 2026-10-16: Owner resolved C-3 (staging is isolated and has its own DB; the prod clone is restored into the staging app DB), C-4 (the owner provisions the auth Postgres), and I-4 (the owner operates the window), in 0d85c88. Owner approved G-1 to G-5; G-2 is recorded in the spec as an owner amendment (in-window prod probe, pre-merge passive dig/curl check, staging-verdict mode). PLAN APPROVED by the human (83c5b76); ran porch approve 300 plan-approval. Entering implement, phase_1 (legacy contract tests).
+
+## 2026-10-16 — implement, phase 1 (legacy contract tests)
+- Added apps/api/tests/contract/: harness.ts (AuthBackend seam, `legacy` today), legacy-users-contract.test.ts (58 scenarios), fixtures/legacy-users.json (frozen key sets, types, literals, details). Green against today's apps/api, unchanged.
+- Setup choices:
+  - The app DB is built from the REAL drizzle journal (the legacy DDL exactly), not hand DDL.
+  - Only two module mocks: `@/lib/db/index` (the handle points at pglite) and `resend` (records email). There is also a stand-in for the JSX email template, which this vitest config cannot load; lib/email and render stay real.
+  - Real config via env, no config mock. Only Date is faked; `call` ticks 1s per request because legacy JWTs have no jti (same-second tokens are byte-identical).
+- What is deliberately NOT pinned, because it cannot hold in phase 8 without forking assertions:
+  - which legacy 401 detail a refresh or bearer failure carries (the status and the set are pinned, as `detailOneOf`)
+  - access-token death after logout or reset (the accepted JWT window)
+  - refresh-token reuse past grace
+  - a stale session_version on a bearer
+  - system-address reset sending an email (scenario 20 changes it)
+- Pinned besides the fields:
+  - malformed JSON (register/login/refresh → 500 generic; reset routes → 422 "Invalid request body")
+  - zod's default missing-field message
+  - the ADMIN_EMAILS-reserved 409, identical to the taken 409, case-insensitive
+  - registered_via
+  - the delete cascade (threads/preferences/feedback)
+  - re-register after delete
+- Client flows as sequences:
+  - mobile login → bearer → expiry 401 → refresh → retry
+  - concurrent refreshes with one refresh token both succeed
+  - a revoked session → non-OK refresh
+  - admin analytics login → admin/stats 200, non-admin 403
+- Negative test (mutation script in scratch, run in place, each file restored): in the 9 legacy files, rename every response key, alter every 'success'/'bearer' literal and every detail/zod string, and bump every status code; run the suite each time. Run 1: 108 mutations, 83 caught. It exposed a real gap (refresh token used as bearer) and the missing ADMIN_EMAILS case, both added. Run 2: 108 mutations, 86 caught, 22 missed. Every response KEY rename is caught, except the error-path ones below. The 22 misses:
+  - 1 is a comment
+  - the reuse-past-grace and stale-session_version paths, unpinned on purpose (above)
+  - race-only branches: the refresh recheck in its tx, the concurrent reset consume, the reset-request catch
+  - 500 DB-fault paths (logout, me GET/DELETE, reset)
+- Client source read (deliverable):
+  - legacy/frontend-app ApiService.ts:101-128: fetchWithAuthRetry retries once (skipRefresh), with no single-flight.
+  - :81-86: a non-OK refresh removes the tokens and calls resetAuth. The types only need access_token/refresh_token.
+  - legacy/frontend-web ApiService.ts:12-28,127-149: a module-level single-flight promise. BUT :110-112 throw unless refresh returns status==='success', which apps/api never sends, so legacy web logs out at every access expiry today.
+  - Owner decision (a): the frozen shape is kept and legacy web is RETIRED at go-live. Spec Current State, plan phase 13 and both runbooks are updated (new window step 13, rollback step 4).
+- Consequence, path A (owner): apps/frontend must serve the pages live links use.
+  - Plan phases 10b (#304: forgot-password, plus /reset-password?token= in the exact legacy shape) and 10c (#306: /delete-account, DELETE me with the JWT only, then discard both tokens) are stacked PRs after phase 10, and window preconditions (runbook step 1).
+  - Porch cannot add phases mid-implement (only a rollback to plan, which was declined). So 10b/10c are gated by the APP architect's PR approval after the real-path run, plus the runbook check. The machine-readable JSON is unchanged.
+  - Send the app architect each stacked PR number as it opens. #307 (share page) is not on this stack.
