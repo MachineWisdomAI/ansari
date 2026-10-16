@@ -24,6 +24,7 @@ import {
   weakPasswordMessage,
 } from './password';
 import { isReservedAddress, normalizeEmail } from './reserved';
+import { createResetPasswordSender, resendMailer, type Mailer } from './reset-email';
 import * as schema from './schema';
 
 export * as schema from './schema';
@@ -31,7 +32,16 @@ export { createDb, pingDatabase, type Db } from './db';
 export { getEnv, resetEnvCache, type AuthEnv } from './env';
 export * as limits from './limits';
 export { consumeWindow, keysSeenSince, peekWindow, touchKey, type WindowState } from './rate-limit-store';
-export { normalizeEmail } from './reserved';
+export { isSystemAddress, normalizeEmail, SYSTEM_EMAIL_DOMAIN } from './reserved';
+export * as users from './users';
+export {
+  resetEmailHtml,
+  resetLink,
+  RESET_EMAIL_FROM,
+  RESET_EMAIL_SUBJECT,
+  type EmailMessage,
+  type Mailer,
+} from './reset-email';
 export { CLIENT_HEADER } from '@ansari/types/attribution';
 
 const DAY = 24 * 60 * 60;
@@ -114,6 +124,8 @@ export type AuthHookContext = Parameters<Parameters<typeof createAuthMiddleware>
 export type AuthExtensions = {
   before?: (ctx: AuthHookContext) => Promise<void>;
   after?: (ctx: AuthHookContext) => Promise<void>;
+  /** Delivers the reset email. Defaults to Resend with RESEND_API_KEY. */
+  mailer?: Mailer;
 };
 
 /**
@@ -212,6 +224,12 @@ export function createAuth(db: Db = createDb(), extensions: AuthExtensions = {})
       password: { hash: hashPassword, verify: verifyPassword },
       // A reset kills every session, so no new JWT can be minted from one.
       revokeSessionsOnPasswordReset: true,
+      // The emailed link has the legacy shape (reset-email.ts), not
+      // better-auth's own `/reset-password/:token` callback URL.
+      sendResetPassword: createResetPasswordSender(
+        env.FRONTEND_URL,
+        extensions.mailer ?? resendMailer(env.RESEND_API_KEY)
+      ),
       // `requireEmailVerification` stays unset: migrated users are copied with
       // emailVerified = true, and new users sign in at once, as today.
     },

@@ -6,8 +6,8 @@
 //   The forwarded-IP header is always stripped; /internal/* is never mounted.
 // Internal (INTERNAL_PORT, Railway's private network only, no domain): the
 //   credentialed /api/auth/* hop for apps/api's layer, its JWKS fetch, and
-//   /internal/* (phase 5). Every request must carry the internal credential.
-import { createAuth, getEnv, type Auth, type Db } from '@ansari/auth';
+//   /internal/*. Every request must carry the internal credential.
+import { createAuth, getEnv, type Auth, type Db, type Mailer } from '@ansari/auth';
 import { toNodeHandler } from 'better-auth/node';
 import express, { type Express, type Request, type Response } from 'express';
 
@@ -18,6 +18,7 @@ import { internalPerimeter, requireClientIp, stripForwardedIp } from './middlewa
 import { corsFor, mergeExposedHeaders } from './middleware/cors';
 import { clientIpDiag, DIAG_PATH } from './routes/diag';
 import { health } from './routes/health';
+import { internalRouter } from './routes/internal';
 
 export type ServiceDeps = { auth: Auth; db: Db };
 export type AppOptions = {
@@ -27,9 +28,16 @@ export type AppOptions = {
 
 const AUTH_ROUTE = '/api/auth{/*path}';
 
+export type ServiceAuthOptions = {
+  alert?: (alert: ListWalkAlert) => void;
+  /** The reset-email transport; Resend by default. */
+  mailer?: Mailer;
+};
+
 /** The configured Better Auth instance with apps/auth's limiters as its hooks. */
-export function createServiceAuth(db: Db, alert?: (alert: ListWalkAlert) => void): Auth {
-  return createAuth(db, createPerimeterHooks({ db, mode: getEnv().AUTH_RATE_LIMIT_MODE, alert }));
+export function createServiceAuth(db: Db, { alert, mailer }: ServiceAuthOptions = {}): Auth {
+  const hooks = createPerimeterHooks({ db, mode: getEnv().AUTH_RATE_LIMIT_MODE, alert });
+  return createAuth(db, { ...hooks, mailer });
 }
 
 function isProduction(options: AppOptions): boolean {
@@ -55,11 +63,13 @@ export function createPublicApp({ auth, db }: ServiceDeps, options: AppOptions =
   return app;
 }
 
-export function createInternalApp({ auth }: ServiceDeps, options: AppOptions = {}): Express {
+export function createInternalApp({ auth, db }: ServiceDeps, options: AppOptions = {}): Express {
   const app = express();
   app.disable('x-powered-by');
   app.use(internalPerimeter(getEnv().AUTH_INTERNAL_SECRET));
   app.use(blockedPaths);
+  // Outside Better Auth's handler path (spec 300 rule 8), behind the credential.
+  app.use('/internal', internalRouter({ auth, db }));
   app.all(AUTH_ROUTE, requireClientIp(isProduction(options)), toNodeHandler(auth));
   app.use(notFound);
   return app;

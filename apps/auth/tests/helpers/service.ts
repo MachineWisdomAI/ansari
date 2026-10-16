@@ -6,7 +6,7 @@ import type { AddressInfo } from 'node:net';
 
 import type { PGlite } from '@electric-sql/pglite';
 
-import type { Auth, AuthEnv, Db } from '@ansari/auth';
+import type { Auth, AuthEnv, Db, EmailMessage, Mailer } from '@ansari/auth';
 
 import {
   drizzleFor,
@@ -29,6 +29,8 @@ export type Service = {
   auth: Auth;
   publicUrl: string;
   internalUrl: string;
+  /** Every reset email the service handed to its mailer, in order. */
+  mail: EmailMessage[];
   close: () => Promise<void>;
 };
 
@@ -36,6 +38,8 @@ export type ServiceOptions = {
   mode?: AuthEnv['AUTH_RATE_LIMIT_MODE'];
   production?: boolean;
   alert?: (alert: ListWalkAlert) => void;
+  /** Replaces the capturing mailer (which records into `mail`). */
+  mailer?: Mailer;
 };
 
 function listen(app: { listen: (port: number, cb: () => void) => Server }): Promise<Server> {
@@ -51,7 +55,11 @@ export async function startService(options: ServiceOptions = {}): Promise<Servic
   process.env.AUTH_RATE_LIMIT_MODE = options.mode ?? 'ip';
   const client = await migrate();
   const db = drizzleFor(client);
-  const auth = createServiceAuth(db, options.alert);
+  const mail: EmailMessage[] = [];
+  const capture: Mailer = async (message) => {
+    mail.push(message);
+  };
+  const auth = createServiceAuth(db, { alert: options.alert, mailer: options.mailer ?? capture });
   const appOptions = { production: options.production ?? false };
   const publicServer = await listen(createPublicApp({ auth, db }, appOptions));
   const internalServer = await listen(createInternalApp({ auth, db }, appOptions));
@@ -61,6 +69,7 @@ export async function startService(options: ServiceOptions = {}): Promise<Servic
     auth,
     publicUrl: urlOf(publicServer),
     internalUrl: urlOf(internalServer),
+    mail,
     async close() {
       await new Promise((r) => publicServer.close(r));
       await new Promise((r) => internalServer.close(r));
@@ -137,4 +146,24 @@ export async function signIn(
   opts: Omit<RequestOptions, 'body'> = {}
 ) {
   return send(service.publicUrl, '/api/auth/sign-in/email', { ...opts, body: { email, password } });
+}
+
+/** The session token and JWT a fresh sign-up returns. */
+export async function signUpTokens(service: Service, email: string, password = STRONG_PASSWORD) {
+  const res = await signUp(service, email, password);
+  if (res.status !== 200) throw new Error(`sign-up failed: ${res.status}`);
+  const { token, user } = (await res.json()) as { token: string; user: { id: string } };
+  return { id: user.id, sessionToken: token, jwt: await mintJwt(service, token) };
+}
+
+/** Exchange a session token for a JWT at /token, as apps/api's layer does. */
+export async function mintJwt(service: Service, sessionToken: string): Promise<string> {
+  const res = await send(service.publicUrl, '/api/auth/token', { bearer: sessionToken });
+  if (res.status !== 200) throw new Error(`token exchange failed: ${res.status}`);
+  return ((await res.json()) as { token: string }).token;
+}
+
+/** The status of a session token's JWT exchange at /token (200 while the session lives). */
+export async function tokenStatus(service: Service, sessionToken: string): Promise<number> {
+  return (await send(service.publicUrl, '/api/auth/token', { bearer: sessionToken })).status;
 }

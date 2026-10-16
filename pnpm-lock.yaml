@@ -169,6 +169,9 @@ importers:
       express:
         specifier: ^5.1.0
         version: 5.2.1
+      jose:
+        specifier: ^6.2.9
+        version: 6.2.9
     devDependencies:
       '@ansari/eslint-config':
         specifier: workspace:*
