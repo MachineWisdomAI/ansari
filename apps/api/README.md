@@ -35,7 +35,6 @@ Auth is owned by `apps/auth` (Better Auth, spec 300): this service verifies its 
 - **AI**: Google Gemini via Vertex AI (preferred) or the public Gemini API, with model fallback on capacity errors
 - **Database**: PostgreSQL with Drizzle ORM (migrations in `drizzle/`)
 - **Validation**: Zod (strict env + request validation)
-- **Email**: Resend + react-email (password reset)
 - **Observability**: Sentry (optional — disabled when `SENTRY_DSN` is unset; no user content is logged)
 - **Tests**: Vitest (unit/integration)
 
@@ -68,10 +67,9 @@ lib/            Engine: facilitator agent, Gemini client, tools, auth, db helper
   ai/prompts/   The facilitator system prompt ("the soul")
   tools/        Quran / Hadith / Mawsuah / Tafsir search + resilience wrapper
 src/app/api/    HTTP surface (v1, v2 routes)
-db/schema/      Drizzle schema (users, threads, messages, tokens, ...)
+db/schema/      Drizzle schema (users, threads, messages, deleted_users, ...)
 drizzle/        Generated SQL migrations
 tests/          Vitest suites
-emails/         react-email templates
 ```
 
 ## Deployment
