@@ -308,13 +308,15 @@ the edge, and any service in the environment could claim any IP. Requirements:
 - `apps/auth` uses the forwarded IP **only** when the credential verifies, in constant time. On
   every other request it strips any such header, and Better Auth reads the edge's `X-Real-IP` as
   usual.
-- The credential also identifies the layer's internal-only calls (for example account deletion
-  without a fresh session, below). No other caller can reach those.
+- The credential also identifies the internal-only endpoints (profile, role, delete; see "Two
+  databases" rule 8). No other caller can reach those, and delete also requires the subject's own
+  JWT.
 - A test proves that a forged forwarded-IP header without the credential is ignored, and that two
   legacy clients behind the layer land in different buckets.
 
 **Residual risk, accepted and documented:** whoever holds the internal credential can choose the
-rate-limit key. It lives only in the two services' environments, and it is rotated with them.
+rate-limit key and read any user's profile and role by id. It cannot delete an account without that
+user's JWT. It lives only in the two services' environments, and it is rotated with them.
 
 ### Hosting and token model (owner decisions, 2026-10-15)
 
@@ -426,6 +428,14 @@ issue's dedicated-schema decision): `auth.users`, `auth.session`, `auth.account`
      `ON CONFLICT (id) DO NOTHING`. If `apps/auth` answers that the user does not exist, the request
      gets 401.
    - The same path repairs a layer registration whose insert failed.
+   - **An email held under another id.** `ON CONFLICT (id)` does not cover `users_email_unique`
+     (`apps/api/drizzle/0000_baseline.sql:10`). If another `public.users` row already holds the
+     email (an uncopied legacy row, a system row, a leftover from a resolved collision), the
+     request gets **401**, no row is written, and there is **no 500**. The pair of ids is logged,
+     by id only, and an alert fires through the existing Sentry path.
+   - **Defence in depth behind `apps/auth`'s sign-up hook:** this path also refuses any email on a
+     reserved domain (`@system.ansari.chat`) and any email held by a `system_key` row, with the
+     same 401, log and alert.
 3. **Existence on each request.** `apps/api` reads `public.users` by `sub` in its own database, as
    it reads the user row today. A missing row that `apps/auth` does not know, or a tombstoned id
    (rule 5), gets 401.
@@ -441,10 +451,17 @@ issue's dedicated-schema decision): `auth.users`, `auth.session`, `auth.account`
    3. It calls `apps/auth`'s internal delete endpoint, which removes the sessions and the auth user.
       "Not found" counts as done, so the call is idempotent. Then it sets `auth_deleted_at`.
 
+   **The delete endpoint is bound to the subject.** It requires the internal credential **and** the
+   user's own JWT. `apps/auth` verifies that JWT against its own JWKS and refuses the call when the
+   JWT's `sub` differs from the target id. The internal secret alone can therefore delete no
+   account.
+
    The profile path in rule 2 **never re-creates a tombstoned id**. If step 3 fails, any later
-   request carrying that `sub`, or the user's retry of `DELETE me`, retries step 3 before
-   answering 401. An operator script also lists and completes pending tombstones. A failure
-   therefore leaves an account that `apps/api` refuses, and never app data without a user.
+   request carrying that `sub` (and so that user's JWT), or the user's retry of `DELETE me`,
+   retries step 3 before answering 401. The operator's completion script lists pending tombstones
+   and deletes those auth users **directly as the auth database's migrator**; it never uses the
+   endpoint. A failure therefore leaves an account that `apps/api` refuses, and never app data
+   without a user.
 6. **Admin role.** `role` lives only in the auth database. On **each admin request**, `apps/api`
    asks an internal-only `apps/auth` endpoint for the user's role, so a demotion still takes effect
    immediately. If `apps/auth` is unreachable, the admin route **fails closed** (503) and never
@@ -461,8 +478,19 @@ issue's dedicated-schema decision): `auth.users`, `auth.session`, `auth.account`
    holds no app-database credential. Every cross-service fact goes over the internal credential,
    through three internal-only `apps/auth` endpoints (profile, role, delete). A source scan pins
    that neither service's runtime code names the other database's connection.
+
+   **The internal endpoints are high-value.** The profile endpoint returns any user's personal data
+   by id, so the internal credential's impact is High. Requirements:
+   - the credential is compared in constant time
+   - the internal routes are mounted **outside** Better Auth's handler path
+   - they are rate-limited
+   - delete is bound to the subject's JWT (rule 5)
+   - `apps/api` reaches profile, role and delete through `AUTH_INTERNAL_URL` over **Railway's private
+     network**, never the public domain. The layer's sign-in hop, which forwards the client IP,
+     stays as specified under Client IP.
 9. **The per-request session check**, if the owner chooses it, becomes an HTTP call to `apps/auth`
-   on every request. Its cost is recorded under I-7.
+   on every request and a hard dependency of all of `apps/api` on `apps/auth`. The cost is recorded
+   under I-7.
 
 **Database principals** (security review of 388371b, carried over per database). Each database has
 a **migrator** (its owner) and **one runtime role**:
@@ -549,14 +577,24 @@ Neither URL is stored in either database.
 1. **Export from the app database into the auth database.** `\copy (SELECT id, lower(trim(email)),
    first_name, last_name, password_hash, registered_via, created_at, updated_at FROM public.users
    WHERE system_key IS NULL) TO STDOUT`, piped into a `\copy … FROM STDIN` on an import table in the
-   auth database.
+   auth database. The **pipe never touches a file**. The import table is a temporary table created
+   **in the same auth-database session** as step 2, so it is dropped on every failure path and a
+   failed step 2 never leaves bcrypt hashes in a stray table.
 2. **One auth-database transaction**, with guards that abort unless `auth.users` and `auth.account`
    are empty, the import is non-empty, and no two rows collide on the normalized email. Then:
-   - `INSERT … SELECT` into `auth.users`: same `id`, derived `name`, `email_verified = true`
+   - `INSERT … SELECT` into `auth.users`: same `id`, derived `name`, `email_verified = true`. This
+     is a **deliberate grant**: the legacy system never verified emails, and the issue decided to
+     treat migrated users as verified. **No copied user is sent a verification email**, at the copy
+     or later.
    - one `credential` account per row, with the bcrypt hash
    - drop the import table
-3. **Cross-database audits** before step 4. The operator's script computes, on each side, the row
-   count and an ordered id checksum of non-system users, and the two must match.
+3. **Cross-database audits** before step 4. The operator's script computes, on each side, over
+   non-system users, and the two sides must match:
+   - the row count
+   - an ordered id checksum
+   - a **hash checksum**: `md5(string_agg(password_hash, '' ORDER BY id))` on `public.users`,
+     against the same over the `credential` rows' password column in `auth.account`, ordered by
+     `user_id`. A corrupted or truncated copy is caught before the app migration.
 4. **Apply the app-database cutover migration.**
 
 The copy is **not atomic across the two databases**, so ordering and gates replace atomicity. A
@@ -662,7 +700,8 @@ rollback deadline passing.
   - it inserts `auth.users` (same `id`, derived `name`, `email_verified = true`) and one
     `credential` account per user with the bcrypt hash
   - the cross-database audits pass before the app cutover migration runs
-  - no cross-database credential is stored in either database
+  - no cross-database credential is stored in either database, the pipe writes no file, and the
+    import table is a temporary table in the step-2 session
 - [ ] The app cutover migration, in one transaction with guards, normalizes `public.users.email`
   (aborting on a collision), drops `password_hash`, `is_admin` and `session_version`, and drops
   `tokens`. The foreign keys from `threads`, `preferences` and `feedback` to `public.users` are
@@ -678,6 +717,8 @@ rollback deadline passing.
   informational only and never blocks the cutover.
 - [ ] Audits run after the copy and pass:
   - the row count and ordered id checksum of non-system `public.users` equal those of `auth.users`
+  - the ordered password-hash checksum of non-system `public.users` equals that of the `credential`
+    rows in `auth.account`
   - the number of `credential` rows equals the number of non-system users
   - **no system account exists in the auth database**
   - every `ADMIN_EMAILS` entry has `role = 'admin'` after the role script
@@ -709,6 +750,14 @@ rollback deadline passing.
   internal profile endpoint, with `ON CONFLICT (id) DO NOTHING`. Concurrent first requests create
   one row.
 - [ ] A `sub` unknown to `apps/auth`, or tombstoned, gets 401 and never gets a row.
+- [ ] A profile whose email is held under another id, is on a reserved domain, or is held by a
+  `system_key` row gets 401, no row and no 500. The pair of ids is logged by id only, and an alert
+  fires.
+- [ ] The internal delete endpoint refuses a call without the subject's JWT, with an invalid JWT,
+  or with a JWT whose `sub` differs from the target id. The operator completion script deletes as
+  the auth migrator and never calls it.
+- [ ] Internal routes compare the credential in constant time, are mounted outside the Better Auth
+  handler path, are rate-limited, and are reached over the private network.
 - [ ] `DELETE me` refuses a system account before deleting anything. Otherwise it deletes the app
   row (cascading) and writes the tombstone in one transaction, then deletes the auth user through
   the internal endpoint and marks the tombstone done. A failure after the first transaction is
@@ -1132,9 +1181,11 @@ at the window.
   - If a native `apps/frontend` build pointed at `apps/auth` is released to the stores, a snapshot
     rollback leaves it talking to an `apps/auth` with fewer users.
   - Does any native `apps/frontend` build ship before the rollback deadline passes?
-- **I-7: JWT lifetime.** 15 minutes, the default and the ceiling this spec allows, or shorter? It
-  trades the revocation window against refresh traffic to `apps/auth`. With two databases, a
-  per-request session check would be an HTTP call to `apps/auth` on every request.
+- **I-7: JWT lifetime and the per-request session check** (owner). 15 minutes, the default and the
+  ceiling this spec allows, or shorter? It trades the revocation window against refresh traffic to
+  `apps/auth`. With two databases, a per-request session check would be an HTTP call to `apps/auth`
+  on **every** request and would make **all** of `apps/api` hard-dependent on `apps/auth` being up,
+  where today only sign-in, refresh, admin routes and new users' first requests depend on it.
 
 **Nice-to-know**
 
@@ -1188,6 +1239,15 @@ at the window.
    default privileges are omitted.
 9e. The source scan finds no auth-database connection in `apps/api` and no app-database connection
    in `apps/auth`, and fails on a planted one.
+9f. A user created at `apps/auth` whose email is already held in `public.users` under another id
+   (a legacy row, a system row) gets 401 on the first request; no row is written, the log carries
+   both ids and no email, and the alert fires. The same holds for an `@system.ansari.chat` address.
+9g. With the internal credential but no JWT, with another user's JWT, or with a forged JWT, the
+   delete endpoint refuses and the target account remains.
+9h. The copy with one password hash altered in transit fails the hash audit, and the app cutover
+   migration is not run. A step 2 failure leaves no import table behind.
+9i. No verification email is sent to any copied user, and every copied user has
+   `email_verified = true`.
 10. Re-running the `account` backfill inserts zero rows. The auth-database copy transaction run
     against a non-empty `auth.users` aborts with no changes.
 11. A fresh empty app database migrated through the full `apps/api` journal, and a fresh auth
@@ -1267,7 +1327,7 @@ at the window.
 | JWKS fetch amplification via random `kid` | Low | Medium | Rate-limited re-fetch; test |
 | `apps/auth` reachable before the window, accepting sign-ups | Medium if overlooked | High | Deployed dark; production check before the window; the copy guard aborts on a non-empty `auth.users` |
 | Rate limit collapses into one global login bucket (edge or internal hop) | Medium without the fix | High | `X-Real-IP` only; authenticated forwarded IP on the hop; multi-entry XFF and two-client tests; empirical edge verification |
-| Internal credential leaked | Low | Medium | It only selects a rate-limit key and reaches internal-only endpoints; held in two service environments; rotated with them; never logged |
+| Internal credential leaked | Low | High (any user's profile and role readable by id; rate-limit key chosen) | Constant-time compare; internal routes outside the Better Auth handler path; rate-limited; delete bound to the subject's JWT; profile, role and delete only over the private network; held in two service environments, rotated with them, never logged |
 | Railway changes `X-Real-IP` semantics later | Low | Medium | Documented header; re-verify on any Railway networking change; an arch-critical fact makes the dependency visible |
 | Admin HTTP surface abused (stolen admin token or frontend XSS leads to account takeover) | Low | Critical | Whole admin surface blocked: `disabledPaths` plus a case-insensitive prefix middleware before `toNodeHandler`; variant tests; enumerating regression test |
 | `apps/frontend` client change slips or breaks in the window | Medium | High | Agreed with the app architect up front; rehearsed; web rollback by redeploy; native release timing decided (I-6) |
