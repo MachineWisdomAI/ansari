@@ -42,7 +42,8 @@ The goal is to make Better Auth the **only** auth model without locking anyone o
 - Everyone signs in once more after the cutover. Nobody needs a password reset.
 - The **released mobile build**, which cannot be changed without a store release, keeps working.
   It has `/v2/users/login` and `/v2/users/refresh_token` compiled in, and logs the user out
-  whenever `refresh_token` returns non-OK.
+  whenever `refresh_token` returns non-OK. The **legacy web frontend** (`legacy/frontend-web`),
+  still in production, uses the same routes and keeps working too.
 
 The primary failure mode is **silent mass lockout**. Every irreversible step in this spec is
 weighed against it. Secondary failure modes are a weakened security posture (rate limiting
