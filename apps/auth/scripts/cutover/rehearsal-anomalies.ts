@@ -11,7 +11,7 @@
  *     | psql "$APP_DATABASE_URL" -X -q -v ON_ERROR_STOP=1 --single-transaction
  *
  * Commands, in the rehearsal's order (docs/cutover/rehearsal.md):
- *   seed               the seven rows below (refuses if any is already there)
+ *   seed               the eight rows below (refuses if any is already there)
  *   resolve-collision  delete the collision pair (the copy then stops on the non-bcrypt hash)
  *   resolve-hash       delete the non-bcrypt row (the copy then stops on the NULL timestamp)
  *   resolve-null       set the NULL updated_at to its created_at (the copy then passes)

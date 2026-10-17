@@ -454,3 +454,23 @@
 - Main (via security): rollback targets recorded in window step 1 (the current deployment ID + commit of backend and legacy web; staging: the web service); rollback.md 3/4 redeploy those IDs and check the commit; mirrored in the staging table.
 - Security: phase 13's consult outputs and response file are dropped from git to match earlier phases (kept on disk); the review doc is the durable record. Gemini lane is back (iter1 returned APPROVE): both lanes run for iter2 and the review phase; the PR will name which rounds were Codex-only.
 - Phase 13 consult iter2: Gemini APPROVE; Codex REQUEST_CHANGES (2), both accepted: (1) the seed gains a non-bcrypt (scrypt-shaped) row + `resolve-hash`; staging step 8 now runs four times (collision → non-bcrypt → NULL → pass); tests, runbook table, rehearsal.md, plan, README updated. (2) edge-check's method forces `curl -4`/`-6` on both paths; direct IPv6 via the AAAA record with `--resolve [v6]`, else "not reachable" recorded. Measured: the Railway edge hostnames for api-staging and api-35 have NO AAAA (direct path IPv4 only today). Step 14 runs the whole block.
+
+## 2026-10-17 — review phase
+- Review doc rewritten to the porch template (`codev/reviews/300-better-auth-migration.md`): per-criterion spec compliance (numbered SD/AR/CS/JWT/AZ/CL/FD/RL/CORS/OPS, since the spec's criteria have no IDs), deviations per phase, consultation feedback per phase/round/model (Gemini lane failures from phase 8 iter2 to phase 12 recorded as not reviews), lessons, routing. Lessons routed: the HOT `vi.mock` lesson was demoted (its cold entry under spec 73 already exists), and a combined production-shaped-test lesson took its slot; there is a new cold section "Better Auth migration (spec 300)" plus its map line. Arch docs had been routed in phase 12; nothing further.
+- Security review of the cutover PR (two batches) came in during the review phase. Each fix is its own commit:
+  - F2 9bfbcb2: dev origins outside production only.
+  - F3 b9ca7b9: delete-account mints a fresh JWT first. Two error classes; the page shows a retry copy when nothing was sent. App approved it on #312.
+  - F4 1b7a886: the parity exercise covers insertAppUserRow and resolveUser. It is RED at 0008 until the owner's DEPLOYED_THROUGH bump, by design.
+  - 10c59ff: dead mail deps out of apps/api, bcrypt dev-only. Lockfile hunk minus eslint re-keys; main approved it. The contract preamble was cleaned, and the frozen pin was re-shaped to body plus preamble; security signed off.
+  - f6f8246: nits.
+  - F5 + S3 9d3e93e: change-password blocked. The middleware list is derived from BLOCKED_AUTH_PATHS; it had its own copy, which is why the new entry first went unblocked there. Absolute-form targets are canonicalized.
+  - F6 dce5bc0: no apps/api generate before the contract PR.
+  - S1 81ede8a: an unknown hash format verifies false (401, not 500).
+  - S2 b333830: comment and runbook corrected rather than adding a guard, because grant-admin.ts serves RELEASE.md's local smoke test.
+  - S4 e77a510: the copy passes expected_rows and 02 refuses a short stream. Proven with real psql 18.
+  - 6b5361b: a locked sign-in's refusal writes no walk row.
+  - Accepted residuals (admin check gated on NODE_ENV, one long-lived JWKS key) are recorded in the review.
+- F3 sim run (iPhone 17 dev client, my stack on throwaway DBs, JWT temporarily 1m, never committed):
+  - Expired JWT → /token 200 then DELETE 200 → deleted page; auth row gone, tombstone written.
+  - /token 5xx (auth stopped behind my proxy) → retry copy, still signed in, no DELETE sent. Auth restored → deleted.
+  - TRAP: a stale, untracked apps/frontend/.env.local (EXPO_PUBLIC_API_URL=localhost:3000) overrides the shell env at RUNTIME in the dev bundle, even though Metro inlines the shell value into process.env. The first attempts never reached apps/api ("Could not connect to the server"). Found by logging the resolved URL in customFetch. A stale .expo/types/router.d.ts (lacking /delete-account) also broke the local frontend typecheck; I moved it aside.
