@@ -45,6 +45,16 @@ The branch is never deployed to staging. After the cutover PR merges to `develop
 runbook runs on staging, from step 1**, before production. That run is the rehearsal, recorded in
 [`rehearsal.md`](rehearsal.md).
 
+### Step 0, before the cutover PR merges: staging auto-deploy OFF
+
+**Turn auto-deploy OFF on staging `backend`, the staging web service and staging `auth` before
+the cutover PR merges to `develop`.** Staging deploys from `develop`: with auto-deploy on, the
+merge itself would deploy the new `apps/api` onto a staging app database that has no `0010` or
+`0011` yet, and every staging sign-in and first use would fail. `DEPLOYED_THROUGH =
+'0011_better_auth_window'` asserts that the migrations are applied before the code deploys; only
+this step keeps that true on staging. Check each service in the Railway dashboard, and record
+that all three are off before the merge word.
+
 Roles:
 - the owner operates the Railway side
 - the main architect prepares the filled-in staging command sheet from this runbook and checks

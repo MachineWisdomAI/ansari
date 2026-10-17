@@ -151,6 +151,13 @@ describe('the window runbook', () => {
     expect(doc).not.toMatch(/railway\.internal|X-Ansari-Internal-Auth|:3101/i);
   });
 
+  it('step 0: staging auto-deploy is OFF before the cutover PR merges (main)', () => {
+    const step0 = doc.indexOf('### Step 0, before the cutover PR merges: staging auto-deploy OFF');
+    expect(step0).toBeGreaterThan(0);
+    expect(step0).toBeLessThan(doc.indexOf('## 1. Preconditions'));
+    expect(doc).toMatch(/Turn auto-deploy OFF on staging `backend`, the staging web service and staging `auth` before\s+the cutover PR merges/);
+  });
+
   it('attaches the auth domain after the copy and the admin roles, before apps/api deploys (H-5)', () => {
     const at = (heading: string) => doc.indexOf(heading);
     const attach = at('## 11. Attach `auth.askansari.ai`');
