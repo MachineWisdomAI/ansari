@@ -77,9 +77,11 @@ ENV NODE_ENV=production
 RUN chmod -R a+rX /repo/package.json /repo/pnpm-workspace.yaml /repo/pnpm-lock.yaml \
     /repo/packages /repo/apps/auth /repo/apps/api/drizzle
 
-# The cutover scripts refuse to run anywhere this file does not exist, so a
-# laptop `railway shell` (which injects the same Railway variables) cannot run
-# them. It marks "inside the auth image".
+# The cutover shell scripts (scripts/cutover/copy.sh, complete-tombstones.sh)
+# refuse to run anywhere this file does not exist, so a laptop `railway shell`
+# (which injects the same Railway variables) cannot run them. It marks "inside
+# the auth image". scripts/grant-admin.ts and scripts/ban-user.ts do not check
+# it: they also run against a local auth database (RELEASE.md's smoke test).
 RUN touch /etc/ansari-auth-image
 
 WORKDIR /repo/apps/auth
