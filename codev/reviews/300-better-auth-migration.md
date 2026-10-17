@@ -679,6 +679,22 @@ reviews, in two batches. The app architect re-reviewed the F3 frontend change an
 #### Codex — APPROVE
 - No concerns raised.
 
+### Review Phase — PR #315 (Round 1)
+
+#### Gemini — APPROVE
+- No concerns raised. It spot-checked 583b045 and 68aef71 and found both sound.
+
+#### Codex — REQUEST_CHANGES
+- **Concern**: the deployed-state parity test is red at `0008` → **Rebutted**: by design (F4).
+  The `DEPLOYED_THROUGH` bump is the owner's assertion commit in this PR; main and security
+  confirmed this.
+- **Concern**: `apps/auth`'s env example and CI env files are incomplete → **Rebutted**: held for
+  the owner's decision on env-file access (as in phase 11); listed in the PR body.
+- **Concern**: B-1 to B-4 are empty → **Rebutted**: they gate the owner's merge word, not the
+  open PR (R-2; phase 13 ruling).
+- **Concern**: the review said no tests were skipped → **Addressed** (016f866): the four skips
+  are named under Flaky Tests.
+
 ## Lessons Learned
 
 ### What Went Well
