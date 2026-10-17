@@ -7,7 +7,6 @@ import {
   mintJwt,
   unavailableResponse,
 } from '@/lib/auth-service/legacy';
-import { limitLegacyRoute } from '@/lib/auth-service/limits';
 import { safeErrorMeta } from '@/lib/log';
 
 // Legacy refresh over apps/auth (spec 300, plan phase 8): the refresh_token is
@@ -20,9 +19,6 @@ const refreshSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
-  const limited = limitLegacyRoute(request, 'refresh_token');
-  if (limited) return limited;
-
   try {
     const body = await request.json();
     const parseResult = refreshSchema.safeParse(body);

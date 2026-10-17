@@ -18,7 +18,7 @@
 // never apply: apps/api calls these with its own egress IP.
 import { consumeWindow, getEnv, limits, users, type Auth, type Db } from '@ansari/auth';
 import { Router, type Request, type Response } from 'express';
-import { createLocalJWKSet, jwtVerify } from 'jose';
+import { createLocalJWKSet, errors, jwtVerify, type JWTVerifyGetKey } from 'jose';
 
 import type { ServiceDeps } from '../app';
 
@@ -49,16 +49,67 @@ function bearerOf(req: Request): string | null {
   return match?.[1] ?? null;
 }
 
+/** At most one key-set read per this interval, however many unknown `kid`s arrive. */
+export const KEY_SET_MIN_REFRESH_MS = 60_000;
+/** A cached key set is re-read after this long, so a removed key stops verifying. */
+export const KEY_SET_MAX_AGE_MS = 600_000;
+
+type KeySet = { get: JWTVerifyGetKey; readAt: number };
+const keySets = new WeakMap<Auth, KeySet>();
+const cachedAuths = new Set<Auth>();
+
+/** Test-only: forget every cached key set, so the next verification reads the table. */
+export function resetAccountKeySets(): void {
+  for (const auth of cachedAuths) keySets.delete(auth);
+  cachedAuths.clear();
+}
+
+/**
+ * The service's own key set, read from the jwks table at most once per
+ * KEY_SET_MIN_REFRESH_MS and kept for KEY_SET_MAX_AGE_MS, so a flood of garbage
+ * tokens costs CPU, never a database read (security review, batch 4, C).
+ */
+async function keySet(auth: Auth, now: number, force = false): Promise<KeySet> {
+  const cached = keySets.get(auth);
+  const stale = !cached || now - cached.readAt >= KEY_SET_MAX_AGE_MS;
+  const mayRefresh = !cached || now - cached.readAt >= KEY_SET_MIN_REFRESH_MS;
+  if (cached && !stale && !(force && mayRefresh)) return cached;
+  const fresh = { get: createLocalJWKSet(await auth.api.getJwks()), readAt: now };
+  keySets.set(auth, fresh);
+  cachedAuths.add(auth);
+  return fresh;
+}
+
 /**
  * The subject and session of a JWT this service issued, verified against its
  * own JWKS with the algorithm, issuer, audience and expiry pinned; null when
- * it is anything else. Reading the key set is outside the try: a database
- * failure there is an outage (500, which apps/api reads as unavailable), never
- * "this token is bad" (401, which apps/api reads as refused).
+ * it is anything else. An unknown `kid` re-reads the key set (at most once per
+ * KEY_SET_MIN_REFRESH_MS) and tries once more. Reading the key set is outside
+ * the try: a database failure there is an outage (500, which apps/api reads as
+ * unavailable), never "this token is bad" (401, which apps/api reads as
+ * refused).
  */
 export async function verifySubjectToken(auth: Auth, token: string): Promise<TokenSubject | null> {
+  const now = Date.now();
+  let keys = await keySet(auth, now);
+  let subject = await verifyWith(keys.get, token);
+  if (subject === UNKNOWN_KID) {
+    const refreshed = await keySet(auth, now, true);
+    if (refreshed !== keys) {
+      keys = refreshed;
+      subject = await verifyWith(keys.get, token);
+    }
+  }
+  return subject === UNKNOWN_KID ? null : subject;
+}
+
+const UNKNOWN_KID = Symbol('unknown kid');
+
+async function verifyWith(
+  jwks: JWTVerifyGetKey,
+  token: string
+): Promise<TokenSubject | null | typeof UNKNOWN_KID> {
   const env = getEnv();
-  const jwks = createLocalJWKSet(await auth.api.getJwks());
   try {
     const { payload } = await jwtVerify(token, jwks, {
       algorithms: JWT_ALGORITHMS,
@@ -70,8 +121,8 @@ export async function verifySubjectToken(auth: Auth, token: string): Promise<Tok
     if (typeof sub !== 'string' || typeof sid !== 'string') return null;
     if (!UUID.test(sub) || !UUID.test(sid)) return null;
     return { sub, sid };
-  } catch {
-    return null;
+  } catch (err) {
+    return err instanceof errors.JWKSNoMatchingKey ? UNKNOWN_KID : null;
   }
 }
 

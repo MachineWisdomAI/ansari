@@ -156,11 +156,11 @@ After the copy, sign each seeded user in against the staging auth service with
 | 8 The copy and the audits | | **yes** | | |
 | 9 The app window migration | | no | | |
 | 10 Admin roles | | no | | |
-| 11 Private-network smoke tests | | no | | |
+| 11 Attach `auth.askansari.ai` | | no | | |
 | 12 Deploy `apps/api` and `apps/frontend` | | no | | |
 | 13 Re-attach `apps/api`'s domains | | no | | |
 | 14 Edge probe | | no | | |
-| 15 Attach the auth domain | | no | | |
+| 15 (Moved to step 11) | | no | | |
 | 16 Replace legacy web | | no | | |
 | 17 Public smoke tests | | no | | |
 | 18 Re-enable alerting | | no | | |
@@ -217,7 +217,9 @@ Follow [`rollback.md`](rollback.md) as written:
 1. Remove the post-cutover users: the dry-run count, then `confirm=yes`.
 2. Redeploy the previous image.
 3. A migrated user signs in with the legacy password through the legacy code.
-4. Check that no post-cutover user remains.
+4. A client signed in during the window (the released mobile build, signed in after step 13) is
+   signed out once on its next call, and signs in again with the legacy password.
+5. Check that no post-cutover user remains.
 
 | Check | Result |
 |---|---|
@@ -225,6 +227,7 @@ Follow [`rollback.md`](rollback.md) as written:
 | deleted | |
 | post-cutover users left | |
 | legacy sign-in of a migrated user | |
+| window-signed-in client: signed out once, then signs in with the legacy password | |
 | time, rollback step 1 to step 6 | |
 
 ## Part F: the second forward run, and clean-up

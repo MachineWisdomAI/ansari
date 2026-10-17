@@ -6,9 +6,14 @@ import { randomUUID } from 'node:crypto';
 
 import { limits, users } from '@ansari/auth';
 import { exportJWK, generateKeyPair, SignJWT } from 'jose';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { accountLimitKey } from '../src/routes/account';
+import {
+  accountLimitKey,
+  KEY_SET_MAX_AGE_MS,
+  KEY_SET_MIN_REFRESH_MS,
+  resetAccountKeySets,
+} from '../src/routes/account';
 import { TEST_JWT_AUDIENCE, TEST_JWT_ISSUER } from '../../../packages/auth/tests/helpers/auth-db';
 import { runBanUser } from '../scripts/ban-user';
 import {
@@ -377,6 +382,11 @@ describe("keys planted in the service's own JWKS", () => {
 
   const revokeAt = (bearer: string) => account(planted, '/revoke-sessions', 'POST', bearer);
 
+  // Each planted key must be read: start from a cold key-set cache.
+  beforeEach(() => {
+    resetAccountKeySets();
+  });
+
   it('a token with no exp is refused, though its key is trusted', async () => {
     const target = await signUpTokens(planted, nextEmail('no-exp'));
     const sid = await sessionIdOf(planted, target.sessionToken);
@@ -413,6 +423,84 @@ describe('a ban (scripts/ban-user.ts)', () => {
 
     await runBanUser(service.db, { kind: 'unban', email });
     expect((await signIn(service, email, STRONG_PASSWORD)).status).toBe(200);
+  });
+});
+
+describe('the key-set cache (security review, batch 4, C)', () => {
+  // Garbage tokens cost CPU only: the jwks table is read at most once per
+  // KEY_SET_MIN_REFRESH_MS, and re-read after KEY_SET_MAX_AGE_MS.
+  let svc: Service;
+  beforeAll(async () => {
+    svc = await startService();
+  });
+  afterAll(async () => {
+    await svc.close();
+  });
+  beforeEach(() => {
+    resetAccountKeySets();
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const meAt = (bearer: string) => account(svc, '/me', 'GET', bearer);
+
+  it('a flood of garbage and unknown-kid tokens reads the key set once', async () => {
+    const user = await signUpTokens(svc, nextEmail('cache'));
+    const reads = vi.spyOn(svc.auth.api, 'getJwks');
+    expect((await meAt(user.jwt)).status).toBe(200);
+    const foreign = await new SignJWT({ sub: user.id, sid: claims(user.jwt).sid })
+      .setProtectedHeader({ alg: 'EdDSA', kid: randomUUID() })
+      .setIssuer(TEST_JWT_ISSUER)
+      .setAudience(TEST_JWT_AUDIENCE)
+      .setExpirationTime('5m')
+      .sign((await generateKeyPair('EdDSA')).privateKey);
+    for (let i = 0; i < 20; i++) {
+      expect((await meAt(i % 2 ? 'not.a.jwt' : foreign)).status).toBe(401);
+    }
+    expect(reads).toHaveBeenCalledTimes(1);
+    reads.mockRestore();
+  });
+
+  it(`an unknown kid re-reads at most once per ${KEY_SET_MIN_REFRESH_MS / 1000} s, so a new key verifies after that`, async () => {
+    const user = await signUpTokens(svc, nextEmail('rotate'));
+    expect((await meAt(user.jwt)).status).toBe(200);
+    // A new signing key the cache has not seen: plant it, sign with it.
+    const { publicKey, privateKey } = await generateKeyPair('EdDSA', { extractable: true });
+    const kid = randomUUID();
+    const jwk = await exportJWK(publicKey);
+    await svc.client.query(
+      `insert into auth.jwks (id, public_key, private_key, created_at, alg, crv) values ($1, $2, 'unused', now() - interval '1 day', 'EdDSA', $3)`,
+      [kid, JSON.stringify(jwk), jwk.crv ?? null]
+    );
+    const rotated = await new SignJWT({ sid: claims(user.jwt).sid })
+      .setProtectedHeader({ alg: 'EdDSA', kid })
+      .setSubject(user.id)
+      .setIssuer(TEST_JWT_ISSUER)
+      .setAudience(TEST_JWT_AUDIENCE)
+      .setExpirationTime('10m')
+      .sign(privateKey);
+    const reads = vi.spyOn(svc.auth.api, 'getJwks');
+    expect((await meAt(rotated)).status).toBe(401);
+    expect(reads).not.toHaveBeenCalled();
+    vi.setSystemTime(Date.now() + KEY_SET_MIN_REFRESH_MS);
+    expect((await meAt(rotated)).status).toBe(200);
+    expect(reads).toHaveBeenCalledTimes(1);
+    reads.mockRestore();
+  });
+
+  it(`the cached set is re-read after ${KEY_SET_MAX_AGE_MS / 60_000} min even with no unknown kid`, async () => {
+    const user = await signUpTokens(svc, nextEmail('max-age'));
+    expect((await meAt(user.jwt)).status).toBe(200);
+    const reads = vi.spyOn(svc.auth.api, 'getJwks');
+    vi.setSystemTime(Date.now() + KEY_SET_MAX_AGE_MS - 1);
+    expect((await meAt(user.jwt)).status).toBe(200);
+    expect(reads).not.toHaveBeenCalled();
+    vi.setSystemTime(Date.now() + 1);
+    expect((await meAt(user.jwt)).status).toBe(200);
+    expect(reads).toHaveBeenCalledTimes(1);
+    reads.mockRestore();
   });
 });
 

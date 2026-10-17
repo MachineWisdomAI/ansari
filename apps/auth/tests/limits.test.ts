@@ -5,12 +5,14 @@
 // view: every call from ONE IP (apps/api's), never refused for sharing it.
 // Time moves with a faked Date, which both better-auth's router and these
 // limiters read.
+import { createHmac, randomUUID } from 'node:crypto';
+
 import { limits, touchKey } from '@ansari/auth';
 import * as Sentry from '@sentry/node';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { LIST_WALK_MESSAGE, type ListWalkAlert } from '../src/alerts';
-import { emailHash, emailKey, globalKey, sessionKey } from '../src/limits/email-limiter';
+import { LIST_WALK_MESSAGE, type FailedSignInAlert, type ListWalkAlert } from '../src/alerts';
+import { emailHash, emailKey, globalKey, sessionKey, sessionTokenOf } from '../src/limits/email-limiter';
 import {
   clearSignUpCeiling,
   rateLimitKeys,
@@ -25,6 +27,8 @@ import {
 } from './helpers/service';
 
 const RESET = '/api/auth/request-password-reset';
+/** BETTER_AUTH_SECRET in tests (packages/auth tests/helpers/auth-db.ts setAuthEnv). */
+const AUTH_SECRET = 'test-secret-at-least-32-characters-long-000';
 
 function advance(seconds: number): void {
   vi.setSystemTime(Date.now() + seconds * 1000);
@@ -164,24 +168,78 @@ describe('the session -> JWT exchange, per session token', () => {
     advance(3600);
   });
 
-  it.each(['/token', '/get-session'])(
-    `%s: ${limits.TOKEN_EXCHANGE_PER_SESSION.max} per session pass as a burst; the next is 429; another session is unaffected`,
-    async (path) => {
-      const a = await signUpTokens(service, `exchange-a${path.replace('/', '-')}@example.com`);
-      const b = await signUpTokens(service, `exchange-b${path.replace('/', '-')}@example.com`);
-      advance(3600); // start a fresh window: signUpTokens itself used /token
-      const exchange = (bearer: string) =>
-        send(service.publicUrl, `/api/auth${path}`, { bearer, ip: '192.0.2.20' });
-      for (let i = 0; i < limits.TOKEN_EXCHANGE_PER_SESSION.max; i++) {
-        expect((await exchange(a.sessionToken)).status).toBe(200);
-      }
-      expect((await exchange(a.sessionToken)).status).toBe(429);
-      expect((await exchange(b.sessionToken)).status).toBe(200);
-      const keys = await rateLimitKeys(service);
-      expect(keys).toContain(sessionKey(a.sessionToken, path));
-      expect(keys.some((k) => k.includes(a.sessionToken) || k.includes('192.0.2.20'))).toBe(false);
+  it(`/token: ${limits.TOKEN_EXCHANGE_PER_SESSION.max} per session pass as a burst; the next is 429; another session is unaffected`, async () => {
+    const a = await signUpTokens(service, 'exchange-a@example.com');
+    const b = await signUpTokens(service, 'exchange-b@example.com');
+    advance(3600); // start a fresh window: signUpTokens itself used /token
+    const exchange = (bearer: string) =>
+      send(service.publicUrl, '/api/auth/token', { bearer, ip: '192.0.2.20' });
+    for (let i = 0; i < limits.TOKEN_EXCHANGE_PER_SESSION.max; i++) {
+      expect((await exchange(a.sessionToken)).status).toBe(200);
     }
-  );
+    expect((await exchange(a.sessionToken)).status).toBe(429);
+    expect((await exchange(b.sessionToken)).status).toBe(200);
+    const keys = await rateLimitKeys(service);
+    expect(keys).toContain(sessionKey(a.sessionToken, '/token'));
+    expect(keys.some((k) => k.includes(a.sessionToken) || k.includes('192.0.2.20'))).toBe(false);
+  });
+
+  it("the signed form of a session's token (the web client's) spends the same budget", async () => {
+    const { sessionToken } = await signUpTokens(service, 'exchange-signed@example.com');
+    advance(3600);
+    // As better-call's signCookieValue makes it: standard base64, padded, URI-encoded.
+    const signed = `${sessionToken}.${createHmac('sha256', AUTH_SECRET).update(sessionToken).digest('base64')}`;
+    for (const bearer of [sessionToken, encodeURIComponent(signed)]) {
+      expect((await send(service.publicUrl, '/api/auth/token', { bearer })).status).toBe(200);
+    }
+    expect((await rateLimitRow(service, sessionKey(sessionToken, '/token')))?.count).toBe(2);
+  });
+
+  it('a spray of bearers that cannot be session tokens writes no rows (batch 4, A)', async () => {
+    advance(3600);
+    const before = (await rateLimitKeys(service)).length;
+    const garbage = [
+      'no-such-session',
+      'x'.repeat(31),
+      'x'.repeat(33),
+      `${'A'.repeat(32)}.${'b'.repeat(43)}`, // signed form, wrong HMAC
+      `${'A'.repeat(32)}.short`,
+      '%E0%A4%A',
+      randomUUID(),
+    ];
+    for (let i = 0; i < 50; i++) {
+      const bearer = garbage[i % garbage.length] as string;
+      expect((await send(service.publicUrl, '/api/auth/token', { bearer })).status).toBe(401);
+    }
+    expect((await rateLimitKeys(service)).length).toBe(before);
+  });
+
+  it('sessionTokenOf accepts exactly the two forms better-auth accepts', () => {
+    const token = 'Ab3'.repeat(10) + 'Cd';
+    const mac = createHmac('sha256', AUTH_SECRET).update(token);
+    const raw = mac.digest();
+    const sig = raw.toString('base64url');
+    const std = raw.toString('base64');
+    expect(sessionTokenOf(token, AUTH_SECRET)).toBe(token);
+    for (const form of [`${token}.${sig}`, `${token}.${std}`, encodeURIComponent(`${token}.${std}`)]) {
+      expect(sessionTokenOf(form, AUTH_SECRET), form).toBe(token);
+    }
+    const flipped = (sig[0] === 'A' ? 'B' : 'A') + sig.slice(1);
+    for (const bad of [`${token}.${sig}x`, `${token}.${flipped}`, `${token}x`, `${token}-`, '', `${token}.${sig}.${sig}`]) {
+      expect(sessionTokenOf(bad, AUTH_SECRET), bad).toBeNull();
+    }
+    expect(sessionTokenOf(`${token}.${sig}`, 'another-secret-of-at-least-32-characters')).toBeNull();
+  });
+
+  it('/get-session keeps the router\'s per-IP default; the layer never calls it (batch 4, B)', async () => {
+    advance(3600);
+    expect(service.auth.options.rateLimit?.customRules?.['/get-session']).toBeUndefined();
+    const ip = '192.0.2.21';
+    for (let i = 0; i < limits.DEFAULT_RULE.max; i++) {
+      expect((await send(service.publicUrl, '/api/auth/get-session', { ip })).status).toBe(200);
+    }
+    expect((await send(service.publicUrl, '/api/auth/get-session', { ip })).status).toBe(429);
+  });
 });
 
 describe("the layer's view: every call from one IP (R1)", () => {
@@ -323,6 +381,56 @@ describe('sign-in and sign-up per email (scenario 32)', () => {
     for (const prefix of alert?.hashPrefixes ?? []) expect(prefix).toMatch(/^[0-9a-f]{8}$/);
     expect(walked.map((e) => emailHash(e).slice(0, 8))).toEqual(expect.arrayContaining(alert?.hashPrefixes ?? []));
     expect(JSON.stringify(alert)).not.toMatch(/@|walked/);
+  });
+});
+
+describe('the failed-sign-in alert (batch 5, H): an alert, never a cap', () => {
+  let service: Service;
+  const fired: FailedSignInAlert[] = [];
+
+  beforeAll(async () => {
+    service = await startService({ failedSignInAlert: (a) => fired.push(a) });
+  });
+
+  afterAll(async () => {
+    await service?.close();
+  });
+
+  it(`a spray of one failure per email fires once at ${limits.SIGN_IN_FAILED_ALERT.max} and refuses nothing`, async () => {
+    advance(3600);
+    fired.length = 0;
+    const { max, window } = limits.SIGN_IN_FAILED_ALERT;
+    const sprayed = Array.from({ length: max + 10 }, (_, i) => `spray-${i}@example.com`);
+    for (const [i, email] of sprayed.entries()) {
+      // One failure per email: no per-email lock ever engages.
+      expect((await signIn(service, email, 'Wrong-Passw0rd!', { ip: '192.0.2.40' })).status).toBe(401);
+      expect(fired.length).toBe(i + 1 < max ? 0 : 1);
+    }
+    const [alert] = fired;
+    expect(alert).toMatchObject({ failedSignIns: max, windowSeconds: window, perMinute: max, distinctEmails: max });
+    expect(alert?.hashPrefixes.length).toBeGreaterThan(0);
+    for (const prefix of alert?.hashPrefixes ?? []) expect(prefix).toMatch(/^[0-9a-f]{8}$/);
+    expect(sprayed.map((e) => emailHash(e).slice(0, 8))).toEqual(expect.arrayContaining(alert?.hashPrefixes ?? []));
+    expect(JSON.stringify(alert)).not.toMatch(/@|spray/);
+
+    // Nothing is refused: a correct password still signs in, from the same IP.
+    expect((await signUp(service, 'after-spray@example.com')).status).toBe(200);
+    expect((await signIn(service, 'after-spray@example.com', STRONG_PASSWORD, { ip: '192.0.2.40' })).status).toBe(200);
+
+    // The next window can alert again.
+    advance(window);
+    for (let i = 0; i < max; i++) await signIn(service, `spray-next-${i}@example.com`, 'Wrong-Passw0rd!');
+    expect(fired).toHaveLength(2);
+  });
+
+  it('correct sign-ins are never counted', async () => {
+    advance(3600);
+    fired.length = 0;
+    expect((await signUp(service, 'steady-alert@example.com')).status).toBe(200);
+    for (let i = 0; i < limits.SIGN_IN_FAILED_ALERT.max + 5; i++) {
+      expect((await signIn(service, 'steady-alert@example.com', STRONG_PASSWORD)).status).toBe(200);
+    }
+    expect(fired).toEqual([]);
   });
 });
 

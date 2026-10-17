@@ -44,9 +44,9 @@ export const RESET_REQUEST_GLOBAL: LimitRule = { window: MINUTE, max: 30 };
 export const RESET_CONSUME_GLOBAL: LimitRule = { window: MINUTE, max: 30 };
 
 /**
- * Session → JWT exchange (`/token`, `/get-session`), per session token (stored
- * hashed). The released mobile client refreshes concurrently with no
- * single-flight guard, so bursts must pass.
+ * Session → JWT exchange (`/token`), per session token (stored hashed), counted
+ * only for a bearer shaped like a session token. The released mobile client
+ * refreshes concurrently with no single-flight guard, so bursts must pass.
  */
 export const TOKEN_EXCHANGE_PER_SESSION: LimitRule = { window: MINUTE, max: 60 };
 
@@ -65,6 +65,24 @@ export const SIGN_UP_PER_EMAIL: LimitRule = { window: MINUTE, max: 3 };
  */
 export const SIGN_UP_GLOBAL: LimitRule = { window: MINUTE, max: 30 };
 
+/**
+ * An ALERT, never a cap (security review, batch 5, H): when this many sign-ins
+ * fail in the window, every email together, apps/auth sends one Sentry event
+ * per window (counts, the rate, distinct emails, hash prefixes; ids only) and
+ * refuses nothing. It catches a sprayer that stays under SIGN_IN_PER_EMAIL for
+ * each email, which no limit and not the list-walk alert would see. 30 per
+ * minute until B-4 is measured; the owner sets the number from it.
+ *
+ * OWNER OPTION, NOT BUILT: a refusal ceiling on failed sign-ins could be added
+ * beside it at a much higher floor (max(600 per minute, 10 x the B-4 peak)).
+ * The trade-off: once tripped it refuses every sign-in, the right password
+ * included, so anyone able to send that many wrong passwords can switch sign-in
+ * off for every user, and it does not slow a sprayer (an attempt's outcome is
+ * unknown until the password is checked). The per-email lock stays the primary
+ * control.
+ */
+export const SIGN_IN_FAILED_ALERT: LimitRule = { window: MINUTE, max: 30 };
+
 /** List-walk alert when this many distinct emails hit a per-email limit in the window. */
 export const LIST_WALK_ALERT = { window: 10 * MINUTE, distinctEmails: 20 } as const;
 
@@ -80,6 +98,7 @@ export const LONGEST_WINDOW = Math.max(
     SIGN_IN_PER_EMAIL,
     SIGN_UP_PER_EMAIL,
     SIGN_UP_GLOBAL,
+    SIGN_IN_FAILED_ALERT,
     LIST_WALK_ALERT,
   ].map((rule) => rule.window)
 );
@@ -92,7 +111,19 @@ export const LONGEST_WINDOW = Math.max(
  * back to better-auth's built-in per-IP rules (sign-in/sign-up 3 per 10 s,
  * reset request 3 per 60 s) or the default.
  *
- * These are exactly the paths apps/api's layer calls (`lib/auth-service/legacy.ts`).
+ * These are exactly the five better-auth paths apps/api's layer calls
+ * (`lib/auth-service/legacy.ts`); every other path, `/get-session` included,
+ * keeps the per-IP default.
+ *
+ * PROPOSAL for the owner, after the baselines (security review, batch 4, D; see
+ * also SIGN_IN_FAILED_ALERT's owner option):
+ * with the per-IP rules gone, a client calling these paths directly from one IP
+ * is bounded only by the per-email, per-session and global rules. A HIGH per-IP
+ * ceiling on each would bound it again, if it is sized so the layer's aggregate
+ * from apps/api's one egress IP never binds: max(600 per minute, 10 x the B-4
+ * peak) for sign-in and /token, 10 x the B-1 peak for sign-up, as the global
+ * ceilings are sized. A rule here would be `{ window: 60, max: N }` in place of
+ * `false`. No number is chosen without B-1 and B-4.
  */
 export const ROUTER_RULES: Readonly<Record<string, false>> = {
   '/sign-in/email': false,
@@ -100,5 +131,4 @@ export const ROUTER_RULES: Readonly<Record<string, false>> = {
   '/request-password-reset': false,
   '/reset-password': false,
   '/token': false,
-  '/get-session': false,
 };

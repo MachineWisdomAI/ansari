@@ -11,14 +11,20 @@ import { tooManyRequestsResponse } from './legacy';
  * numbers apps/auth used to enforce per IP. apps/auth's per-email, per-session
  * and global limits still apply behind them.
  *
+ * `refresh_token` has NO per-IP rule (security review, batch 5, G): the released
+ * mobile client signs out on any non-OK refresh (legacy/frontend-app
+ * `src/services/ApiService.ts` refreshAccessToken: `!response.ok` removes the
+ * tokens and resets auth), so a 429 shared by everyone behind one carrier NAT
+ * would sign them all out. A refresh needs a live session token, and
+ * apps/auth caps it per session (TOKEN_EXCHANGE_PER_SESSION).
+ *
  * TEMPORARY, until the legacy system is replaced. The store is in memory, per
  * instance (`lib/rate-limit.ts`), so with N instances a client gets up to N
- * times each budget.
+ * times each budget, and it is cleared whole above 10 000 keys.
  */
 export const LEGACY_IP_LIMITS = {
   login: { max: 5, windowMs: 60_000 },
   register: { max: 3, windowMs: 60_000 },
-  refresh_token: { max: 60, windowMs: 60_000 },
   request_password_reset: { max: 5, windowMs: 15 * 60_000 },
   reset_password: { max: 5, windowMs: 15 * 60_000 },
 } as const;

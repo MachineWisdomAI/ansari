@@ -13,7 +13,7 @@ import {
   migrate,
   setAuthEnv,
 } from '../../../../packages/auth/tests/helpers/auth-db';
-import type { ListWalkAlert } from '../../src/alerts';
+import type { FailedSignInAlert, ListWalkAlert } from '../../src/alerts';
 import { createApp, createServiceAuth } from '../../src/app';
 
 export { TEST_ADMIN_EMAIL } from '../../../../packages/auth/tests/helpers/auth-db';
@@ -34,6 +34,7 @@ export type Service = {
 export type ServiceOptions = {
   production?: boolean;
   alert?: (alert: ListWalkAlert) => void;
+  failedSignInAlert?: (alert: FailedSignInAlert) => void;
   /** Replaces the capturing mailer (which records into `mail`). */
   mailer?: Mailer;
 };
@@ -59,7 +60,11 @@ export async function startService(options: ServiceOptions = {}): Promise<Servic
   const capture: Mailer = async (message) => {
     mail.push(message);
   };
-  const auth = createServiceAuth(db, { alert: options.alert, mailer: options.mailer ?? capture });
+  const auth = createServiceAuth(db, {
+    alert: options.alert,
+    failedSignInAlert: options.failedSignInAlert,
+    mailer: options.mailer ?? capture,
+  });
   const appOptions = { production: options.production ?? false };
   const publicServer = await listen(createApp({ auth, db }, appOptions));
   return {

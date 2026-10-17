@@ -383,6 +383,45 @@ describe('scenarios 21 and 22: sign-in limits through the layer', () => {
     expect((await call(login, { body: { email, password: STRONG_PASSWORD }, ip: '198.51.100.32' })).status).toBe(200);
   });
 
+  it('refresh_token has no per-IP limit: many refreshes from one NAT address all succeed (batch 5, G)', async () => {
+    // The released client signs out on ANY non-OK refresh (legacy ApiService.ts
+    // refreshAccessToken), so a shared per-IP 429 would sign out a whole NAT.
+    const a = await registerUser(nextEmail('nat-a'));
+    const b = await registerUser(nextEmail('nat-b'));
+    const nat = '198.51.100.50';
+    for (let i = 0; i < 80; i++) {
+      const res = await call(refreshToken, { body: { refresh_token: (i % 2 ? a : b).refresh }, ip: nat });
+      expect(res.status).toBe(200);
+    }
+    expect(LEGACY_IP_LIMITS).not.toHaveProperty('refresh_token');
+  });
+
+  it('every 429 has the legacy shape: the detail and a Retry-After, from apps/api and from apps/auth alike', async () => {
+    const raw = async (handler: Handler, body: unknown, ip: string) => {
+      const request = new NextRequest('http://localhost/api/v2/x', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-real-ip': ip },
+        body: JSON.stringify(body),
+      });
+      return (handler as (r: NextRequest) => Promise<Response>)(request);
+    };
+    const legacy429 = async (res: Response) => {
+      expect(res.status).toBe(429);
+      expect(await res.json()).toEqual({ detail: 'Too many requests. Please try again later.' });
+      expect(Number(res.headers.get('retry-after'))).toBeGreaterThan(0);
+    };
+    // apps/api's own per-IP limit.
+    const { email } = await registerUser(nextEmail('shape-ip'));
+    for (let i = 0; i < LEGACY_IP_LIMITS.login.max; i++) {
+      await raw(login, { email, password: STRONG_PASSWORD }, '198.51.100.60');
+    }
+    await legacy429(await raw(login, { email, password: STRONG_PASSWORD }, '198.51.100.60'));
+    // apps/auth's per-email lock, translated by the layer.
+    const locked = await registerUser(nextEmail('shape-email'));
+    for (let i = 0; i < 5; i++) await call(login, { body: { email: locked.email, password: 'Wrong-Password-1!' } });
+    await legacy429(await raw(login, { email: locked.email, password: STRONG_PASSWORD }, '198.51.100.61'));
+  });
+
   it("apps/auth's per-email lock still trips behind the layer, from any number of client IPs", async () => {
     const { email } = await registerUser(nextEmail('email-lock'));
     for (let i = 0; i < 5; i++) {

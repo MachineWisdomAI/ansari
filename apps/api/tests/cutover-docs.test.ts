@@ -159,6 +159,27 @@ describe('the window runbook', () => {
     expect(doc).toContain('## 15. (Moved to step 11)');
   });
 
+  it("rehearsal.md's timing table names each runbook step as the runbook does (batch 5, E)", () => {
+    const rehearsal = read('docs/cutover/rehearsal.md');
+    const headings = new Map(
+      [...doc.matchAll(/^## (\d+)\. (.+)$/gm)].map((m) => [m[1], (m[2] ?? '').toLowerCase()])
+    );
+    const rows = [...rehearsal.matchAll(/^\| (\d+) ([^|]+?) \| \| (?:no|\*\*yes\*\*) \|/gm)];
+    expect(rows.length).toBe(18);
+    for (const [, step, label] of rows) {
+      const heading = headings.get(step as string);
+      expect(heading, `runbook step ${step}`).toBeDefined();
+      expect(heading?.startsWith((label as string).toLowerCase()), `step ${step}: "${label}" vs "${heading}"`).toBe(true);
+    }
+    expect(rehearsal).not.toMatch(/private.network/i);
+  });
+
+  it('step 9 proves 0010 and 0011 landed before anything deploys (batch 5, F)', () => {
+    const step9 = doc.slice(doc.indexOf('## 9. The app window migration'), doc.indexOf('## 10. Admin roles'));
+    expect(step9).toContain("select to_regclass('public.deleted_users') is not null");
+    expect(step9).toMatch(/column_name = 'password_hash'"`\s+prints `YES`/);
+  });
+
   it('gives the operator response to the direct-delete residual (H-6, R3)', () => {
     expect(doc).toContain('## Orphan app rows (owner-accepted residual, spec H-6)');
     expect(doc).toContain('auth user has no app row: email-conflict');

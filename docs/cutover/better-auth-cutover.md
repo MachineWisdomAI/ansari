@@ -270,9 +270,11 @@ psql "$APP_DATABASE_URL" -X -v ON_ERROR_STOP=1 --single-transaction -f apps/api/
 psql "$APP_DATABASE_URL" -X -v ON_ERROR_STOP=1 --single-transaction -f apps/api/drizzle/0011_better_auth_window.sql
 ```
 
-**Check:** `psql "$APP_DATABASE_URL" -X -At -c "select is_nullable from information_schema.columns where table_name = 'users' and column_name = 'password_hash'"`
-prints `YES`, and `psql "$APP_DATABASE_URL" -X -At -c "select count(*) from users where email <> lower(trim(email))"`
-prints `0`. Each guard is one `DO` block: a guard failure aborts its file with nothing applied.
+**Check:** `psql "$APP_DATABASE_URL" -X -At -c "select to_regclass('public.deleted_users') is not null"`
+prints `t` (`0010` landed: the tombstone table `DELETE me` and first use read), `psql "$APP_DATABASE_URL" -X -At -c "select is_nullable from information_schema.columns where table_schema = 'public' and table_name = 'users' and column_name = 'password_hash'"`
+prints `YES` (`0011` landed: rows created on first use carry no hash), and `psql "$APP_DATABASE_URL" -X -At -c "select count(*) from users where email <> lower(trim(email))"`
+prints `0`. A skipped migration must not pass into step 12: the new `apps/api` would refuse every
+first use and every delete, a total auth outage. Each guard is one `DO` block: a guard failure aborts its file with nothing applied.
 **Abort:** a guard failure changed nothing; the legacy code still runs on this database. Bring
 `apps/api` back online on the old code and investigate. If `0011` applied and the window must
 still stop, follow [`rollback.md`](rollback.md).

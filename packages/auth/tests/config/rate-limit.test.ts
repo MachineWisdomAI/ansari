@@ -34,7 +34,6 @@ const LAYER_CALLS: Record<string, CallOptions> = {
   '/request-password-reset': { body: {} },
   '/reset-password': { body: {} },
   '/token': { bearer: 'no-such-session' },
-  '/get-session': { bearer: 'no-such-session' },
 };
 
 /** A path under the router's default rule. */
@@ -83,6 +82,15 @@ describe('no per-IP limit on a path the layer calls, the default included', () =
     expect((await ok(ip)).status).toBe(429);
     // Another client is unaffected.
     expect((await ok('203.0.113.21')).status).toBe(200);
+  });
+
+  it('/get-session, which the layer never calls, is under the default too', async () => {
+    expect(ROUTER_RULES['/get-session']).toBeUndefined();
+    const ip = '203.0.113.22';
+    for (let i = 0; i < DEFAULT_RULE.max; i++) {
+      expect((await call(auth, '/get-session', { ip })).status).toBe(200);
+    }
+    expect((await call(auth, '/get-session', { ip })).status).toBe(429);
   });
 });
 

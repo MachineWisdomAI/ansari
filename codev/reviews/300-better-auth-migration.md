@@ -297,6 +297,71 @@ The owner removed `AUTH_INTERNAL_SECRET` and the internal hop in this PR ("no ti
   `ansari-api#test`, `ansari-api#build` and `ansari-auth#build`, and a again restores all three;
   `AUTH_INTERNAL_SECRET` x → y moves none. Dockerfile `EXPOSE 3100`; `railway.toml` one port.
 
+### Security review batches 4 and 5, on the amendment (and the 3-way consult round 2)
+
+- [x] **A, the `/token` spray.** The limiter counts only a bearer shaped like better-auth 1.7.7's
+  session token (`generateId(32)`, 32 of `[A-Za-z0-9]`, `internal-adapter.mjs`), or its signed
+  form `<token>.<HMAC-SHA256>` with the signature verified under `BETTER_AUTH_SECRET`. better-call's
+  `signCookieValue` uses standard padded base64, URI-encoded; base64url is accepted too. It keys
+  on the 32-character token, so both forms of one session share a bucket.
+  `limits.test.ts`: 50 random or mis-signed bearers write no row, and the signed form spends the
+  unsigned form's budget. **Residual, recorded:** a spray of well-formed unsigned 32-character
+  values still writes one row each, because the bearer() plugin signs an unsigned value itself, so
+  its shape is all there is to check before the session lookup.
+- [x] **B.** `/get-session` is out of `ROUTER_RULES`, so the router's per-IP default applies (the
+  layer never calls it). Tested in both packages.
+- [x] **C.** The account routes' key set is cached in process: at most one read per 60 s on an
+  unknown `kid`, re-read after 10 min. Tests: 20 garbage or unknown-`kid` tokens cost one read; a
+  new key verifies once 60 s have passed; the max age is honoured.
+- [x] **D (owner, after the baselines).** Per-IP ceilings on the layer paths, `max(600/min,
+  10 × B-4)` for sign-in and `/token` and `10 × B-1` for sign-up, are proposed in `limits.ts` and
+  not built.
+- [x] **E.** `rehearsal.md`'s environment note, Part B and timing table follow the runbook's
+  step 11. `cutover-docs.test.ts` checks that every timing-table row names its runbook heading
+  (shown to fail on the old label).
+- [x] **F.** Runbook step 9's check asserts `to_regclass('public.deleted_users') is not null` and
+  that `password_hash` is nullable, so a skipped `0010` or `0011` cannot pass into step 12.
+- [x] **G.** `apps/api` has no per-IP limit on `refresh_token`. The released client signs out on
+  any non-OK refresh: `legacy/frontend-app/src/services/ApiService.ts:81-87` (`if
+  (!response.ok) { removeTokens(); resetAuthCallback(); throw }`), so a per-IP 429 shared behind a
+  carrier NAT would sign out everyone behind it. apps/auth's per-session cap remains.
+  `layer.test.ts`: 80 refreshes from one address all return 200.
+- [x] **H (security decided option 2).** `SIGN_IN_FAILED_ALERT` (30/min until B-4) counts failed
+  sign-ins across every email. At the threshold it sends one Sentry event per window across
+  instances, carrying counts, the per-minute rate, distinct emails and hash prefixes, ids only. It
+  refuses nothing. The refusal ceiling is documented in `limits.ts` as an owner option, not built,
+  with its outage trade-off. `limits.test.ts`: a spray of one failure per email fires exactly once
+  and refuses nothing (a correct password still signs in), fires again in the next window, and
+  correct sign-ins are never counted.
+- [x] **I.** `rollback.md` states that every client that signed in during the window is signed out
+  once and signs in again with the legacy password. Its step 6 and `rehearsal.md` Part E check one
+  such client.
+- [x] **J.** The PR body is rewritten for H-1 to H-6. The temporary per-IP choices point at **#318**
+  (layer removal, filed).
+- **Contract shapes on `/v2/users`.**
+  - 503, in `layer.test.ts`: "apps/auth unreachable: 503, never a credentials error" and "every
+    layer route answers 503 with the legacy detail when apps/auth is unreachable".
+  - 429: "every 429 has the legacy shape: the detail and a Retry-After, from apps/api and from
+    apps/auth alike", and "login … is 429 at apps/api, before apps/auth".
+  - The harness-only token lifetime (2 h to 15 min) under the frozen assertions is the spec's
+    design (I-7), not a contract change.
+- **Gitleaks.** CI's secret scan had failed since fad62e8 on five dummy values. d031ee8 pins them
+  by fingerprint, following `.gitleaksignore`'s convention, and was verified locally with
+  gitleaks 8.24.3 through the CI script. I had not checked CI before calling the PR ready.
+- **Notes (security):**
+  - `apps/api`'s `getClientIp` falls back to `127.0.0.1` when `X-Real-IP` is absent, so such
+    requests share one layer bucket. **Kept:** behind the edge the header is always stamped, so a
+    missing one is a misconfiguration or a request that bypassed the edge. A shared bucket
+    throttles exactly those together, which fails closed and shows up loudly, and local
+    development keeps working. A 400 would also fail closed, but it would break local
+    development and the contract harness for no production gain.
+  - The per-instance store is cleared whole above 10 000 keys (`lib/rate-limit.ts`, pre-existing).
+    It now carries the layer's per-IP limits, so an attacker rotating through more than 10 000 IPs
+    resets every bucket on that instance. **Residual of Option A, until #318.**
+  - An admin whose session was revoked gets **403** ("Admin access required"), not 401, from
+    `requireAdminRole`: `GET /api/account/me` answers 401, which reads as "no account", so the
+    route denies. Acceptable, because access is denied either way.
+
 ## Deviations from Plan
 
 The thread (`codev/state/spir-300_thread.md`, one section per phase) has each deviation with its
@@ -965,7 +1030,7 @@ conditional by design:
 - Possibly make `AUTH_*` unconditionally required.
 
 **Issues to file (spec OPS-7) and other open items:**
-- File: layer removal, gated on the I-3 metric.
+- Layer removal, gated on the I-3 metric: filed as **#318**, with the temporary per-IP choices.
 - File: profile sync.
 - File: guest cleanup (feedback retention, shared links, session accumulation).
 - Close #16 and #49 after the cutover.

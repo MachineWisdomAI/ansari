@@ -25,4 +25,4 @@ and addresses) stays with the owner. The same run's `to_copy` feeds the timing s
 | B-1 | | | sign-up 3/60 s per email (and per IP at `apps/api` for the layer); the global ceiling `max(30/60 s, 10 × B-1 peak per minute)` | |
 | B-2 | | | the list-walk alert (≥ 20 distinct emails in 10 min) | |
 | B-3 | | | reset request caps (per email 3/h; the global ceiling `max(30/60 s, 10 × B-3 peak per minute)`; per IP 5/15 min at `apps/api` for the layer) | |
-| B-4 | | | `/token` and `/get-session` 60/60 s per session token (and `refresh_token` 60/60 s per IP at `apps/api`); the account endpoints 60/60 s per user | |
+| B-4 | | | `/token` 60/60 s per session token (no per-IP rule on `refresh_token`); the account endpoints 60/60 s per user; the proposed per-IP ceilings and the failed-sign-in global ceiling (`packages/auth/src/limits.ts`) | |

@@ -10,7 +10,10 @@ the window's step 4 exists for a disaster, not for this procedure.
 
 **Costs the owner accepted:** a password changed at `apps/auth` after the cutover reverts to the
 legacy one (that user resets again), and accounts created after the cutover are removed, with
-their threads.
+their threads. **Every client that signed in during the window is signed out once:** it holds an
+`apps/auth` session token and JWT, which the legacy code rejects (its first call is a 401, and
+its refresh is refused), so the released mobile app clears its tokens and the user signs in again
+with the legacy password. Step 6 checks one such client.
 
 Each step: what to run, the mechanical **check**, and what to do if it fails. Database steps run
 in the window runbook's operator environment: `railway ssh --service auth --environment production`,
@@ -89,7 +92,9 @@ curl -s https://api.askansari.ai/api/v2/users/login -H 'Content-Type: applicatio
 ```
 
 **Check:** an access token is returned, and `/api/v2/threads` with it returns 200 with the
-account's threads. A released mobile build signs in.
+account's threads. A released mobile build signs in. **One client signed in during the window**
+(a released mobile build that signed in after step 13) is signed out on its next call or refresh,
+and signs in again with the legacy password.
 
 ## 7. Record it
 

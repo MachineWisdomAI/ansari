@@ -9,7 +9,7 @@ import { createAuth, getEnv, type Auth, type Db, type Mailer } from '@ansari/aut
 import { toNodeHandler } from 'better-auth/node';
 import express, { type Express, type Request, type Response } from 'express';
 
-import type { ListWalkAlert } from './alerts';
+import type { FailedSignInAlert, ListWalkAlert } from './alerts';
 import { createPerimeterHooks } from './limits/email-limiter';
 import { blockedPaths } from './middleware/blocked-paths';
 import { requireClientIp } from './middleware/client-ip';
@@ -28,13 +28,17 @@ const AUTH_ROUTE = '/api/auth{/*path}';
 
 export type ServiceAuthOptions = {
   alert?: (alert: ListWalkAlert) => void;
+  failedSignInAlert?: (alert: FailedSignInAlert) => void;
   /** The reset-email transport; Resend by default. */
   mailer?: Mailer;
 };
 
 /** The configured Better Auth instance with apps/auth's limiters as its hooks. */
-export function createServiceAuth(db: Db, { alert, mailer }: ServiceAuthOptions = {}): Auth {
-  const hooks = createPerimeterHooks({ db, alert });
+export function createServiceAuth(
+  db: Db,
+  { alert, failedSignInAlert, mailer }: ServiceAuthOptions = {}
+): Auth {
+  const hooks = createPerimeterHooks({ db, alert, failedSignInAlert });
   return createAuth(db, { ...hooks, mailer });
 }
 

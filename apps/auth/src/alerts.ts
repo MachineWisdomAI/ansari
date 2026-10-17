@@ -15,9 +15,38 @@ export type ListWalkAlert = {
 
 export const LIST_WALK_MESSAGE = 'auth: per-email limits tripped across many emails (list walk?)';
 
+/**
+ * Failed sign-ins over SIGN_IN_FAILED_ALERT in one window, every email
+ * together (a spray under the per-email lock). Nothing is refused.
+ */
+export type FailedSignInAlert = {
+  /** Failed sign-ins in the window, every email together. */
+  failedSignIns: number;
+  /** The window, in seconds. */
+  windowSeconds: number;
+  /** failedSignIns per minute over the window. */
+  perMinute: number;
+  /** Distinct emails that failed inside the window. */
+  distinctEmails: number;
+  /** First 8 hex characters of sha256(normalized email), a sample. */
+  hashPrefixes: string[];
+};
+
+export const FAILED_SIGN_IN_MESSAGE = 'auth: failed sign-ins over the alert threshold, every email together (spray?)';
+
 export function initSentry(dsn: string | undefined, environment: string): void {
   if (!dsn) return;
   Sentry.init({ dsn, environment, sendDefaultPii: false });
+}
+
+/** One Sentry event (plus a log line with the same fields). */
+export function sendFailedSignInAlert(alert: FailedSignInAlert): void {
+  console.warn(FAILED_SIGN_IN_MESSAGE, alert);
+  Sentry.captureMessage(FAILED_SIGN_IN_MESSAGE, {
+    level: 'warning',
+    tags: { alert: 'auth-failed-sign-ins' },
+    extra: { ...alert },
+  });
 }
 
 /** One Sentry event (plus a log line with the same fields). */
