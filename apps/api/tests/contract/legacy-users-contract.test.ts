@@ -3,10 +3,11 @@ import fixtures from './fixtures/legacy-users.json';
 import { createHarness, type ContractHarness, type MockState, type WireResponse } from './harness';
 
 // Frozen wire contract of the legacy /v2/users/* surface and the two
-// password-reset routes (spec 300, plan phase 1). Written against today's
-// apps/api; phase 8 runs these same assertions against the compatibility layer
-// over apps/auth, unedited. Setup lives in ./harness (the AuthBackend seam);
-// nothing below may branch on the backend.
+// password-reset routes (spec 300, plan phase 1). Written against the legacy
+// apps/api; since phase 8 these same assertions run against the compatibility
+// layer over apps/auth, unedited. Setup lives in ./harness (the AuthBackend
+// seam); nothing below may branch on the backend. Reset emails are captured
+// by the harness from apps/auth's injected mailer into `sentEmails`.
 
 const h = vi.hoisted((): MockState => ({ db: null, sentEmails: [] }));
 
@@ -15,25 +16,6 @@ vi.mock('@/lib/db/index', () => ({
     return h.db;
   },
   closeDb: async () => {},
-}));
-
-// The JSX template is not loadable under this vitest config (jsx: preserve).
-// Stand-in markup that carries the same link; lib/email and render stay real.
-vi.mock('../../emails/password-reset', async () => {
-  const { createElement } = await import('react');
-  return { default: ({ resetUrl }: { resetUrl: string }) => createElement('a', { href: resetUrl }, 'Reset') };
-});
-
-// The outbound email boundary: record instead of send.
-vi.mock('resend', () => ({
-  Resend: class {
-    emails = {
-      send: async (message: { to: string; html: string }) => {
-        h.sentEmails.push({ to: message.to, html: message.html });
-        return { data: { id: 'contract-email' }, error: null };
-      },
-    };
-  },
 }));
 
 type FixtureName = Exclude<keyof typeof fixtures, '$comment'>;
