@@ -14,7 +14,7 @@ import { GET } from '../../src/app/api/v2/%5Fdiag/client-ip/route';
 const EDGE_SHAPES = (
   JSON.parse(
     readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../../../docs/cutover/edge-header-shapes.json'), 'utf8')
-  ) as { shapes: { name: string; headers: Record<string, string> }[] }
+  ) as { shapes: { name: string; headers: Record<string, string>; probe: Record<string, unknown> }[] }
 ).shapes;
 const probe = (headers: Record<string, string> = {}) =>
   GET(new NextRequest('http://localhost/api/v2/_diag/client-ip', { headers }));
@@ -50,28 +50,14 @@ describe('GET /api/v2/_diag/client-ip', () => {
     });
   });
 
-  it('records the via-Cloudflare shape: first X-Forwarded-For entry is not the client, no Cloudflare or edge value echoed', async () => {
-    const text = await probe(EDGE_SHAPES[0]!.headers).text();
-    expect(JSON.parse(text)).toEqual({
-      x_real_ip: '203.0.113.10',
-      x_forwarded_for_entries: 2,
-      x_forwarded_for_first_is_x_real_ip: false,
-      cf_connecting_ip: '203.0.113.10',
-      via_cloudflare: true,
-    });
-    expect(text).not.toContain('198.51.100.10');
-    expect(text).not.toContain('192.0.2.200');
-  });
-
-  it('records the direct shape: the spoofed CF-Connecting-IP is reported as it arrived', async () => {
-    const text = await probe(EDGE_SHAPES[1]!.headers).text();
-    expect(JSON.parse(text)).toEqual({
-      x_real_ip: '203.0.113.20',
-      x_forwarded_for_entries: 2,
-      x_forwarded_for_first_is_x_real_ip: true,
-      cf_connecting_ip: '192.0.2.66',
-      via_cloudflare: false,
-    });
-    expect(text).not.toContain('192.0.2.200');
-  });
+  it.each(EDGE_SHAPES.map((s) => [s.name, s] as const))(
+    'records the shape "%s": the fixture\'s probe output, and no X-Forwarded-For value but the caller\'s',
+    async (_name, shape) => {
+      const text = await probe(shape.headers).text();
+      expect(JSON.parse(text)).toEqual(shape.probe);
+      for (const entry of (shape.headers['x-forwarded-for'] ?? '').split(',').map((e) => e.trim())) {
+        if (entry && entry !== shape.headers['x-real-ip']) expect(text).not.toContain(entry);
+      }
+    }
+  );
 });

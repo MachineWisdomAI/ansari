@@ -28,7 +28,7 @@ import {
 
 const SIGN_IN = '/api/auth/sign-in/email';
 
-type EdgeShape = { name: string; headers: Record<string, string>; client?: string; never?: string[] };
+type EdgeShape = { name: string; headers: Record<string, string>; probe?: { x_real_ip: string }; never?: string[] };
 const DOCS_CUTOVER = resolve(dirname(fileURLToPath(import.meta.url)), '../../../docs/cutover');
 /** Header shapes behind Railway's edge, per path (docs/cutover/edge-check.md). */
 const EDGE = JSON.parse(readFileSync(resolve(DOCS_CUTOVER, 'edge-header-shapes.json'), 'utf8')) as {
@@ -306,9 +306,11 @@ describe('ipBucket groups exactly like better-auth', () => {
 });
 
 describe('edge header shapes (docs/cutover/edge-header-shapes.json): only X-Real-IP is the client', () => {
-  it('the fixture has both paths and both no-edge shapes', () => {
-    expect(EDGE.shapes).toHaveLength(2);
-    expect(EDGE.withoutTheEdge).toHaveLength(2);
+  it('the fixture covers both paths and at least one no-edge shape', () => {
+    const viaCloudflare = EDGE.shapes.map((s) => (s.probe as { via_cloudflare?: boolean } | undefined)?.via_cloudflare);
+    expect(viaCloudflare).toContain(true);
+    expect(viaCloudflare).toContain(false);
+    expect(EDGE.withoutTheEdge.length).toBeGreaterThan(0);
   });
 
   it('provisional shapes cannot ship as evidence: once rehearsal.md records a verdict, the fixture must be measured', () => {
@@ -326,7 +328,8 @@ describe('edge header shapes (docs/cutover/edge-header-shapes.json): only X-Real
         const res = await failedSignIn(prod.publicUrl, null, shape.headers);
         expect(res.status).toBe(401);
         const keys = await rateLimitKeys(prod);
-        expect(keys).toEqual([`${shape.client}|/sign-in/email`]);
+        // The X-Real-IP client, bucketed as better-auth buckets it (IPv6 by its /64).
+        expect(keys).toEqual([`${ipBucket(shape.probe?.x_real_ip ?? '')}|/sign-in/email`]);
         for (const other of shape.never ?? []) expect(keys.some((k) => k.includes(other))).toBe(false);
       } finally {
         await prod.close();

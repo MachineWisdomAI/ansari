@@ -61,6 +61,7 @@ promote `develop`. Each step is run as written, except for these differences:
 | Auto-deploy is turned off for the window (step 1) and back on in step 18 | **Set before the cutover PR merges** (owner): auto-deploy off on staging `backend` and the staging web service, and the staging `auth` service deploying from `develop` with auto-deploy off. Every deploy is manual: the new frontend is deployed by hand at step 12, so the step 16 web change is rehearsed in order. Auto-deploy comes back only after the rollback rehearsal and the second forward run (below) |
 | The auth database is created for the window, or found (C-4) | It already exists, empty, on Postgres 18. Step 1's empty and version checks apply as written |
 | The app database is production's | The staging app database (Postgres 18) with its **existing staging users**, no production restore (R-1), plus the anomaly seed below |
+| Step 1 records the rollback targets: `backend` and the legacy web service (deployment ID and commit) | Record `backend` and the **staging web service** (it already serves `apps/frontend`); the rollback rehearsal redeploys exactly those IDs |
 | Step 2: the public maintenance notice | The team only; no public notice |
 | Step 16 replaces legacy web with `apps/frontend`; its rollback is [`rollback.md`](rollback.md) step 4 (the previous legacy web deployment) | Staging web **already serves `apps/frontend`**. Step 16 rehearses only its rebuild with `EXPO_PUBLIC_AUTH_URL` and the domain checks; the swap itself is **not rehearsed** ([`rehearsal.md`](rehearsal.md), residuals) |
 | Steps 14 and 15: production domains | The staging domains, on **both paths**: via Cloudflare once the owner orange-clouds `api-staging` and `auth-staging`, and direct with `--resolve` ([`edge-check.md`](edge-check.md)). The staging verdict is recorded only after both paths are measured |
@@ -95,6 +96,11 @@ forward run, `rehearsal-anomalies.ts remove | psql …` deletes the seeded rows.
 - **`main` is current except for spec 300.** A normal release of `develop` at the tip just
   before the cutover PR has been promoted and has soaked, so this window promotes only the
   spec 300 delta.
+- **The rollback targets are recorded, before anything goes offline.** In the release record,
+  write the **current Railway deployment ID and its commit** for the `backend` service and for
+  the legacy web service. On staging there is no legacy web, so record the staging web service
+  instead. Rollback steps 3 and 4 redeploy exactly these IDs, never one picked by eye from a
+  list that by then has new entries.
 - **Production only:** the staging rehearsal (the section above: this runbook, the rollback and
   the second forward run, on staging, from the same `develop` merge commit) passed, the security
   architect has its verdicts, and its docs-only evidence PR is merged. On the staging run itself,

@@ -48,18 +48,24 @@ the cause (usually `cutover_at` missing or malformed) and repeat.
 The previous `apps/api` boots only with its legacy variables, which the window's preconditions
 keep on `backend` until the contract PR: `JWT_SECRET`, `ACCESS_TOKEN_EXPIRY_HOURS`,
 `REFRESH_TOKEN_EXPIRY_HOURS` and `ADMIN_EMAILS`. Confirm they are set, then: Railway dashboard →
-`backend` → Deployments → the deployment before the cutover → **Redeploy**.
-Do the same for the web service only if `apps/frontend` was serving production web before the
-window.
+`backend` → Deployments → the deployment whose **ID the release record holds** (window step 1)
+→ **Redeploy**. Never pick it by eye: by now the list has new entries.
+Do the same for the web service, with its recorded ID, only if `apps/frontend` was serving web
+before the window. On staging it was, so the staging web service's recorded ID is redeployed
+here.
 
-**Check:** both deployments healthy, on the pre-cutover commit.
+**Check:** each redeployed service is healthy, and its deployed commit equals the commit the
+release record holds for it.
 
 ## 4. Restore the previous legacy web deployment
 
 Move the web domain back from the `apps/frontend` web service to the legacy web service (the
-reverse of the window's step 16).
+reverse of the window's step 16). Then make sure the legacy web service runs the deployment
+whose **ID the release record holds** (window step 1), redeploying that ID if anything else is
+live. (On staging there is no legacy web; step 3 already restored the web service.)
 
-**Check:** the web domain serves legacy web.
+**Check:** the web domain serves legacy web, and the legacy web service's deployed commit equals
+the commit the release record holds for it.
 
 ## 5. Detach `auth.askansari.ai`
 

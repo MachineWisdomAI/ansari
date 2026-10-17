@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-type EdgeShape = { name: string; headers: Record<string, string>; client?: string };
+type EdgeShape = { name: string; headers: Record<string, string>; probe?: { x_real_ip: string } };
 /** Header shapes behind Railway's edge, per path (docs/cutover/edge-check.md); shared with apps/auth's tests. */
 const EDGE = JSON.parse(
   readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../../docs/cutover/edge-header-shapes.json'), 'utf8')
@@ -138,9 +138,10 @@ describe('Rate limiter', () => {
     it.each(EDGE.shapes.map((s) => [s.name, s] as const))(
       'edge shape %s: the X-Real-IP client, never cf-connecting-ip or x-forwarded-for',
       (_name, shape) => {
-        expect(shape.client).toBeTruthy();
-        expect(getRealIp(req(shape.headers))).toBe(shape.client);
-        expect(getClientIp(req(shape.headers))).toBe(shape.client);
+        const client = shape.probe?.x_real_ip;
+        expect(client).toBeTruthy();
+        expect(getRealIp(req(shape.headers))).toBe(client);
+        expect(getClientIp(req(shape.headers))).toBe(client);
       }
     );
 

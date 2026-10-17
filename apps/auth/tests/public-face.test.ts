@@ -152,28 +152,12 @@ describe('CORS (scenario 28)', () => {
   });
 });
 
-/** The edge shapes (docs/cutover/edge-header-shapes.json) as the probe must report them. */
-const EDGE_SHAPES = (
+/** The edge shapes (docs/cutover/edge-header-shapes.json), each with the probe output it must give. */
+const DIAG_SHAPES = (
   JSON.parse(
     readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../../docs/cutover/edge-header-shapes.json'), 'utf8')
-  ) as { shapes: { name: string; headers: Record<string, string> }[] }
-).shapes;
-const DIAG_SHAPES = [
-  ['via-Cloudflare', EDGE_SHAPES[0]!, {
-    x_real_ip: '203.0.113.10',
-    x_forwarded_for_entries: 2,
-    x_forwarded_for_first_is_x_real_ip: false,
-    cf_connecting_ip: '203.0.113.10',
-    via_cloudflare: true,
-  }],
-  ['direct', EDGE_SHAPES[1]!, {
-    x_real_ip: '203.0.113.20',
-    x_forwarded_for_entries: 2,
-    x_forwarded_for_first_is_x_real_ip: true,
-    cf_connecting_ip: '192.0.2.66',
-    via_cloudflare: false,
-  }],
-] as const;
+  ) as { shapes: { name: string; headers: Record<string, string>; probe: Record<string, unknown> }[] }
+).shapes.map((s) => [s.name, s] as const);
 
 describe('the diag route (P-4)', () => {
   it("returns only the caller's own X-Real-IP and the X-Forwarded-For entry count, no-store", async () => {
@@ -205,10 +189,10 @@ describe('the diag route (P-4)', () => {
     });
   });
 
-  it.each(DIAG_SHAPES)('records the %s shape, with no X-Forwarded-For value but the caller\'s', async (_name, shape, expected) => {
+  it.each(DIAG_SHAPES)('records the shape "%s", with no X-Forwarded-For value but the caller\'s', async (_name, shape) => {
     const res = await send(service.publicUrl, '/__diag/client-ip', { ip: null, headers: shape.headers });
     const text = await res.text();
-    expect(JSON.parse(text)).toEqual(expected);
+    expect(JSON.parse(text)).toEqual(shape.probe);
     for (const entry of (shape.headers['x-forwarded-for'] ?? '').split(',').map((e) => e.trim())) {
       if (entry && entry !== shape.headers['x-real-ip']) expect(text).not.toContain(entry);
     }
