@@ -3,7 +3,7 @@ import { ActivityIndicator, Text } from 'react-native';
 import { router } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/lib/auth/context';
-import { AccountSessionEndedError } from '@/lib/auth/errors';
+import { AccountDeleteNotSentError, AccountSessionEndedError } from '@/lib/auth/errors';
 import { openAuthSheet } from '@/lib/authSheet';
 import { AuthPage, authPageStyles as styles } from '@/components/AuthPage';
 import { PressableScale } from '@/components/PressableScale';
@@ -57,6 +57,9 @@ export default function DeleteAccountScreen() {
     } catch (e) {
       if (e instanceof AccountSessionEndedError) {
         setStep('ended');
+      } else if (e instanceof AccountDeleteNotSentError) {
+        // Nothing was sent: the account is certainly still there.
+        setError(e.message);
       } else {
         // A 5xx or a lost response cannot say whether the delete committed,
         // and no raw error text belongs on this page.

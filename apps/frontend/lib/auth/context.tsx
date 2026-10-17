@@ -24,7 +24,7 @@ import {
 import { AuthError, type AuthSession, type RegisterInput } from '@/lib/auth/api';
 import { authApi } from '@/lib/auth/client';
 import { deleteAccountRequest } from '@/lib/auth/delete-account';
-import { AccountSessionEndedError } from '@/lib/auth/errors';
+import { AccountDeleteNotSentError, AccountSessionEndedError } from '@/lib/auth/errors';
 import { ApiError } from '@/vendor/api-client-react/custom-fetch';
 import { generateGuestCredentials } from '@/lib/auth/guest';
 
@@ -318,10 +318,15 @@ export function AuthProvider({
   // signed-out transition then returns the device to its guest. The guest's
   // stored credentials are a different account and are kept.
   //
-  // Single-flight: a double tap shares one DELETE. A 401 means the session is
-  // already dead (the account was deleted and the response lost, or the
-  // session ended): it ends locally too, and `AccountSessionEndedError` lets
-  // the page say so honestly.
+  // The JWT lives 15 minutes and is refreshed only when a request 401s, so a
+  // user who signed in earlier holds an expired one, and /delete-account makes
+  // no request before the DELETE. So a fresh JWT is minted first (one `/token`):
+  // - `/token` 401: the session is dead (a reset or ban elsewhere). `refresh`
+  //   has already ended it locally; `AccountSessionEndedError` says so.
+  // - any other `/token` failure: nothing is sent and the session is kept.
+  // - DELETE 401 with the fresh JWT: only the tombstone answers that (an
+  //   earlier confirm committed and its response was lost): it ends locally.
+  // Single-flight: a double tap shares one attempt.
   const deleteInFlight = useRef<Promise<void> | null>(null);
   const deleteAccount = useCallback((): Promise<void> => {
     if (deleteInFlight.current) return deleteInFlight.current;
@@ -329,14 +334,21 @@ export function AuthProvider({
     if (!current || current.isGuest) {
       return Promise.reject(new Error('Sign in to the account you want to delete.'));
     }
-    const endLocally = async () => {
-      // A sign-out or sign-in during the request already left this account.
-      if (sessionRef.current !== current) return;
-      sessionRef.current = null;
-      await clearSession();
-      applySession(null);
-    };
     deleteInFlight.current = (async () => {
+      const token = await refresh();
+      // `refresh` answers null both for a dead session (cleared) and for a
+      // transient failure (kept), so the session is re-read after the await.
+      // The DELETE goes out only with the JWT just minted, never a stale one.
+      const fresh = sessionRef.current;
+      if (!fresh) throw new AccountSessionEndedError();
+      if (token === null || fresh.accessToken !== token) throw new AccountDeleteNotSentError();
+      const endLocally = async () => {
+        // A sign-out or sign-in during the request already left this account.
+        if (sessionRef.current !== fresh) return;
+        sessionRef.current = null;
+        await clearSession();
+        applySession(null);
+      };
       try {
         await deleteAccountRequest();
       } catch (error) {
@@ -351,7 +363,7 @@ export function AuthProvider({
       deleteInFlight.current = null;
     });
     return deleteInFlight.current;
-  }, [applySession]);
+  }, [applySession, refresh]);
 
   const value = useMemo<AuthContextValue>(
     () => ({

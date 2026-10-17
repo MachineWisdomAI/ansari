@@ -27,15 +27,23 @@ vi.mock('@/lib/auth/api', async (importActual) => ({
   createAuthApi: () => authApiDouble,
 }));
 
+// A double by default; the expired-JWT test runs the real request against a
+// stubbed fetch.
 const deleteAccountRequest = vi.hoisted(() => vi.fn(async () => {}));
-vi.mock('@/lib/auth/delete-account', () => ({ deleteAccountRequest }));
+const realDeleteAccountRequest = vi.hoisted(() => ({ fn: null as null | (() => Promise<void>) }));
+vi.mock('@/lib/auth/delete-account', async (importActual) => {
+  realDeleteAccountRequest.fn = (
+    await importActual<typeof import('@/lib/auth/delete-account')>()
+  ).deleteAccountRequest;
+  return { deleteAccountRequest };
+});
 
 import * as store from '@/lib/auth/store';
 import { AuthError } from '@/lib/auth/api';
 import { handleUnauthorized } from '@/lib/api/auth-bridge';
 import { AuthProvider, useAuth } from '@/lib/auth/context';
-import { AccountSessionEndedError } from '@/lib/auth/errors';
-import { ApiError } from '@/vendor/api-client-react/custom-fetch';
+import { AccountDeleteNotSentError, AccountSessionEndedError } from '@/lib/auth/errors';
+import { ApiError, setBaseUrl } from '@/vendor/api-client-react/custom-fetch';
 
 const loadSessionMock = vi.mocked(store.loadSession);
 const saveSessionMock = vi.mocked(store.saveSession);
@@ -539,9 +547,13 @@ describe('deleteAccount', () => {
       await authApi.deleteAccount();
     });
     expect(deleteAccountRequest).toHaveBeenCalledTimes(1);
+    // One fresh JWT, minted before the DELETE.
+    expect(mintJwt).toHaveBeenCalledWith('real-session');
+    expect(mintJwt.mock.invocationCallOrder[0]!).toBeLessThan(
+      deleteAccountRequest.mock.invocationCallOrder[0]!,
+    );
     expect(clearSessionMock).toHaveBeenCalled();
     expect(signOut).not.toHaveBeenCalled();
-    expect(mintJwt).not.toHaveBeenCalledWith('real-session');
     await waitFor(() => expect(authApi.isGuest).toBe(true));
     expect(signIn).toHaveBeenLastCalledWith(STORED_GUEST.email, STORED_GUEST.password);
     expect(clearGuestMock).not.toHaveBeenCalled();
@@ -584,7 +596,7 @@ describe('deleteAccount', () => {
     expect(deleteAccountRequest).toHaveBeenCalledTimes(1);
   });
 
-  it('a 401 (already deleted, response lost; or the session ended) ends the session locally, honestly', async () => {
+  it('a 401 with the fresh JWT (already deleted, response lost) ends the session locally, honestly', async () => {
     await mountReal();
     deleteAccountRequest.mockRejectedValueOnce(
       new ApiError(new Response(null, { status: 401 }), null, { method: 'DELETE', url: '/api/v2/users/me' }),
@@ -595,9 +607,77 @@ describe('deleteAccount', () => {
     });
     expect(thrown).toBeInstanceOf(AccountSessionEndedError);
     expect(clearSessionMock).toHaveBeenCalled();
-    expect(mintJwt).not.toHaveBeenCalledWith('real-session');
+    expect(mintJwt.mock.calls.filter(([t]) => t === 'real-session')).toHaveLength(1);
     expect(signOut).not.toHaveBeenCalled();
     await waitFor(() => expect(authApi.isGuest).toBe(true));
+  });
+
+  // Security review F3: the JWT lives 15 minutes and is refreshed only when a
+  // request 401s; /delete-account makes no request first. The stored JWT here
+  // is expired (the server 401s it); the DELETE must carry the fresh one.
+  it('an expired stored JWT: a fresh one is minted and the DELETE succeeds with it', async () => {
+    const sent: (string | null)[] = [];
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit & { headers: Headers }) => {
+      const bearer = new Headers(init.headers).get('authorization');
+      sent.push(bearer);
+      return bearer === 'Bearer real-jwt'
+        ? new Response(JSON.stringify({ detail: 'Could not validate credentials' }), { status: 401 })
+        : new Response(JSON.stringify({ message: 'Account successfully deleted' }), { status: 200 });
+    });
+    setBaseUrl('https://api.test');
+    deleteAccountRequest.mockImplementationOnce(() => realDeleteAccountRequest.fn!());
+    try {
+      await mountReal();
+      await act(async () => {
+        await authApi.deleteAccount();
+      });
+      expect(sent).toEqual(['Bearer jwt-for-real-session']);
+      expect(clearSessionMock).toHaveBeenCalled();
+      await waitFor(() => expect(authApi.isGuest).toBe(true));
+    } finally {
+      vi.unstubAllGlobals();
+      setBaseUrl(null);
+    }
+  });
+
+  it('a /token 401 (the session is dead): nothing is sent, the session ends, honestly', async () => {
+    await mountReal();
+    mintJwt.mockRejectedValueOnce(new AuthError('Unauthorized', 401, 'token'));
+    let thrown: unknown;
+    await act(async () => {
+      thrown = await authApi.deleteAccount().catch((error: unknown) => error);
+    });
+    expect(thrown).toBeInstanceOf(AccountSessionEndedError);
+    expect(deleteAccountRequest).not.toHaveBeenCalled();
+    expect(clearSessionMock).toHaveBeenCalled();
+  });
+
+  it.each([429, 503])(
+    'a /token %i: nothing is sent, the session is kept, and the page can offer a retry',
+    async (status) => {
+      await mountReal();
+      mintJwt.mockRejectedValueOnce(new AuthError('Unavailable', status, 'token'));
+      let thrown: unknown;
+      await act(async () => {
+        thrown = await authApi.deleteAccount().catch((error: unknown) => error);
+      });
+      expect(thrown).toBeInstanceOf(AccountDeleteNotSentError);
+      expect(deleteAccountRequest).not.toHaveBeenCalled();
+      expect(clearSessionMock).not.toHaveBeenCalled();
+      expect(authApi.session).toMatchObject({ sessionToken: 'real-session', accessToken: 'real-jwt' });
+    },
+  );
+
+  it('a network failure at /token: nothing is sent, the session is kept', async () => {
+    await mountReal();
+    mintJwt.mockRejectedValueOnce(new TypeError('Network request failed'));
+    let thrown: unknown;
+    await act(async () => {
+      thrown = await authApi.deleteAccount().catch((error: unknown) => error);
+    });
+    expect(thrown).toBeInstanceOf(AccountDeleteNotSentError);
+    expect(deleteAccountRequest).not.toHaveBeenCalled();
+    expect(authApi.status).toBe('signedIn');
   });
 
   it('a sign-in during the request keeps the new principal', async () => {
@@ -608,6 +688,7 @@ describe('deleteAccount', () => {
     act(() => {
       deleting = authApi.deleteAccount();
     });
+    await waitFor(() => expect(deleteAccountRequest).toHaveBeenCalled());
     await act(async () => {
       await authApi.login('b@example.com', 'pw');
     });
@@ -615,6 +696,28 @@ describe('deleteAccount', () => {
       pending.resolve();
       await deleting;
     });
+    expect(clearSessionMock).not.toHaveBeenCalled();
+    expect(authApi.session?.sessionToken).toBe('session-b@example.com');
+  });
+
+  it('a sign-in while the fresh JWT is minted: nothing is sent, the new principal is kept', async () => {
+    await mountReal();
+    const minted = deferred<string>();
+    mintJwt.mockImplementationOnce(() => minted.promise);
+    let deleting!: Promise<unknown>;
+    act(() => {
+      deleting = authApi.deleteAccount().catch((error: unknown) => error);
+    });
+    await act(async () => {
+      await authApi.login('b@example.com', 'pw');
+    });
+    let thrown: unknown;
+    await act(async () => {
+      minted.resolve('jwt-late');
+      thrown = await deleting;
+    });
+    expect(thrown).toBeInstanceOf(AccountDeleteNotSentError);
+    expect(deleteAccountRequest).not.toHaveBeenCalled();
     expect(clearSessionMock).not.toHaveBeenCalled();
     expect(authApi.session?.sessionToken).toBe('session-b@example.com');
   });

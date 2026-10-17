@@ -46,7 +46,7 @@ vi.mock('@/lib/auth/context', () => ({
 }));
 
 import { ApiError } from '@/vendor/api-client-react/custom-fetch';
-import { AccountSessionEndedError } from '@/lib/auth/errors';
+import { AccountDeleteNotSentError, AccountSessionEndedError } from '@/lib/auth/errors';
 import DeleteAccountScreen from '@/app/delete-account';
 
 afterEach(() => {
@@ -141,6 +141,17 @@ describe('/delete-account for a signed-in account', () => {
     expect(text).toMatch(/couldn't confirm the deletion/);
     expect(text).toMatch(/If this device has been signed out, your account is gone/);
     expect(text).not.toMatch(/Nothing was deleted|internal detail|Network request/);
+    expect(screen.getByTestId('delete-confirm')).toBeTruthy();
+  });
+
+  it('nothing sent (the fresh JWT could not be minted): a plain retry, not "could not confirm"', async () => {
+    auth.deleteAccount.mockRejectedValue(new AccountDeleteNotSentError());
+    signedInAs(REAL);
+    await press('delete-start');
+    await press('delete-confirm');
+    const text = screen.getByTestId('delete-error').textContent ?? '';
+    expect(text).toBe("We couldn't reach Ansari, so nothing was deleted. Try again.");
+    expect(text).not.toMatch(/couldn't confirm|your account is gone/);
     expect(screen.getByTestId('delete-confirm')).toBeTruthy();
   });
 
