@@ -16,8 +16,9 @@ its refresh is refused), so the released mobile app clears its tokens and the us
 with the legacy password. Step 6 checks one such client.
 
 Each step: what to run, the mechanical **check**, and what to do if it fails. Database steps run
-in the window runbook's operator environment: `railway ssh --service auth --environment production`,
-`cd /repo`, and `APP_DATABASE_URL` typed into that session only.
+from the window runbook's operator environment (spec H-8): the owner's machine over the Tailscale
+route, the promoted commit's clean checkout, and both URLs entered with `read -rs` for that
+session only.
 
 ## 1. `apps/api` offline
 

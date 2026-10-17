@@ -126,6 +126,25 @@ This spec defines WHAT and WHY. The plan defines HOW and WHEN.
 >   with the IDENTICAL 409" is deleted under the pin, with the security architect's sign-off.
 >   `apps/api`'s **legacy** `ADMIN_EMAILS` stays set on the `backend` service until the contract
 >   PR (the rollback's previous `apps/api` needs it).
+> - **H-8 (owner, 2026-10-17, security and main conditions folded in).** The cutover's database
+>   steps run on **the owner's machine**, over the owner's **Tailscale route to Railway's private
+>   network**, from a clean checkout of the promoted commit, no longer inside the auth image.
+>   `apps/auth`'s image is the service only again: no Postgres client, no PGDG repository, no
+>   migration SQL, no marker. This **supersedes the earlier ruling** that the copy runs only
+>   inside the auth image, so that the hashes never transit an operator machine. The owner's
+>   reason: no Postgres tooling in a service image for a one-time process. Security's framing:
+>   the owner's Railway access already reveals both database URLs, so the marginal exposure is
+>   the copy stream (emails and bcrypt hashes) passing through that machine's memory over
+>   WireGuard, with no file ever written. The marker becomes an operator-environment check
+>   (`apps/auth/scripts/cutover/operator-env.sh`): both URLs set and different, hosts
+>   `<name>.railway.internal` only (Railway's public proxy `*.proxy.rlwy.net` and anything else
+>   refused), `psql` major 18, a clean checkout at `PROMOTED_COMMIT`, stdout a terminal. The
+>   rehearsal seed also needs `ANSARI_CUTOVER_ENV=staging`. TLS on the private path is probed and
+>   recorded at step 1. The staging rehearsal runs the same machine path, so it proves the
+>   environment. **Residuals, owner-accepted:** the operator machine is in scope for the window
+>   (full-disk encryption, no session recording, history off, screen sharing off: runbook step
+>   1); the URLs live in that session for the window; and the staging guard for the seed is a
+>   typed word, because an internal host name is the same in staging and production.
 >
 > This amendment supersedes every passage below about the internal credential, the internal
 > listener, the private network, the forwarded IP and `AUTH_RATE_LIMIT_MODE`; those passages are

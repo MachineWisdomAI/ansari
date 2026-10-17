@@ -45,7 +45,7 @@ migration runbook were both proven in real releases on 2026-08-02.
 > ```
 > backend:   apps/api/**       packages/**  package.json  pnpm-lock.yaml  pnpm-workspace.yaml
 > frontend:  apps/frontend/**  packages/**  package.json  pnpm-lock.yaml  pnpm-workspace.yaml
-> auth:      apps/auth/**      apps/api/drizzle/**  packages/**  package.json  pnpm-lock.yaml  pnpm-workspace.yaml
+> auth:      apps/auth/**      packages/**  package.json  pnpm-lock.yaml  pnpm-workspace.yaml
 > ```
 >
 > `packages/**` is **not optional**. The shared config packages are copied into both
@@ -64,12 +64,12 @@ migration runbook were both proven in real releases on 2026-08-02.
 > It has its OWN Railway Postgres, the auth database, with snapshots or PITR
 > enabled before its first real row, on Postgres 18 (C-4: the owner's service; in staging it
 > already exists, empty; in production it is created or found, and checked empty in window step 1).
-> Its image is also the
-> cutover's operator environment (`psql`, both migration journals, the cutover scripts; reached
-> with `railway ssh --service auth`). Operator scripts run in it, from `/repo/apps/auth`:
-> `./node_modules/.bin/tsx scripts/grant-admin.ts …` and `… scripts/ban-user.ts …`
-> (tsx directly: the image has no pnpm for its non-root user). From a checkout
-> with the auth database's `DATABASE_URL`, `pnpm exec tsx scripts/…` works too.
+> Its image is the service only: no Postgres client
+> and no migration SQL. The cutover runs from the owner's machine over the Tailscale route
+> (spec amendment H-8; the runbook's "operator environment"). The two operator scripts run from
+> a checkout with the auth database's `DATABASE_URL` (`pnpm exec tsx scripts/grant-admin.ts …`,
+> `… scripts/ban-user.ts …`), or in the image from `/repo/apps/auth` with
+> `./node_modules/.bin/tsx scripts/…` (tsx directly: the image has no pnpm for its non-root user).
 >
 > **frontend (web) build variables** — `Dockerfile.web` bakes `EXPO_PUBLIC_API_URL`
 > and `EXPO_PUBLIC_AUTH_URL` into the bundle at build time, so both are set on the

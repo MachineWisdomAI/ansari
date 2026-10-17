@@ -7,8 +7,11 @@
  * It prints SQL for psql to read on a pipe; the bcrypt hashes in it never
  * touch a file or a terminal:
  *
- *   REHEARSAL_PASSWORD=… ./node_modules/.bin/tsx scripts/cutover/rehearsal-anomalies.ts seed \
+ *   ANSARI_CUTOVER_ENV=staging ./node_modules/.bin/tsx scripts/cutover/rehearsal-anomalies.ts seed \
  *     | psql "$APP_DATABASE_URL" -X -q -v ON_ERROR_STOP=1 --single-transaction
+ *
+ * (REHEARSAL_PASSWORD, APP_DATABASE_URL and PROMOTED_COMMIT are already in the
+ * session, entered with `read -rs`.)
  *
  * Commands, in the rehearsal's order (docs/cutover/rehearsal.md):
  *   seed               the eight rows below (refuses if any is already there)
@@ -17,10 +20,14 @@
  *   resolve-null       set the NULL updated_at to its created_at (the copy then passes)
  *   remove             delete every rehearsal row (threads etc. go with the cascade)
  *
- * Runs only inside the auth image (the marker), in Railway's staging
- * environment; never against production.
+ * Runs on the owner's machine over the Tailscale route (spec 300 amendment
+ * H-8), from the promoted commit's clean checkout, against STAGING only. A
+ * Railway-internal host name is the same in both environments, so nothing in
+ * the URL says which one it is: the operator types ANSARI_CUTOVER_ENV=staging,
+ * and anything else is refused (an owner-accepted residual: a typed word, not
+ * a check the environment can prove).
  */
-import { existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 
 // apps/auth depends on bcrypt but not on its type package (the library code
@@ -30,7 +37,22 @@ const bcrypt = createRequire(import.meta.url)('bcrypt') as {
   hash(data: string, salt: string): Promise<string>;
 };
 
-export const IMAGE_MARKER = '/etc/ansari-auth-image';
+/** A Railway-internal host, as operator-env.sh allows: `<name>.railway.internal`, a trailing dot allowed. */
+const INTERNAL_HOST = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?\.railway\.internal\.?$/;
+
+/** The host of a postgres URL, lower-cased, or null when it does not parse. */
+export function urlHost(url: string | undefined): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url).hostname.toLowerCase() || null;
+  } catch {
+    return null;
+  }
+}
+
+export function isInternalHost(host: string | null): boolean {
+  return host !== null && INTERNAL_HOST.test(host);
+}
 
 /** Every rehearsal row's id starts with this, so `remove` touches nothing else. */
 export const ID_PREFIX = 'e0300000-0000-4000-8000-';
@@ -57,16 +79,24 @@ export const MIN_PASSWORD_LENGTH = 12;
 
 /** Why this run must not go ahead, or null. Checked before anything is generated. */
 export function refusal(input: {
-  markerExists: boolean;
-  environmentName: string | undefined;
+  cutoverEnv: string | undefined;
+  appHost: string | null;
+  checkout: 'ok' | 'dirty' | 'not-promoted' | 'no-commit' | 'no-git';
   stdoutIsTTY: boolean;
   command: string | undefined;
   password: string | undefined;
 }): string | null {
-  if (!input.markerExists)
-    return "refusing to run outside the auth image (no /etc/ansari-auth-image; run it from 'railway ssh' into the STAGING auth service)";
-  if (input.environmentName !== 'staging')
-    return `refusing to run outside Railway's staging environment (RAILWAY_ENVIRONMENT_NAME is ${input.environmentName ? `'${input.environmentName}'` : 'unset'})`;
+  if (input.cutoverEnv !== 'staging')
+    return `refusing to run against anything but staging (ANSARI_CUTOVER_ENV is ${input.cutoverEnv ? `'${input.cutoverEnv}'` : 'unset'}; type ANSARI_CUTOVER_ENV=staging)`;
+  if (input.appHost === null) return 'APP_DATABASE_URL is unset or not a URL';
+  if (input.appHost.endsWith('.proxy.rlwy.net'))
+    return "APP_DATABASE_URL points at Railway's public TCP proxy; use the <name>.railway.internal host over the Tailscale route";
+  if (!isInternalHost(input.appHost))
+    return "APP_DATABASE_URL's host is not Railway-internal (<name>.railway.internal over the Tailscale route)";
+  if (input.checkout === 'no-git') return 'not inside a git checkout';
+  if (input.checkout === 'no-commit') return 'PROMOTED_COMMIT is unset (the commit the window recorded)';
+  if (input.checkout === 'dirty') return 'the checkout has uncommitted changes';
+  if (input.checkout === 'not-promoted') return 'HEAD is not PROMOTED_COMMIT';
   if (!input.command || !(COMMANDS as readonly string[]).includes(input.command))
     return `usage: rehearsal-anomalies.ts <${COMMANDS.join('|')}> | psql "$APP_DATABASE_URL" -X -q -v ON_ERROR_STOP=1 --single-transaction`;
   if (input.stdoutIsTTY) return 'refusing to print to a terminal: pipe the output into psql';
@@ -121,12 +151,32 @@ INSERT INTO public.users (id, email, password_hash, first_name, last_name, creat
   }
 }
 
+/** The checkout this runs from must be clean and at PROMOTED_COMMIT, as operator-env.sh checks. */
+export function checkoutState(promoted: string | undefined, cwd: string): 'ok' | 'dirty' | 'not-promoted' | 'no-commit' | 'no-git' {
+  const git = (...args: string[]) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8' }).trim();
+  try {
+    git('rev-parse', '--show-toplevel');
+  } catch {
+    return 'no-git';
+  }
+  if (!promoted) return 'no-commit';
+  if (git('status', '--porcelain') !== '') return 'dirty';
+  let wanted = '';
+  try {
+    wanted = git('rev-parse', '--verify', '--quiet', `${promoted}^{commit}`);
+  } catch {
+    return 'not-promoted';
+  }
+  return git('rev-parse', 'HEAD') === wanted ? 'ok' : 'not-promoted';
+}
+
 async function main(): Promise<void> {
   const command = process.argv[2];
   const password = process.env.REHEARSAL_PASSWORD;
   const refused = refusal({
-    markerExists: existsSync(IMAGE_MARKER),
-    environmentName: process.env.RAILWAY_ENVIRONMENT_NAME,
+    cutoverEnv: process.env.ANSARI_CUTOVER_ENV,
+    appHost: urlHost(process.env.APP_DATABASE_URL),
+    checkout: checkoutState(process.env.PROMOTED_COMMIT, import.meta.dirname),
     stdoutIsTTY: Boolean(process.stdout.isTTY),
     command,
     password,

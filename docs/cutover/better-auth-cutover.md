@@ -7,24 +7,42 @@ action if the check fails. Rollback, within 24 hours, is [`rollback.md`](rollbac
 operator SQL is described in
 [`apps/auth/scripts/cutover/README.md`](../../apps/auth/scripts/cutover/README.md).
 
-**The operator environment.** Every database step runs inside the **auth image**, reached with
+**The operator environment (spec H-8).** Every database step runs on **the owner's machine**, in
+one terminal session, over the owner's **Tailscale route to Railway's private network**, from a
+**clean checkout of the promoted commit** (step 4). The auth image carries no Postgres client:
+the cutover tooling runs from this checkout, once, and nowhere else.
 
 ```bash
-railway ssh --service auth --environment production
-cd /repo
-export AUTH_DATABASE_URL="$DATABASE_URL"   # the auth service's own database
-export APP_DATABASE_URL='<app database URL>'   # typed into this ssh session only
+tailscale status                                   # up, and the route to Railway's private network is listed
+git -C <repo> fetch origin && git -C <repo> checkout --detach <promoted commit>
+cd <repo> && git status --porcelain                # prints nothing: a clean checkout
+set +o history                                     # shell history off for this session
+export PROMOTED_COMMIT=<promoted commit>           # the scripts refuse any other HEAD
+read -rs APP_DATABASE_URL && export APP_DATABASE_URL     # pasted at the prompt, never typed as a command
+read -rs AUTH_DATABASE_URL && export AUTH_DATABASE_URL
 ```
 
-The image carries `psql`, the cutover scripts, both migration journals and the operator
-scripts, at the commit the service was deployed from (step 6). Nothing here runs on a laptop:
-`railway shell` on a laptop injects the same Railway variables, so the cutover shell scripts
-(`copy.sh`, `complete-tombstones.sh`) refuse to run anywhere without the image's marker
-(`/etc/ansari-auth-image`). The operator scripts (`grant-admin.ts`, `ban-user.ts`) do not check
-it, because they also run against a local auth database (RELEASE.md's smoke test). A local
-`docker run` of the image would also have the marker (an accepted residual): these steps run
-**only** through `railway ssh` into the auth service. `APP_DATABASE_URL` is never set on a service and never
-written to a file; it ends with the ssh session.
+- **The hosts.** Each URL's host is Railway-internal, `<name>.railway.internal`, reached over the
+  Tailscale route: `copy.sh`, `complete-tombstones.sh` and the rehearsal seed refuse Railway's
+  public TCP proxy (`*.proxy.rlwy.net`) and every other host. They also refuse a `psql` that is not
+  major 18, a dirty checkout, a HEAD that is not `PROMOTED_COMMIT`, and stdout that is not a
+  terminal (`apps/auth/scripts/cutover/operator-env.sh`).
+- **TLS on the path.** Append `sslmode=require` to both URLs, then
+  `psql "$APP_DATABASE_URL" -X -At -c "select ssl from pg_stat_ssl where pid = pg_backend_pid()"`
+  (and the same for `$AUTH_DATABASE_URL`) must print `t`. **If Railway refuses TLS on its private
+  path,** drop `sslmode=require`, record that in the release record, and rely on the tunnel: the hop
+  from this machine to Railway's private network is inside Tailscale's WireGuard encryption, and
+  past it the connection stays on Railway's private network. The scripts then print a TLS warning,
+  which is expected.
+- **What passes through this machine.** The copy (step 8) streams every email and bcrypt hash
+  from the app database into the auth database through a pipe in this session's memory. Nothing
+  is written to a file (`02`'s import table is `TEMP`), and the scripts print counts and
+  checksums only.
+- **The operator scripts** run from the same checkout:
+  `(cd apps/auth && DATABASE_URL="$AUTH_DATABASE_URL" pnpm exec tsx scripts/grant-admin.ts …)`
+  (and `ban-user.ts`). They need no `psql`, and they also run in the auth image.
+- **The session ends with the window:** `exit` the shell, which takes the URLs with it. They are
+  never set on a service and never written to a file.
 
 **`psql`.** Every `psql` that applies a migration is `psql -X -v ON_ERROR_STOP=1 --single-transaction -f <file>`:
 with both flags, a failed statement stops the run **and** rolls back everything before it. The
@@ -68,7 +86,7 @@ promote `develop`. Each step is run as written, except for these differences:
 | Production | Staging rehearsal |
 |---|---|
 | Step 4 promotes `develop` to `main`; every deploy and file comes from the promoted commit | **No promotion.** The cutover PR's merge commit on `develop` stands in for `main`. Record it in step 1; every deploy and every applied file comes from it |
-| `railway ssh --service auth --environment production` | `railway ssh --service auth --environment staging` |
+| The operator environment, with production's URLs | The **same machine, Tailscale route and checkout path**, with staging's URLs (the rehearsal proves this environment, not only the SQL); the seed also needs `ANSARI_CUTOVER_ENV=staging`, because an internal host name is the same in both environments |
 | `api.askansari.ai`, `api-35.ansari.chat`; `auth.askansari.ai`; the production web domain | `api-staging.askansari.ai`; `auth-staging.askansari.ai`; the staging web domain. Service names are on main's sheet |
 | Auto-deploy is turned off for the window (step 1) and back on in step 18 | **Set before the cutover PR merges** (owner): auto-deploy off on staging `backend` and the staging web service, and the staging `auth` service deploying from `develop` with auto-deploy off. Every deploy is manual: the new frontend is deployed by hand at step 12, so the step 16 web change is rehearsed in order. Auto-deploy comes back only after the rollback rehearsal and the second forward run (below) |
 | The auth database is created for the window, or found (C-4) | It already exists, empty, on Postgres 18. Step 1's empty and version checks apply as written |
@@ -84,7 +102,7 @@ the rollback rehearsal it marks the users to remove. The step 17 smoke test sign
 after it, so the rollback has at least one user to remove, and must leave none behind.
 
 **The seeded anomaly users** (`apps/auth/scripts/cutover/rehearsal-anomalies.ts`; staging only).
-They are seeded in the operator environment after step 6 and before step 7. Every seeded
+They are seeded from the operator environment after step 6 and before step 7. Every seeded
 `created_at` is in the past, so the rollback never removes them. Step 8 then runs four times:
 
 | Run | State | `copy.sh` must | Then |
@@ -118,6 +136,21 @@ forward run, `rehearsal-anomalies.ts remove | psql …` deletes the seeded rows.
   the second forward run, on staging, from the same `develop` merge commit) passed, the security
   architect has its verdicts, and its docs-only evidence PR is merged. On the staging run itself,
   this item reads: the cutover PR's merge commit on `develop` is recorded.
+- **The operator machine (spec H-8), checked before anything goes offline:**
+  - full-disk encryption is on;
+  - the Tailscale route is up: `tailscale status` lists the route to Railway's private network,
+    and `psql "$AUTH_DATABASE_URL" -X -At -c "select 1"` answers over it. Both URLs' hosts are
+    `<name>.railway.internal` (never `*.proxy.rlwy.net`);
+  - TLS on that path is probed and recorded (the operator environment section): `sslmode=require`
+    with `pg_stat_ssl` printing `t`, or the recorded reason for going without it;
+  - the URLs are entered with `read -rs` only: never typed as a command, never in a file, a note
+    or a clipboard manager's history (turn it off before copying from the Railway dashboard);
+  - shell history is off for the session (`set +o history`; the scripts also turn it off);
+  - no terminal session recording: no `script`, no asciinema, no iTerm2 (or other terminal)
+    session logging;
+  - screen sharing is off for the whole window;
+  - the checkout is clean, at the promoted commit, with `PROMOTED_COMMIT` exported;
+  - the session is closed (`exit`) at the end of the window.
 - The phase 13 image check passed: `docker build -f apps/auth/Dockerfile .`, run as the image's
   `node` user, `./node_modules/.bin/tsx scripts/grant-admin.ts --list` inside it.
 - Baselines B-1 to B-4 are recorded in [`baselines.md`](baselines.md). The staging edge check's
@@ -130,13 +163,11 @@ forward run, `rehearsal-anomalies.ts remove | psql …` deletes the seeded rows.
   it), and the auth database runs on 18. From the operator
   environment, `psql "$APP_DATABASE_URL" -X -At -c "select version()"` and
   `psql "$AUTH_DATABASE_URL" -X -At -c "select version()"` both report `PostgreSQL 18`, and
-  `psql --version` beside them reports 18 (the auth image's `PG_CLIENT_MAJOR`).
+  `psql --version` on this machine reports 18 (the scripts refuse any other major).
 - **The auth database is empty**, checked mechanically against `AUTH_DATABASE_URL`, whether it was
   created for this window (production) or already existed (staging):
   `psql "$AUTH_DATABASE_URL" -X -At -c "select count(*) from information_schema.tables where table_schema not in ('pg_catalog','information_schema')"`
-  prints `0`. Step 7 then applies the `0000` auth baseline as written. If the `auth` service has
-  no deployment yet, so there is no operator environment, run this check and the version check
-  above when step 6 opens one, before step 7.
+  prints `0`. Step 7 then applies the `0000` auth baseline as written.
 - Every **collision** the preflight lists is decided and resolved (the copy and `0011` abort on
   any), the preflight shows no NULL `created_at`/`updated_at` (the copy aborts on any: it
   copies timestamps exactly), and `not_bcrypt = 0` (the copy aborts on any hash that is not
@@ -218,11 +249,11 @@ Take a Railway snapshot (or note the PITR mark) of the **app database**, and of 
 **Check:** both snapshot ids or PITR timestamps are in the record.
 **Abort:** bring `apps/api` back online.
 
-## 6. Deploy `apps/auth` privately (the operator environment)
+## 6. Deploy `apps/auth` privately
 
 Deploy the `auth` service from the promoted commit, with **no domain**. It boots without a
-schema (`/health` only pings the database), and it runs no admin check at boot (spec H-7). Then open the operator environment
-above (`railway ssh`, the two exports).
+schema (`/health` only pings the database), and it runs no admin check at boot (spec H-7). The
+operator environment (above) is already open on the owner's machine, at the same commit.
 
 Then take **`cutover_at`** from the app database's own clock:
 
@@ -234,15 +265,15 @@ It is taken **here**, with `apps/api` offline and before any new code can create
 `apps/api` first deploys in step 12), so the rollback's "users created at or after
 `cutover_at`" catches every one of them.
 
-**Check:** the deployment is healthy; in the ssh session, `test -f /etc/ansari-auth-image && echo image`
-prints `image`; `psql --version` shows 18, and `select version()` reports `PostgreSQL 18` on both
+**Check:** the deployment is healthy; in the operator session, `git rev-parse HEAD` equals
+`PROMOTED_COMMIT` and `git status --porcelain` prints nothing; `psql --version` shows 18, and `select version()` reports `PostgreSQL 18` on both
 `$APP_DATABASE_URL` and `$AUTH_DATABASE_URL`; step 1's empty-database check prints `0` on
 `$AUTH_DATABASE_URL`; `cutover_at` is in the record.
 **Abort:** remove the deployment, bring `apps/api` back online.
 
 ## 7. The auth baseline
 
-`packages/auth/drizzle/0000_auth_schema.sql`, in the operator environment:
+`packages/auth/drizzle/0000_auth_schema.sql`, from the operator environment:
 
 ```bash
 psql "$AUTH_DATABASE_URL" -X -v ON_ERROR_STOP=1 --single-transaction -f packages/auth/drizzle/0000_auth_schema.sql
@@ -270,7 +301,7 @@ either re-run from step 7 or bring `apps/api` back online on the old code.
 
 ## 9. The app window migration
 
-In the operator environment, in journal order, each applied only if not already applied
+From the operator environment, in journal order, each applied only if not already applied
 (`0009` and `0010` may have shipped earlier; the release record says):
 
 ```bash
@@ -290,13 +321,13 @@ still stop, follow [`rollback.md`](rollback.md).
 
 ## 10. Admin roles
 
-In the operator environment (the service's own `DATABASE_URL` is the auth database), for each
+From the operator environment (`grant-admin.ts` reads the auth database from `DATABASE_URL`), for each
 address on the approved list: show the account, check it, then grant it by its id. Then run
 the audit.
 
 ```bash
-(cd apps/auth && ./node_modules/.bin/tsx scripts/grant-admin.ts <email>)                  # shows id, email, created_at, email_verified, role; grants nothing
-(cd apps/auth && ./node_modules/.bin/tsx scripts/grant-admin.ts <email> --confirm <id>)   # grants exactly that account
+(cd apps/auth && DATABASE_URL="$AUTH_DATABASE_URL" pnpm exec tsx scripts/grant-admin.ts <email>)                  # shows id, email, created_at, email_verified, role; grants nothing
+(cd apps/auth && DATABASE_URL="$AUTH_DATABASE_URL" pnpm exec tsx scripts/grant-admin.ts <email> --confirm <id>)   # grants exactly that account
 psql "$AUTH_DATABASE_URL" -X -q -v ON_ERROR_STOP=1 -f apps/auth/scripts/cutover/05-audit-admins-auth.sql
 ```
 
@@ -308,7 +339,7 @@ in this step (spec H-7): the window has one fewer `auth` redeploy than before.
 **Check:** `05-audit-admins-auth.sql` prints exactly the approved list, one address per line. A
 legacy admin left off the list holds no admin role. The role in `auth.users` is the only admin
 truth; nothing at boot checks a list.
-**Abort:** `(cd apps/auth && ./node_modules/.bin/tsx scripts/grant-admin.ts --revoke <email>)`
+**Abort:** `(cd apps/auth && DATABASE_URL="$AUTH_DATABASE_URL" pnpm exec tsx scripts/grant-admin.ts --revoke <email>)`
 for any extra; fix and re-check.
 
 ## 11. Attach `auth.askansari.ai` (spec H-5)

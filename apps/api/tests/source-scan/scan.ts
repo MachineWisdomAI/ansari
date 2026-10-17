@@ -129,7 +129,9 @@ const REMOVED_HOP: readonly RegExp[] = [
   /\bFORWARDED_IP_HEADER\b/,
   /x-ansari-internal-auth/i,
   /x-ansari-forwarded-client-ip/i,
-  /\.railway\.internal\b/i,
+  // The removed internal listener on Railway's private network. The cutover scripts name
+  // `<name>.railway.internal` database hosts (H-8): those are not the hop.
+  /\.railway\.internal:3101\b/i,
   /['"`]\/internal(?:\/|['"`])/,
 ];
 

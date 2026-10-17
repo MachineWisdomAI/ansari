@@ -26,8 +26,6 @@ builder = "dockerfile"
 dockerfilePath = "apps/auth/Dockerfile"
 watchPatterns = [
   "apps/auth/**",
-  # The image carries the app migrations the cutover window applies from it.
-  "apps/api/drizzle/**",
   # Shared workspace packages are COPYied into this image (see the Dockerfile),
   # and @ansari/auth is the service's whole auth config, so a packages-only
   # change alters the built artifact. Without this pattern the change ships

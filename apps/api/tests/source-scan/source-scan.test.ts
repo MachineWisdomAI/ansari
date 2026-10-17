@@ -225,6 +225,7 @@ describe('scan 4: the removed internal hop stays gone (owner amendment 2026-10-1
       "fetch('/api/account/me');",
       "const path = '/internals-guide';",
       'const url = process.env.AUTH_URL;',
+      "const host = 'postgres.railway.internal'; // a cutover database host (H-8)",
       'const admins = await users.listAdmins(db);',
       "const role = users.ADMIN_ROLE; // 'admin'",
     ]) {

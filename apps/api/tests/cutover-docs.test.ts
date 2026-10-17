@@ -117,10 +117,52 @@ describe('the window runbook', () => {
     expect(steps[deployAuth - 1]).not.toMatch(/`ADMIN_EMAILS` empty/);
   });
 
-  it('names the exact operator environment, and every database step runs in it', () => {
-    expect(doc).toContain('railway ssh --service auth --environment production');
-    expect(doc).toContain('/etc/ansari-auth-image');
+  it("names the operator environment: the owner's machine over Tailscale, a clean promoted checkout (H-8)", () => {
+    expect(doc).toContain('**The operator environment (spec H-8).**');
+    expect(doc).toContain('export PROMOTED_COMMIT=<promoted commit>');
+    expect(doc).toContain('read -rs APP_DATABASE_URL && export APP_DATABASE_URL');
+    expect(doc).toContain('set +o history');
+    expect(doc).toMatch(/`<name>\.railway\.internal`/);
+    expect(doc).toMatch(/`\*\.proxy\.rlwy\.net`/);
+    expect(doc).toContain('select ssl from pg_stat_ssl where pid = pg_backend_pid()');
     expect(doc).not.toMatch(/RAILWAY_ENVIRONMENT=/);
+  });
+
+  it('step 1 carries the operator-machine hygiene checklist (H-8)', () => {
+    const step1 = steps[0] as string;
+    for (const item of [
+      'full-disk encryption is on',
+      'the Tailscale route is up',
+      'TLS on that path is probed and recorded',
+      'entered with `read -rs` only',
+      'shell history is off',
+      'no terminal session recording',
+      'screen sharing is off',
+      'the session is closed (`exit`)',
+    ]) {
+      expect(step1, item).toContain(item);
+    }
+  });
+
+  it('no railway ssh or image marker survives in RELEASE.md, docs/ or apps/auth/scripts (H-8, main e)', () => {
+    const roots = ['RELEASE.md', 'docs', 'apps/auth/scripts'];
+    const files = roots.flatMap((root) => {
+      const abs = resolve(repoRoot, root);
+      const walk = (dir: string): string[] =>
+        readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+          e.isDirectory() ? walk(resolve(dir, e.name)) : [resolve(dir, e.name)]
+        );
+      return root.includes('.') ? [abs] : walk(abs);
+    });
+    expect(files.length).toBeGreaterThan(15);
+    const hits = files.flatMap((f) =>
+      readFileSync(f, 'utf8')
+        .split('\n')
+        .filter((line) => /railway ssh|ansari-auth-image/i.test(line))
+        .map((line) => `${f}: ${line}`)
+    );
+    console.info(`[cutover-docs] railway ssh / image marker: ${hits.length} hits in ${files.length} files`);
+    expect(hits).toEqual([]);
   });
 
   it.each([/Edge probe on the `apps\/api` production domains/, /Attach `auth\.askansari\.ai`/])(
@@ -148,7 +190,8 @@ describe('the window runbook', () => {
     expect(doc).toMatch(/signed in to a real account before the cutover/i);
     expect(doc).toMatch(/Key rotation is not revocation/);
     // Spec H-1: no internal hop survives in the runbook's commands.
-    expect(doc).not.toMatch(/railway\.internal|X-Ansari-Internal-Auth|:3101/i);
+    // The database hosts ARE <name>.railway.internal now (H-8); the removed hop's port and header are not.
+    expect(doc).not.toMatch(/railway\.internal:3101|X-Ansari-Internal-Auth|:3101/i);
   });
 
   it('step 0: staging auto-deploy is OFF before the cutover PR merges (main)', () => {
@@ -182,7 +225,8 @@ describe('the window runbook', () => {
       expect(heading, `runbook step ${step}`).toBeDefined();
       expect(heading?.startsWith((label as string).toLowerCase()), `step ${step}: "${label}" vs "${heading}"`).toBe(true);
     }
-    expect(rehearsal).not.toMatch(/private.network/i);
+    // The old order (smoke tests on the private network at step 11, the auth domain at step 15) is gone.
+    expect(rehearsal).not.toMatch(/private-network smoke tests|on the private network in\s+step 11|attached at step 15/i);
   });
 
   it('step 9 proves 0010 and 0011 landed before anything deploys (batch 5, F)', () => {
@@ -225,7 +269,7 @@ describe('the rollback runbook', () => {
     expect(doc).toContain("DROP SCHEMA auth CASCADE'");
   });
 
-  it('runs its database step in the operator environment', () => {
-    expect(doc).toContain('railway ssh --service auth --environment production');
+  it('runs its database step from the operator environment (H-8)', () => {
+    expect(doc).toContain("from the window runbook's operator environment (spec H-8)");
   });
 });

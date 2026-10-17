@@ -8,7 +8,8 @@ commit. This file holds the procedure and, filled in by the docs-only evidence P
 `develop` is not promoted until that PR merges.
 
 Who does what:
-- the owner operates Railway (`railway ssh`, `copy.sh`, `0009`–`0011`, `grant-admin.ts`, the
+- the owner operates Railway and runs every database step from the operator environment, the
+  owner's machine over the Tailscale route (`copy.sh`, `0009`–`0011`, `grant-admin.ts`, the
   rollback script)
 - the main architect prepares the filled-in staging command sheet and checks outputs
 - the builder runs the client-side checks (Parts C and D, and the edge probes)
@@ -40,11 +41,13 @@ A clone would have shown two things that staging cannot:
   merge commit on `develop`**, with auto-deploy off (set before the merge), and
   `auth-staging.askansari.ai` attached at step 11 (spec H-5), after the admin roles and before
   the staging `backend` deploys.
-- Postgres 18 on both the staging app and auth servers. `psql --version` in the auth image reports
-  18 (the window's step 1 precondition, rehearsed).
-- The operator environment is the window's, in staging:
-  `railway ssh --service auth --environment staging`, then `cd /repo`, with `AUTH_DATABASE_URL`
-  set to the service's `DATABASE_URL` and `APP_DATABASE_URL` typed in the session only.
+- Postgres 18 on both the staging app and auth servers. `psql --version` on the owner's machine
+  reports 18 (the window's step 1 precondition, rehearsed).
+- **The operator environment is the window's (spec H-8), and the rehearsal proves it, not only
+  the SQL:** the owner's machine, the Tailscale route to staging's private network, the clean
+  checkout of the `develop` merge commit as `PROMOTED_COMMIT`, staging's two URLs entered with
+  `read -rs`, the step 1 hygiene checklist, and the TLS probe recorded. Record the timings of the
+  copy and the audits from this machine: the production window's estimate scales from them.
 
 ## Un-rehearsed residuals
 
@@ -73,12 +76,13 @@ A clone would have shown two things that staging cannot:
 
 ## Part A: the guards fire (runbook steps 6 to 8)
 
-In the operator environment, after runbook step 6 and before step 7, seed the staging app
+From the operator environment, after runbook step 6 and before step 7, seed the staging app
 database. The existing staging users and system rows stay. Every `rehearsal-anomalies.ts`
-command is piped straight into psql. The script refuses outside the auth image, outside Railway's
-`staging` environment, or onto a terminal:
+command is piped straight into psql. The script refuses without `ANSARI_CUTOVER_ENV=staging`,
+a non-internal app host, a dirty or unpromoted checkout, or a terminal on stdout:
 
 ```bash
+export ANSARI_CUTOVER_ENV=staging                          # typed: the host cannot tell staging from production
 SEED="./apps/auth/node_modules/.bin/tsx apps/auth/scripts/cutover/rehearsal-anomalies.ts"
 read -rs REHEARSAL_PASSWORD && export REHEARSAL_PASSWORD   # typed, ≥ 12 characters; kept for Part B's sign-ins
 $SEED seed | psql "$APP_DATABASE_URL" -X -q -v ON_ERROR_STOP=1 --single-transaction

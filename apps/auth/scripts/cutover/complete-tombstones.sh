@@ -3,23 +3,17 @@
 # during DELETE /v2/users/me): lists the pending tombstones in the app
 # database (04a), deletes those users directly in the auth database (04b; the
 # cascade removes their sessions and accounts), and marks them done (04c).
-# It never calls the delete endpoint. Auth image only, like copy.sh. Ids only.
+# It never calls the delete endpoint. Ids only. Runs where copy.sh runs: the
+# owner's machine over the Tailscale route, checked by operator-env.sh.
 set -euo pipefail
 set +o history 2>/dev/null || true
 
 die() { echo "complete-tombstones.sh: $*" >&2; exit 2; }
 
-# Only inside the auth image (apps/auth/Dockerfile bakes the marker), reached
-# by `railway ssh` into the auth service: never on an operator machine.
-# `railway shell` on a laptop injects the same Railway variables, so no
-# environment variable can prove where this runs.
-[ -f /etc/ansari-auth-image ] \
-  || die "refusing to run outside the auth image (no /etc/ansari-auth-image; run it from 'railway ssh' into the auth service, never from a laptop)"
-[ -n "${APP_DATABASE_URL:-}" ] || die "APP_DATABASE_URL is unset"
-[ -n "${AUTH_DATABASE_URL:-}" ] || die "AUTH_DATABASE_URL is unset"
-[ "$APP_DATABASE_URL" != "$AUTH_DATABASE_URL" ] || die "APP_DATABASE_URL and AUTH_DATABASE_URL are the same database"
-
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=operator-env.sh
+. "$here/operator-env.sh"
+operator_check complete-tombstones.sh
 ids="$(psql "$APP_DATABASE_URL" -X -q -v ON_ERROR_STOP=1 -f "$here/04-tombstones-pending-app.sql")"
 echo "complete-tombstones.sh: pending $ids"
 [ "$ids" != "{}" ] || { echo "complete-tombstones.sh: nothing pending"; exit 0; }

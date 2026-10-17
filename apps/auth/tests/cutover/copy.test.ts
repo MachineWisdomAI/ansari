@@ -5,7 +5,8 @@
 // 01 | 02 is emulated by handing 01's stdout to 02's stdin (./psql.ts). The
 // real psql pipe and copy.sh run in the phase 13 rehearsal.
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { chmodSync, cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -24,8 +25,10 @@ import {
   ID_PREFIX,
   ROWS,
   anomalySql,
+  isInternalHost,
   makeHashes,
   refusal,
+  urlHost,
 } from '../../scripts/cutover/rehearsal-anomalies';
 import { runPsqlFile } from './psql';
 
@@ -509,19 +512,43 @@ describe('hash formats: only bcrypt $2a$/$2b$ of length 60 is copied', () => {
 });
 
 describe('the staging anomaly seed (rehearsal-anomalies.ts), through the rehearsal order', () => {
-  const ok = { markerExists: true, environmentName: 'staging', stdoutIsTTY: false, command: 'seed', password: 'x'.repeat(12) };
+  const ok = {
+    cutoverEnv: 'staging',
+    appHost: 'postgres.railway.internal',
+    checkout: 'ok' as const,
+    stdoutIsTTY: false,
+    command: 'seed',
+    password: 'x'.repeat(12),
+  };
 
-  it('refuses outside the image, outside staging, on a terminal, an unknown command or a short password', () => {
+  it('refuses anything but staging, a non-internal host, a bad checkout, a terminal, an unknown command or a short password', () => {
     expect(refusal(ok)).toBeNull();
     expect(refusal({ ...ok, command: 'remove', password: undefined })).toBeNull();
-    expect(refusal({ ...ok, markerExists: false })).toMatch(/outside the auth image/);
-    expect(refusal({ ...ok, environmentName: 'production' })).toMatch(/staging environment .*'production'/);
-    expect(refusal({ ...ok, environmentName: undefined })).toMatch(/unset/);
+    expect(refusal({ ...ok, cutoverEnv: 'production' })).toMatch(/anything but staging .*'production'/);
+    expect(refusal({ ...ok, cutoverEnv: undefined })).toMatch(/unset/);
+    expect(refusal({ ...ok, appHost: null })).toMatch(/APP_DATABASE_URL is unset/);
+    expect(refusal({ ...ok, appHost: 'roundhouse.proxy.rlwy.net' })).toMatch(/public TCP proxy/);
+    for (const host of ['db.example.com', 'railway.internal', 'postgres.railway.internal.evil.com', '10.0.0.5']) {
+      expect(refusal({ ...ok, appHost: host }), host).toMatch(/not Railway-internal/);
+    }
+    expect(refusal({ ...ok, appHost: 'postgres-staging.railway.internal' })).toBeNull();
+    expect(refusal({ ...ok, checkout: 'dirty' })).toMatch(/uncommitted/);
+    expect(refusal({ ...ok, checkout: 'not-promoted' })).toMatch(/PROMOTED_COMMIT/);
+    expect(refusal({ ...ok, checkout: 'no-commit' })).toMatch(/PROMOTED_COMMIT is unset/);
     expect(refusal({ ...ok, stdoutIsTTY: true })).toMatch(/terminal/);
     expect(refusal({ ...ok, command: 'drop' })).toMatch(/usage/);
     expect(refusal({ ...ok, password: 'x'.repeat(11) })).toMatch(/REHEARSAL_PASSWORD/);
-    // Location first: a laptop run in production is refused on location.
-    expect(refusal({ ...ok, markerExists: false, environmentName: 'production', stdoutIsTTY: true })).toMatch(/outside the auth image/);
+    // The environment word first: a production run is refused on it, whatever else holds.
+    expect(refusal({ ...ok, cutoverEnv: 'production', appHost: null, stdoutIsTTY: true })).toMatch(/anything but staging/);
+  });
+
+  it('urlHost and isInternalHost read the host as operator-env.sh does', () => {
+    expect(urlHost('postgresql://u:p@postgres.railway.internal:5432/railway?sslmode=require')).toBe('postgres.railway.internal');
+    expect(urlHost('postgres://u:p%40x@Postgres.Railway.Internal/db')).toBe('postgres.railway.internal');
+    expect(urlHost('not a url')).toBeNull();
+    expect(urlHost(undefined)).toBeNull();
+    expect(isInternalHost('postgres.railway.internal.')).toBe(true);
+    expect(isInternalHost('-bad.railway.internal')).toBe(false);
   });
 
   it('seed → the preflight sees every class; the copy stops on the collision, then the NULL timestamp, then passes', async () => {
@@ -588,15 +615,22 @@ describe('the staging anomaly seed (rehearsal-anomalies.ts), through the rehears
     expect(await count(app, 'users')).toBe(2);
   });
 
-  it('the CLI exits 2 before generating anything when run outside the image (a laptop, even as "staging")', () => {
+  it('the CLI exits 2 before generating anything: production, or a laptop shell without the staging word', () => {
     const tsx = resolve(here, '../../node_modules/.bin/tsx');
-    const result = spawnSync(tsx, [script('rehearsal-anomalies.ts'), 'seed'], {
-      env: { PATH: process.env.PATH ?? '', RAILWAY_ENVIRONMENT_NAME: 'staging', REHEARSAL_PASSWORD: 'x'.repeat(16) },
-      encoding: 'utf8',
-    });
-    expect(result.status).toBe(2);
-    expect(result.stderr).toMatch(/outside the auth image/);
-    expect(result.stdout).toBe('');
+    for (const env of [
+      { ANSARI_CUTOVER_ENV: 'production', APP_DATABASE_URL: 'postgresql://u:p@postgres.railway.internal/railway' },
+      // Railway's own variables prove nothing (a laptop `railway shell` injects them).
+      { RAILWAY_ENVIRONMENT_NAME: 'staging', APP_DATABASE_URL: 'postgresql://u:p@postgres.railway.internal/railway' },
+      { ANSARI_CUTOVER_ENV: 'staging', APP_DATABASE_URL: 'postgresql://u:p@roundhouse.proxy.rlwy.net:41234/railway' },
+    ]) {
+      const result = spawnSync(tsx, [script('rehearsal-anomalies.ts'), 'seed'], {
+        env: { PATH: process.env.PATH ?? '', REHEARSAL_PASSWORD: 'x'.repeat(16), ...env },
+        encoding: 'utf8',
+      });
+      expect(result.status).toBe(2);
+      expect(result.stderr).toMatch(/anything but staging|public TCP proxy/);
+      expect(result.stdout).toBe('');
+    }
   });
 
   it('every rehearsal row is outside the system domain, and every id carries the prefix', () => {
@@ -699,61 +733,116 @@ describe('rollback: remove post-cutover users (docs/cutover/rollback.md)', () =>
   });
 });
 
-describe('copy.sh and complete-tombstones.sh refuse to run unguarded', () => {
-  // The guards exit before psql is ever called, so these run without a database.
-  const run = (name: string, env: Record<string, string>) =>
-    spawnSync('bash', [script(name)], { env: { PATH: process.env.PATH ?? '', ...env }, encoding: 'utf8' });
-  const both = { APP_DATABASE_URL: 'postgresql://app/x', AUTH_DATABASE_URL: 'postgresql://auth/y' };
+describe('copy.sh and complete-tombstones.sh: the operator-environment check (spec 300 H-8)', () => {
+  // Each script runs from a throwaway clean checkout (the cutover directory
+  // committed in a temp repo) with a fake psql on PATH. The check exits before
+  // any real database call; the fake psql logs every call that is not
+  // --version, so a run that passed the check shows up in the log.
+  let repo: string;
+  let bin: string;
+  let log: string;
+  let commit: string;
+  const SCRIPTS = resolve(here, '../../scripts/cutover');
 
-  it.each(['copy.sh', 'complete-tombstones.sh'])('%s: outside the auth image (a laptop `railway shell`)', (name) => {
-    // Every Railway variable a laptop shell injects, and the two URLs: still refused.
-    const result = run(name, {
-      ...both,
-      RAILWAY_ENVIRONMENT: 'production',
-      RAILWAY_SERVICE_NAME: 'auth',
-      RAILWAY_PROJECT_ID: 'p',
+  const git = (...args: string[]) => {
+    const r = spawnSync('git', ['-C', repo, ...args], { encoding: 'utf8' });
+    if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
+    return r.stdout.trim();
+  };
+
+  beforeEach(() => {
+    repo = mkdtempSync(resolve(tmpdir(), 'cutover-checkout-'));
+    bin = mkdtempSync(resolve(tmpdir(), 'cutover-bin-'));
+    log = resolve(bin, 'psql.log');
+    cpSync(SCRIPTS, resolve(repo, 'cutover'), { recursive: true });
+    git('init', '-q');
+    git('-c', 'user.email=t@example.com', '-c', 'user.name=t', 'add', '.');
+    git('-c', 'user.email=t@example.com', '-c', 'user.name=t', 'commit', '-q', '-m', 'promoted');
+    commit = git('rev-parse', 'HEAD');
+    writeFileSync(
+      resolve(bin, 'psql'),
+      `#!/usr/bin/env bash\nif [ "$1" = "--version" ]; then echo "psql (PostgreSQL) \${FAKE_PSQL_MAJOR:-18}.0"; exit 0; fi\necho "called $#" >> "${log}"\nexit 3\n`
+    );
+    chmodSync(resolve(bin, 'psql'), 0o755);
+  });
+
+  afterEach(() => {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(bin, { recursive: true, force: true });
+  });
+
+  const good = () => ({
+    APP_DATABASE_URL: 'postgresql://u:p@postgres.railway.internal:5432/railway?sslmode=require',
+    AUTH_DATABASE_URL: 'postgresql://u:p@postgres-auth.railway.internal:5432/railway?sslmode=require',
+    PROMOTED_COMMIT: commit,
+  });
+
+  const run = (name: string, env: Record<string, string | undefined>) =>
+    spawnSync('bash', [resolve(repo, 'cutover', name)], {
+      env: { PATH: `${bin}:${process.env.PATH ?? ''}`, HOME: process.env.HOME ?? '', ...env } as NodeJS.ProcessEnv,
+      encoding: 'utf8',
     });
+
+  const psqlCalls = () => {
+    try {
+      return readFileSync(log, 'utf8');
+    } catch {
+      return '';
+    }
+  };
+
+  it.each(['copy.sh', 'complete-tombstones.sh'])('%s: refuses each condition, before any database call', (name) => {
+    const cases: [string, Record<string, string | undefined>, RegExp][] = [
+      ['no APP_DATABASE_URL', { ...good(), APP_DATABASE_URL: undefined }, /APP_DATABASE_URL is unset/],
+      ['no AUTH_DATABASE_URL', { ...good(), AUTH_DATABASE_URL: '' }, /AUTH_DATABASE_URL is unset/],
+      ['the same database', { ...good(), AUTH_DATABASE_URL: good().APP_DATABASE_URL }, /same database/],
+      ['the public TCP proxy', { ...good(), APP_DATABASE_URL: 'postgresql://u:p@roundhouse.proxy.rlwy.net:41234/railway' }, /public TCP proxy/],
+      ['a public host', { ...good(), AUTH_DATABASE_URL: 'postgresql://u:p@db.example.com/railway' }, /not Railway-internal/],
+      ['a near-miss host', { ...good(), APP_DATABASE_URL: 'postgresql://u:p@postgres.railway.internal.evil.com/railway' }, /not Railway-internal/],
+      ['a bare IP', { ...good(), APP_DATABASE_URL: 'postgresql://u:p@100.64.0.7:5432/railway' }, /not Railway-internal/],
+      ['psql 17', { ...good(), FAKE_PSQL_MAJOR: '17' }, /psql must be major 18 .*17/],
+      ['no PROMOTED_COMMIT', { ...good(), PROMOTED_COMMIT: undefined }, /PROMOTED_COMMIT is unset/],
+      ['HEAD is not the promoted commit', { ...good(), PROMOTED_COMMIT: 'HEAD~0^' }, /HEAD is not PROMOTED_COMMIT/],
+      ['stdout not a terminal', good(), /stdout redirected/],
+    ];
+    for (const [label, env, message] of cases) {
+      const result = run(name, env);
+      expect({ label, status: result.status }).toEqual({ label, status: 2 });
+      expect(result.stderr, label).toMatch(message);
+      expect(result.stderr, label).not.toMatch(/u:p@/);
+    }
+    expect(psqlCalls()).toBe('');
+  });
+
+  it.each(['copy.sh', 'complete-tombstones.sh'])('%s: a dirty checkout is refused', (name) => {
+    writeFileSync(resolve(repo, 'cutover', '02-import-auth.sql'), '-- edited after promotion\n');
+    const result = run(name, good());
     expect(result.status).toBe(2);
-    expect(result.stderr).toMatch(/outside the auth image/);
+    expect(result.stderr).toMatch(/uncommitted changes/);
+    expect(psqlCalls()).toBe('');
   });
 
-  it.each(['copy.sh', 'complete-tombstones.sh'])('%s: the guard is the image marker, and the Dockerfile bakes it', (name) => {
+  it.each(['copy.sh', 'complete-tombstones.sh'])('%s: in a terminal, with everything right, it passes the check', (name) => {
+    const target = resolve(repo, 'cutover', name);
+    const [cmd, args] =
+      process.platform === 'darwin'
+        ? ['script', ['-q', '/dev/null', 'bash', target]]
+        : ['script', ['-qec', `bash ${target}`, '/dev/null']];
+    const result = spawnSync(cmd, args, {
+      env: { PATH: `${bin}:${process.env.PATH ?? ''}`, HOME: process.env.HOME ?? '', ...good() } as NodeJS.ProcessEnv,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    // Past the check, the fake psql is called (and fails, so nothing else runs).
+    expect(psqlCalls()).toMatch(/^called /);
+    expect(`${result.stdout}${result.stderr}`).not.toMatch(/refusing|not Railway-internal|PROMOTED_COMMIT|uncommitted/);
+  });
+
+  it.each(['copy.sh', 'complete-tombstones.sh'])('%s: no image marker or railway ssh is left in it', (name) => {
     const source = readFileSync(script(name), 'utf8');
-    expect(source).toMatch(/\[ -f \/etc\/ansari-auth-image \]/);
-    expect(source).not.toMatch(/RAILWAY_ENVIRONMENT|RAILWAY_SERVICE_NAME/);
-    const dockerfile = readFileSync(resolve(here, '../../Dockerfile'), 'utf8');
-    expect(dockerfile).toMatch(/RUN touch \/etc\/ansari-auth-image/);
+    expect(source).toMatch(/operator_check /);
+    expect(source).not.toMatch(/ansari-auth-image|railway ssh/);
   });
-
-  it.each(['copy.sh', 'complete-tombstones.sh'])(
-    '%s: location is checked FIRST: a laptop run with bad URLs fails on location',
-    (name) => {
-      for (const env of [
-        { APP_DATABASE_URL: 'postgresql://app/x' },
-        { APP_DATABASE_URL: 'postgresql://same/db', AUTH_DATABASE_URL: 'postgresql://same/db' },
-        {},
-      ]) {
-        const result = run(name, env);
-        expect(result.status).toBe(2);
-        expect(result.stderr).toMatch(/outside the auth image/);
-      }
-    }
-  );
-
-  it.each(['copy.sh', 'complete-tombstones.sh'])(
-    '%s: after the location, the URLs: both set, and different (in that order)',
-    (name) => {
-      const source = readFileSync(script(name), 'utf8');
-      const marker = source.indexOf('[ -f /etc/ansari-auth-image ]');
-      const app = source.indexOf('[ -n "${APP_DATABASE_URL:-}" ] || die "APP_DATABASE_URL is unset"');
-      const auth = source.indexOf('[ -n "${AUTH_DATABASE_URL:-}" ] || die "AUTH_DATABASE_URL is unset"');
-      const differ = source.indexOf('[ "$APP_DATABASE_URL" != "$AUTH_DATABASE_URL" ] || die');
-      const firstPsql = source.search(/\bpsql[_ ]/);
-      expect(marker).toBeGreaterThan(0);
-      expect([marker, app, auth, differ].every((i, k, all) => i > 0 && (k === 0 || i > (all[k - 1] as number)))).toBe(true);
-      expect(differ).toBeLessThan(firstPsql);
-    }
-  );
 
   it('copy.sh prints counts and checksums only: no echo of a URL or row data', () => {
     const source = readFileSync(script('copy.sh'), 'utf8');

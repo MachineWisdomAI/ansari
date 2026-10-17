@@ -395,6 +395,51 @@ legacy variable until the contract PR.
   `self-hosting-docs.test.ts` now pins "no boot admin check" and the two-step grant in place of
   the old crash-loop triage.
 
+### Owner amendment H-8: the cutover runs from the owner's machine over Tailscale
+
+The owner's review asked to keep Postgres tooling out of the service image and to run the
+one-off cutover over their Tailscale connection to Railway. Security accepted, with conditions 1
+to 7, and main added a to e. This supersedes the earlier "inside the auth image only" ruling.
+
+- [x] `operator-env.sh`, sourced by `copy.sh` and `complete-tombstones.sh`, refuses before any
+  database call:
+  - an unset, empty or identical URL;
+  - a host that is not `<name>.railway.internal`: the public proxy `*.proxy.rlwy.net` is refused,
+    and so is any other host, a bare IP, or a near-miss like `….railway.internal.evil.com`;
+  - a `psql` that is not major 18;
+  - a missing `PROMOTED_COMMIT`, a HEAD other than it, or a dirty checkout;
+  - stdout that is not a terminal.
+
+  It warns when a URL has no `sslmode=require`. `copy.test.ts` negative-tests each refusal
+  against a throwaway clean checkout with a fake `psql`, and asserts that no URL is echoed and
+  `psql` is never called. A positive run under a real pseudo-terminal (`script`) gets past the
+  check.
+- [x] The rehearsal seed checks the same host and checkout, and needs `ANSARI_CUTOVER_ENV=staging`.
+  Railway's own variables prove nothing, because a laptop shell injects them. That is tested.
+- [x] The Dockerfile is back to the service image: no PGDG, no psql, no `apps/api/drizzle` copy
+  or chmod, no marker, and the comment no longer calls it the operator environment. The full
+  install stays because `grant-admin.ts` and `ban-user.ts` also run in it. `railway.toml` and
+  RELEASE.md's watch line drop `apps/api/drizzle/**`, while `apps/auth/turbo.json` keeps it as a
+  test input, because `copy.test` builds the app database from it.
+- [x] Runbook:
+  - the operator-environment section covers the Tailscale route, the clean checkout, `set +o
+    history`, `read -rs` for both URLs, the host rule, the TLS probe (`sslmode=require` with
+    `pg_stat_ssl` printing `t`, or the recorded reason), what passes through the machine, and
+    `exit` at the end;
+  - step 1 gains the hygiene checklist: full-disk encryption, the route up, TLS recorded, URLs
+    via `read -rs` only, history off, no session recording (`script`, asciinema, iTerm2
+    logging), screen sharing off, the checkout clean at `PROMOTED_COMMIT`, the session closed;
+  - steps 6, 7, 9 and 10, rollback.md, rehearsal.md (the same machine path, and its timings
+    recorded), the scripts README ("01-export is never run by hand") and RELEASE.md are updated.
+- [x] Main's scan: `railway ssh` and `/etc/ansari-auth-image` went from 13 hits in five files to
+  0 across RELEASE.md, `docs/` and `apps/auth/scripts`. `cutover-docs.test.ts` pins that, plus
+  the operator environment and the checklist.
+- [x] Source scan 4's private-network pattern is narrowed to the removed listener
+  (`.railway.internal:3101`), because the cutover scripts now name `<name>.railway.internal`
+  hosts. A near-miss line pins that.
+- **Open at step 1, recorded by the owner:** whether Railway offers TLS on the private path over
+  Tailscale.
+
 ## Deviations from Plan
 
 The thread (`codev/state/spir-300_thread.md`, one section per phase) has each deviation with its
