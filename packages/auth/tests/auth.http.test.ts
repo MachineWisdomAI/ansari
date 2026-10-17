@@ -17,7 +17,13 @@ import type { PGlite } from '@electric-sql/pglite';
 import { betterAuth } from 'better-auth';
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 
-import { createAuth, type Auth, type Db } from '../src/index';
+import {
+  createAuth,
+  DEV_TRUSTED_ORIGINS,
+  trustedOriginsFor,
+  type Auth,
+  type Db,
+} from '../src/index';
 import { drizzleFor, migrate, setAuthEnv } from './helpers/auth-db';
 
 const BASE = 'http://localhost:3100';
@@ -87,6 +93,37 @@ describe('trusted origins carry the frontend Expo scheme', () => {
   it('accepts a sign-in bearing the ansarichat:// origin over HTTP', async () => {
     const res = await auth.handler(signInReq(BASE, 'ansarichat://'));
     expect(res.status).toBe(200);
+  });
+});
+
+describe('development origins are never trusted in production', () => {
+  const base = {
+    CORS_ORIGIN: ['https://ansari.chat'],
+    AUTH_LAYER_ORIGIN: 'https://api.ansari.chat',
+  };
+
+  it('production trusts the web origins, the layer and the app scheme only', () => {
+    const origins = trustedOriginsFor({ ...base, NODE_ENV: 'production' });
+    expect(origins).toEqual(['https://ansari.chat', 'https://api.ansari.chat', 'ansarichat://']);
+    for (const dev of DEV_TRUSTED_ORIGINS) expect(origins).not.toContain(dev);
+    expect(origins).not.toContain('exp://');
+    expect(origins).not.toContain('http://localhost:8081');
+  });
+
+  it.each(['development', 'test'] as const)('%s also trusts Expo Go and Metro web', (NODE_ENV) => {
+    const origins = trustedOriginsFor({ ...base, NODE_ENV });
+    expect(origins).toContain('exp://');
+    expect(origins).toContain('http://localhost:8081');
+  });
+
+  it('createAuth() uses the environment-gated list', () => {
+    expect(auth.options.trustedOrigins).toEqual(
+      trustedOriginsFor({
+        CORS_ORIGIN: ['http://localhost:3100'],
+        AUTH_LAYER_ORIGIN: process.env.AUTH_LAYER_ORIGIN as string,
+        NODE_ENV: 'test',
+      })
+    );
   });
 });
 
