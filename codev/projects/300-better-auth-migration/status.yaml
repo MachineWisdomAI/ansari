@@ -240,7 +240,7 @@ history:
         file: >-
           /Users/amrmohamed/repos/iaser/ansari/.builders/spir-300/codev/projects/300-better-auth-migration/300-phase_13-iter2-gemini.txt
 started_at: '2026-10-14T03:31:15.359Z'
-updated_at: '2026-10-17T01:17:03.073Z'
+updated_at: '2026-10-17T02:08:25.476Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-10-16T00:28:28.599Z'
@@ -290,3 +290,8 @@ force_advanced:
   max_iterations: 3
   rebuttal_file: 300-phase_12-iter3-rebuttals.md
   at: '2026-10-16T21:19:01.825Z'
+pr_history:
+  - phase: review
+    pr_number: 315
+    branch: builder/spir-300
+    created_at: '2026-10-17T02:08:25.476Z'
