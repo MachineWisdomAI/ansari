@@ -69,8 +69,11 @@ the commit the release record holds for it.
 
 ## 5. Detach `auth.askansari.ai`
 
-Remove the public domain from the `auth` service. Leave the service and its database as they
-are (stopped is fine): they are evidence, and a second attempt starts by emptying them. The auth
+Remove the public domain from the `auth` service. It was attached at window step 11 (spec H-5),
+before `apps/api` deployed, so a rollback from any step from 11 on detaches it here; step 3 has
+already put the previous `apps/api`, which never calls `apps/auth`, back in place. Leave the
+service and its database as they are (stopped is fine): they are evidence, and a second attempt
+starts by emptying them. The auth
 database now holds every copied password hash: see "If no second attempt follows" below.
 
 **Check:** `curl -s -o /dev/null -w '%{http_code}' https://auth.askansari.ai/health` no longer

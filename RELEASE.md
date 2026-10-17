@@ -57,10 +57,10 @@ migration runbook were both proven in real releases on 2026-08-02.
 > healthcheck `/`, auth healthcheck `/health` (200 only when the auth database
 > answers; timeout 300s); restart ON_FAILURE, max 3 retries.
 >
-> **auth service (spec 300)** — two listeners: the public domain
-> (`auth.askansari.ai`, `auth-staging.askansari.ai`) targets `PORT` (3100) and
-> nothing else; `INTERNAL_PORT` (3101) has NO domain and is reached by `backend`
-> over the private network (`AUTH_INTERNAL_URL`). Set both as service variables.
+> **auth service (spec 300)** — one listener: the public domain
+> (`auth.askansari.ai`, `auth-staging.askansari.ai`) targets `PORT` (3100); set it as
+> a service variable. `backend` reaches it at that domain too (`AUTH_URL`), like any
+> client: no private-network hop, no shared secret (spec amendment H-1).
 > It has its OWN Railway Postgres, the auth database, with snapshots or PITR
 > enabled before its first real row, on Postgres 18 (C-4: the owner's service; in staging it
 > already exists, empty; in production it is created or found, and checked empty in window step 1).
@@ -164,15 +164,14 @@ verifies JWTs from `apps/auth`, so both services run, each on its own database.
 
 3. **Boot both production builds.** `apps/auth` first, in its own shell, from `apps/auth/`,
    with its `DATABASE_URL` set to the auth database and its env file loaded (it listens on
-   3100 public and 3101 internal):
+   3100):
 
    ```bash
    DATABASE_URL=postgresql://postgres:postgres@localhost:5433/ansari_auth pnpm start
    ```
 
    Then `apps/api`, in this shell (the `DATABASE_URL` override wins over `.env`; its
-   `AUTH_INTERNAL_URL` is `http://localhost:3101` and its `AUTH_INTERNAL_SECRET` equals
-   `apps/auth`'s):
+   `AUTH_URL` is `http://localhost:3100`, `apps/auth`'s origin):
 
    ```bash
    pnpm start

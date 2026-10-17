@@ -143,7 +143,29 @@ describe('the window runbook', () => {
     expect(doc).toMatch(/CORS_ORIGIN.*real web origins/s);
     expect(doc).toMatch(/signed in to a real account before the cutover/i);
     expect(doc).toMatch(/Key rotation is not revocation/);
-    expect(doc).toMatch(/no domain on `INTERNAL_PORT`/i);
+    // Spec H-1: no internal hop survives in the runbook's commands.
+    expect(doc).not.toMatch(/railway\.internal|X-Ansari-Internal-Auth|:3101/i);
+  });
+
+  it('attaches the auth domain after the copy and the admin roles, before apps/api deploys (H-5)', () => {
+    const at = (heading: string) => doc.indexOf(heading);
+    const attach = at('## 11. Attach `auth.askansari.ai`');
+    expect(at('## 8. The copy and the audits')).toBeGreaterThan(0);
+    expect(attach).toBeGreaterThan(at('## 10. Admin roles'));
+    expect(attach).toBeLessThan(at('## 12. Deploy `apps/api` and `apps/frontend`'));
+    expect(doc).toMatch(/DNS record for `auth\.askansari\.ai` exists before the window and is not attached/);
+    expect(doc).toMatch(/valid certificate/);
+    expect(doc).toMatch(/`AUTH_URL=https:\/\/auth\.askansari\.ai`/);
+    expect(doc).toContain('## 15. (Moved to step 11)');
+  });
+
+  it('gives the operator response to the direct-delete residual (H-6, R3)', () => {
+    expect(doc).toContain('## Orphan app rows (owner-accepted residual, spec H-6)');
+    expect(doc).toContain('auth user has no app row: email-conflict');
+    expect(doc).toContain('LC_ALL=C comm -23 /tmp/app_ids /tmp/auth_ids');
+    expect(doc).toContain(
+      "WITH gone AS (DELETE FROM users WHERE id = :'id' AND system_key IS NULL RETURNING id)\nINSERT INTO deleted_users (id, auth_deleted_at) SELECT id, now() FROM gone;"
+    );
   });
 });
 
@@ -156,6 +178,10 @@ describe('the rollback runbook', () => {
     const confirm = doc.indexOf('-v confirm=yes');
     expect(dry).toBeGreaterThan(0);
     expect(confirm).toBeGreaterThan(dry);
+  });
+
+  it('detaches the auth domain, attached at window step 11 (H-5)', () => {
+    expect(doc).toMatch(/attached at window step 11 \(spec H-5\)/);
   });
 
   it('restarts from the auth baseline (window step 7)', () => {

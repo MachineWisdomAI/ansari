@@ -240,6 +240,63 @@ checksums and timings only:
 | Edge check, both paths, two networks; staging verdict | `docs/cutover/edge-check.md`; `rehearsal.md` Verdicts | _pending_ |
 | Measured shapes replace the provisional fixture | `docs/cutover/edge-header-shapes.json` | _pending_ |
 
+### Owner amendment at the pr gate: the internal hop removed (spec H-1 to H-6)
+
+The owner removed `AUTH_INTERNAL_SECRET` and the internal hop in this PR ("no tight coupling");
+`apps/api` now reaches `apps/auth` like any client, at its public origin (`AUTH_URL`; the issuer
+`AUTH_JWT_ISSUER` stays separate, owner). The security architect set R1 to R3 and approved the
+`DELETE` order; R2 was decided with main.
+
+- [x] **H-2: account endpoints** bound to the caller's own JWT and a live `sid`
+  (`apps/auth/src/routes/account.ts`): `GET /api/account/me`, `POST /api/account/revoke-sessions`,
+  `DELETE /api/account` (204 first when the user is already gone). `account.test.ts`: the forged
+  token matrix on all three (foreign key, swapped payload, `alg: none`, HS256, wrong `iss`/`aud`,
+  expired, no `sid`, non-UUID `sub`, session token), dead `sid` → 401 on `me` and revoke, expired
+  session row, another user's live `sid`, each `DELETE` branch (security's list: dead `sid` with a
+  live user → 401 and nothing changes; gone user → 204 and nothing changes; live → deleted, sessions
+  gone, second call 204), planted keys (no `exp`, RS256), the per-user budgets, an auth-database
+  outage → 500 on all three (found on the way: the JWKS read sat inside the token `try`, so an
+  outage read as 401; fixed and pinned).
+- [x] **H-3: public JWKS**, no credential (`verify-jwt.test.ts` asserts no `x-ansari-*` and no
+  `authorization` header on the fetch, and that the issuer is pinned as set, not derived).
+- [x] **H-4 / R1: no per-IP rule on any layer path.** `ROUTER_RULES` are all `false` (better-auth
+  1.7.7 `resolveRateLimitConfig` returns before choosing a bucket on `false`, so the default is
+  skipped too; read in `dist/api/rate-limiter/index.mjs`). `limits.test.ts` "the layer's view":
+  101 sign-ins and 101 token exchanges from one IP across two users, no 429 and no per-IP row; from
+  the same IP the per-email lock and the per-session budget still trip. **Shown to fail** with
+  `/sign-in/email` removed from `ROUTER_RULES` (2 failures), and to pass restored.
+  `packages/auth` `rate-limit.test.ts`: each of the six paths takes `DEFAULT_RULE.max + 1` from one
+  IP with no 429; `/ok` keeps the default (429 at 101). `apps/api` limits the layer per
+  `X-Real-IP` (`lib/auth-service/limits.ts`); `layer.test.ts` proves the sixth login is 429 before
+  `apps/auth` is called, two IPs two buckets, the per-email lock behind it, no forwarded IP or
+  credential on any layer call, and the whole legacy cycle against production-mode `apps/auth`
+  behind a stand-in edge that stamps `apps/api`'s one IP (the only per-IP row it leaves is
+  `…|/jwks`). Owner: TEMPORARY until the legacy system is replaced.
+- [x] **`deleteAuthUser(sub, jwt)` refuses a token that is not the subject's own** before any call
+  (`NotTheSubjectError`). Found while converting `resolve-user.test.ts`: with the account endpoint
+  deleting the token's subject, a mismatched token in the pending-delete retry would have deleted
+  the wrong account. No current caller passes one; the guard is the backstop, tested.
+- [x] **H-5 / R2:** the runbook attaches `auth.askansari.ai` at step 11 (after step 10, before
+  step 12), with the DNS record checked at step 1, `/health` 200 over a valid certificate, the
+  JWKS, `/internal/…` 404, `/api/account/me` 401, and the auth edge probe moved there; step 15 is
+  "(moved to step 11)"; rollback step 5 and the staging table updated; `cutover-docs.test.ts` pins
+  the order.
+- [x] **H-6 / R3:** the runbook's "Orphan app rows" section (the `email-conflict` alert, the audit,
+  the one-transaction cleanup); `rehearsal.md` records it as an owner-accepted residual with a
+  staging check; `resolve-user.test.ts` reproduces the refusal and runs the documented statement to
+  clear it. The psql form was run through real psql 18: the orphan prints `INSERT 0 1`, a system row
+  `INSERT 0 0` and is untouched.
+- [x] **Source scan 4** (planted-bad and near-miss lines, a file floor): no runtime file or config
+  names the removed hop. Repo-wide, the remaining hits are test files that name it on purpose
+  (planted lines, absence checks), the historical thread and plan phases, and docs sentences that
+  say it is gone.
+- [x] **Turbo** (main): `globalEnv` drops `AUTH_INTERNAL_SECRET`, `AUTH_INTERNAL_URL`,
+  `INTERNAL_PORT` and `AUTH_RATE_LIMIT_MODE` and adds `AUTH_URL` (four-way: in `apps/api`'s Zod
+  schema; no static or dynamic `process.env` read, which the eslint guard forbids; documented in
+  `docs/self-hosting.md` and `.env.example`). `--dry=json`: `AUTH_URL` a → b moves
+  `ansari-api#test`, `ansari-api#build` and `ansari-auth#build`, and a again restores all three;
+  `AUTH_INTERNAL_SECRET` x → y moves none. Dockerfile `EXPOSE 3100`; `railway.toml` one port.
+
 ## Deviations from Plan
 
 The thread (`codev/state/spir-300_thread.md`, one section per phase) has each deviation with its
@@ -875,6 +932,9 @@ conditional by design:
 ## Follow-up Items
 
 **Owner, before the merge word:**
+- Remove `AUTH_INTERNAL_SECRET`, `AUTH_INTERNAL_URL`, `INTERNAL_PORT` and `AUTH_RATE_LIMIT_MODE`
+  from the staging `auth` and `backend` services, and set `backend`'s `AUTH_URL` (spec H-1).
+- The `auth-staging` and `auth` DNS records exist, unattached, before each window (spec H-5).
 - B-1 to B-4 in `docs/cutover/baselines.md`, plus any `limits.ts` amendment, in this PR (G-4).
 - Staging auto-deploy off for backend, auth and web; staging auth deploys from `develop`.
 - Staging DNS for `auth-staging`; orange-cloud the staging hostnames for the probe.
@@ -914,6 +974,9 @@ conditional by design:
 - The #305 production build guard must cover `EXPO_PUBLIC_AUTH_URL`.
 - #265: duplicate better-auth snapshots.
 - #176: nothing checks the target DB for applied migrations.
+
+- `apps/api`'s per-IP store for the layer is in memory, per instance (H-4): with N instances a
+  client gets N times each budget. Temporary with the layer; a shared store if it outlives that.
 
 **Observed, not changed:**
 - A tokenless `GET /threads` fires after sign-out (pre-existing).

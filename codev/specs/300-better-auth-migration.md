@@ -80,6 +80,45 @@ This spec defines WHAT and WHY. The plan defines HOW and WHEN.
 >   (or found) with the settings the main architect confirms. Either way, window step 1 checks
 >   mechanically that the auth server reports major 18 and that the database has no tables.
 >
+> **Owner amendment, 2026-10-17, at the pr gate: no shared secret, no internal hop** (owner
+> decision; the security architect's requirements R1 to R3 folded in; R2 decided with main).
+>
+> - **H-1.** `AUTH_INTERNAL_SECRET`, the internal listener (`INTERNAL_PORT`, 3101), the
+>   private-network hop and the forwarded-IP header are **removed**. `apps/api` reaches `apps/auth`
+>   like any other client, at its **public origin** (`AUTH_URL`), with no shared credential. The
+>   issuer it pins (`AUTH_JWT_ISSUER`) stays a separate setting, never derived from the URL.
+> - **H-2.** The four internal endpoints become **account endpoints** on the public listener, bound
+>   to the caller's OWN JWT (EdDSA, `iss`, `aud`, `exp`, `sub`, `sid`; no id in any path) and to a
+>   **live session** (the token's `sid` still exists): `GET /api/account/me` (`{id, email,
+>   first_name, last_name, registered_via, role, banned}`, serving rules 2 and 6), `POST
+>   /api/account/revoke-sessions` (G-3) and `DELETE /api/account` (rule 5). `DELETE` answers 204 when
+>   the token's subject is already gone, before the session check, so a retry after a lost 204 stays
+>   idempotent; otherwise it requires the live session. Each endpoint has a per-user budget.
+> - **H-3.** The JWKS `apps/api` verifies against is the **public** `/api/auth/jwks`, fetched like any
+>   client fetches it, under the router's per-IP default (at most one fetch per 30 s cooldown).
+> - **H-4.** The `/v2/users/*` layer is an **anonymous pass-through** to `apps/auth`'s public
+>   endpoints. Rate limits, Option A, **TEMPORARY until the legacy system is replaced** (owner):
+>   `apps/auth` sees `apps/api`'s egress IP on every legacy call, so **no path the layer calls has a
+>   per-IP router rule**, the global default included (R1): sign-in and sign-up per email (plus the
+>   global sign-up ceiling), reset request per email plus a global ceiling, reset consume globally,
+>   `/token` and `/get-session` per session token, the account endpoints per user. `apps/api` limits
+>   the layer's routes per client `X-Real-IP` itself, at the per-IP numbers `apps/auth` used.
+>   `AUTH_RATE_LIMIT_MODE` is removed: per-email is the only mode.
+> - **H-5 (R2).** The window attaches `auth.askansari.ai` **after the copy and the admin roles
+>   (step 10) and before `apps/api` deploys**, never before the copy, and `apps/api`'s `AUTH_URL` is
+>   that domain from its first deploy. The few minutes of public sign-in exposure before `apps/api`
+>   deploys are the same exposure as after the old step 15, only earlier.
+> - **H-6 (R3), accepted residual.** A user who calls `DELETE /api/account` directly, bypassing
+>   `apps/api`, deletes their auth account and leaves their app row with no tombstone. A later
+>   sign-up with the same email gets a new id that first use refuses as an email conflict, naming
+>   the orphan holder in the Sentry alert. The operator response (an audit for app ids with no auth
+>   user and a one-transaction cleanup) is in the runbook. A stolen JWT can delete at `apps/auth`
+>   directly, the same power it has through `apps/api`.
+>
+> This amendment supersedes every passage below about the internal credential, the internal
+> listener, the private network, the forwarded IP and `AUTH_RATE_LIMIT_MODE`; those passages are
+> amended in place where they are normative.
+>
 > **Lineage.** This spec is written for issue #300. Its evidence base is the issue #60 reference
 > spec and plan (`codev/specs/60-better-auth-migration-reference.md`,
 > `codev/plans/60-better-auth-migration-reference.md`), updated in #299 against better-auth 1.7.7.
@@ -299,8 +338,8 @@ After the cutover:
       consumes the same budget, so the limit reveals nothing about which addresses exist.
     - They are enforced by `apps/auth`'s Better Auth router, and are keyed by the **real client
       IP**, which comes from `X-Real-IP` (see Client IP below).
-    - Calls from the compatibility layer reach that same router, so one database-backed limiter
-      covers both paths. The client IP is forwarded over an authenticated hop.
+    - Calls from the compatibility layer reach that same router anonymously, with `apps/api`'s IP,
+      so none of their paths is keyed by IP there; `apps/api` limits the layer per client IP (H-4).
 11. **Revocation is bounded by the JWT lifetime. This is the accepted cost of the owner's JWT
     decision.**
     - Today, a revoked session is rejected on its very next request, because every request checks
@@ -330,8 +369,8 @@ After the cutover:
 **Decision: read the client IP from `X-Real-IP` alone.** Better Auth gets
 `advanced.ipAddress.ipAddressHeaders: ['x-real-ip']` with `trustedProxies` unset. The
 apps/api's `lib/rate-limit.ts` `getClientIp` resolves the IP the same way, from `X-Real-IP` only
-and never from `X-Forwarded-For`. The layer forwards that value to `apps/auth` over the
-authenticated hop described below.
+and never from `X-Forwarded-For`, and uses it for the layer's per-IP limits (H-4). Nothing
+forwards it to `apps/auth`: the layer's calls are anonymous.
 
 Evidence:
 
@@ -408,30 +447,27 @@ counts its sign-in limit.
   PR ships with.
 - **Owner amendment G-1 (2026-10-16):** the fallback is built in every case, selected by
   `AUTH_RATE_LIMIT_MODE` (`ip` | `email`, default `email`). A failed check, including the in-window
-  production probe, switches the mode without a code change.
+  production probe, switches the mode without a code change. **Superseded by H-4 (2026-10-17):**
+  the switch is removed and per-email is the only mode, because the layer's anonymous calls reach
+  `apps/auth` with `apps/api`'s IP.
 
-**The layer-to-`apps/auth` hop carries the client IP, so that hop must be authenticated.** When a
-`/v2/users/*` route calls `apps/auth`, the TCP peer is `apps/api`, not the user. If the route went
-over the public domain, the edge would stamp `apps/api`'s egress IP as `X-Real-IP`, and every
-legacy-client login would share one bucket, which is exactly the global login cap this section
-exists to prevent. If it went over Railway's private network (`*.railway.internal`), it would skip
-the edge, and any service in the environment could claim any IP. Requirements:
+**The layer's calls to `apps/auth` are anonymous, so no limit on their paths is keyed by IP (H-4).**
+When a `/v2/users/*` route calls `apps/auth`, the TCP peer is `apps/api`, not the user, and the
+edge stamps `apps/api`'s egress IP as `X-Real-IP`. A per-IP rule on any path the layer calls
+would put every legacy client in one bucket, which is exactly the global login cap this section
+exists to prevent. Requirements (R1):
 
-- `apps/api` forwards the end user's `X-Real-IP`, as it received it from the edge, in a dedicated
-  header, together with a **shared internal credential** (a secret only `apps/api` and `apps/auth`
-  hold, validated through `getEnv()`).
-- `apps/auth` uses the forwarded IP **only** when the credential verifies, in constant time. On
-  every other request it strips any such header, and Better Auth reads the edge's `X-Real-IP` as
-  usual.
-- The credential also identifies the internal-only endpoints (profile, role, delete; see "Two
-  databases" rule 8). No other caller can reach those, and delete also requires the subject's own
-  JWT.
-- A test proves that a forged forwarded-IP header without the credential is ignored, and that two
-  legacy clients behind the layer land in different buckets.
+- every path the layer calls (`/sign-in/email`, `/sign-up/email`, `/request-password-reset`,
+  `/reset-password`, `/token`, `/get-session`) has its router rule set to `false`, which also
+  keeps the router's per-IP default off them; the account endpoints sit outside the router
+- `apps/auth` limits them per email, per session token, per user or globally instead
+- `apps/api` limits the layer's routes per client `X-Real-IP` itself, before calling `apps/auth`
+- a test fires more than the router's default maximum from one IP across two users and gets no
+  429 from `apps/auth`, while the per-email and per-session rules still trip
 
-**Residual risk, accepted and documented:** whoever holds the internal credential can choose the
-rate-limit key and read any user's profile and role by id. It cannot delete an account without that
-user's JWT. It lives only in the two services' environments, and it is rotated with them.
+**Owner: TEMPORARY, until the legacy system is replaced.** The cost, accepted: a client that calls
+`apps/auth` directly gets no per-IP limit on reset or the session exchange, only per-email,
+per-session and global ones, and `apps/api`'s per-IP store is per instance.
 
 ### Hosting and token model (owner decisions, 2026-10-15)
 
@@ -449,9 +485,10 @@ project adds:
 **Not in production before the window.** `apps/auth`'s code, Dockerfile and service reach
 production only when the cutover PR merges, at the window. Its auth database is created empty ahead
 of time, and nothing reads it. In the window, `apps/auth` is deployed after the copy and its
-audits, and its **public domain is attached last**, after the smoke tests on the private network. A
-reachable `apps/auth` before the copy would accept sign-ups into `auth.users`, which the copy's
-emptiness guard would then refuse. The edge check and the rehearsal use staging deployments from
+audits, and its **public domain is attached after the copy and the admin roles, before `apps/api`
+deploys** (H-5), because `apps/api` reaches it there from its first deploy. A reachable `apps/auth`
+before the copy would accept sign-ups into `auth.users`, which the copy's emptiness guard would then
+refuse. The edge check and the rehearsal use staging deployments from
 `develop` after the merge (owner amendment R-2); the branch is never deployed.
 
 **Token model: JWT via JWKS** (Better Auth's `jwt` plugin on `apps/auth`), alongside `bearer()` so
@@ -503,7 +540,7 @@ wrong origin.
 | Decision | Departs from | Cost accepted by the owner |
 |---|---|---|
 | JWT via JWKS in `apps/api` | Issue decided item "apps/api authenticates with the bearer plugin"; reference plan "How apps/api authenticates" | Revocation lags by up to the JWT lifetime (Desired State item 11). Key management (`auth.jwks`, rotation). An extra token exchange on every refresh |
-| Layer calls `apps/auth` over HTTP | Reference plan's in-process `auth.api.*` calls | An authenticated internal hop that carries the client IP. A network dependency on `apps/auth` for every legacy sign-in |
+| Layer calls `apps/auth` over HTTP | Reference plan's in-process `auth.api.*` calls | An anonymous pass-through to the public endpoints (H-4), with per-IP limits moved into `apps/api`. A network dependency on `apps/auth` for every legacy sign-in |
 | `apps/frontend` on `apps/auth` at cutover | (none; matches the reference) | An app-architect-agreed client change ships inside the window (I-6) |
 | `apps/api` CORS is a static wildcard with no credentials (security architect, 2026-10-16, phase 9) | Plan phase 9 "`Allow-Origin` is the allowlist"; scenario 28's "no allow response" for `apps/api` | Any origin may read an `apps/api` response to a request it can already make with a token it holds. No credentialed CORS: `Allow-Credentials` is never sent, so a browser refuses every credentialed cross-origin request. The allowlist was dropped because `next.config.ts` headers are compiled at build (the image builds with the dummy `.env.ci`) and a runtime list would need the global middleware the spec forbids plus a variable whose misconfiguration takes the web app down in the window. `apps/auth` keeps its exact allowlist |
 | Separate auth database from the start (2026-10-16) | Issue decided item "FKs on `threads`, `preferences`, `feedback` repointed to `auth.users.id`"; the reference's single database | A second Railway Postgres with its own backups; a cross-database copy that is ordered and gated, not atomic; app rows created on first use; deletion through a tombstone; admin role over HTTP |
@@ -564,10 +601,10 @@ issue's dedicated-schema decision): `auth.users`, `auth.session`, `auth.account`
    - **Through the layer** (`/v2/users/register`): after `apps/auth` creates the user, the layer
      inserts the `public.users` row with the same id, email, names and `registered_via`.
    - **Directly at `apps/auth`** (`apps/frontend`): on the first `apps/api` request whose verified
-     `sub` has no `public.users` row, `apps/api` fetches the user's profile from an internal-only
-     `apps/auth` endpoint (internal credential) and inserts the row with
-     `ON CONFLICT (id) DO NOTHING`. If `apps/auth` answers that the user does not exist, the request
-     gets 401.
+     `sub` has no `public.users` row, `apps/api` fetches the user's profile from `apps/auth`'s
+     `GET /api/account/me` **with that user's own JWT** (H-2) and inserts the row with
+     `ON CONFLICT (id) DO NOTHING`. If `apps/auth` answers that the user does not exist, or that the
+     token's session has ended, the request gets 401.
    - The same path repairs a layer registration whose insert failed.
    - **An email held under another id.** `ON CONFLICT (id)` does not cover `users_email_unique`
      (`apps/api/drizzle/0000_baseline.sql:10`). If another `public.users` row already holds the
@@ -594,13 +631,14 @@ issue's dedicated-schema decision): `auth.users`, `auth.session`, `auth.account`
    2. In one app-database transaction, it deletes the `public.users` row (cascading threads,
       preferences and feedback) and writes a **tombstone** (`public.deleted_users`: `id`,
       `deleted_at`, `auth_deleted_at` null). The tombstone holds the id only, no personal data.
-   3. It calls `apps/auth`'s internal delete endpoint, which removes the sessions and the auth user.
-      "Not found" counts as done, so the call is idempotent. Then it sets `auth_deleted_at`.
+   3. It calls `apps/auth`'s `DELETE /api/account` with the user's own JWT (H-2), which removes the
+      sessions and the auth user. "Already gone" is a 204, so the call is idempotent. Then it sets
+      `auth_deleted_at`.
 
-   **The delete endpoint is bound to the subject.** It requires the internal credential **and** the
-   user's own JWT. `apps/auth` verifies that JWT against its own JWKS and refuses the call when the
-   JWT's `sub` differs from the target id. The internal secret alone can therefore delete no
-   account.
+   **The delete endpoint is bound to the subject.** It deletes only the user the JWT names, verified
+   against `apps/auth`'s own JWKS, and needs that token's session to be live unless the user is
+   already gone. `apps/api` refuses before any call to pass a token whose `sub` is not the user
+   being deleted. A direct call that bypasses `apps/api` is the H-6 residual.
 
    The profile path in rule 2 **never re-creates a tombstoned id**. If step 3 fails, any later
    request carrying that `sub` (and so that user's JWT), or the user's retry of `DELETE me`,
@@ -609,8 +647,8 @@ issue's dedicated-schema decision): `auth.users`, `auth.session`, `auth.account`
    endpoint. A failure therefore leaves an account that `apps/api` refuses, and never app data
    without a user.
 6. **Admin role.** `role` lives only in the auth database. On **each admin request**, `apps/api`
-   asks an internal-only `apps/auth` endpoint for the user's role, so a demotion still takes effect
-   immediately. If `apps/auth` is unreachable, the admin route **fails closed** (503) and never
+   asks `apps/auth`'s `GET /api/account/me` for the user's role **with the admin's own JWT** (H-2),
+   so a demotion, a ban or a revoked session still takes effect immediately. If `apps/auth` is unreachable, the admin route **fails closed** (503) and never
    grants access. The only admin route is `admin/stats`, so the traffic is small.
    - `ADMIN_EMAILS` (the reservation and the boot assertion) moves to `apps/auth`.
    - `grant-admin.ts` moves to `apps/auth/scripts/`, keeps its name, sets `auth.users.role`, and
@@ -621,20 +659,20 @@ issue's dedicated-schema decision): `auth.users`, `auth.session`, `auth.account`
    non-system row holding the address, because `apps/api` writes its own database.
    `@system.ansari.chat` stays reserved in `apps/auth`'s sign-up hooks and on the layer.
 8. **No query crosses databases.** `apps/api` holds no auth-database credential, and `apps/auth`
-   holds no app-database credential. Every cross-service fact goes over the internal credential,
-   through four internal-only `apps/auth` endpoints (profile, role, delete, and `revoke-sessions`
-   for legacy logout, which is bound to the subject's JWT like delete; owner amendment G-3). A source scan pins
-   that neither service's runtime code names the other database's connection.
+   holds no app-database credential, and there is **no shared credential between them** (H-1).
+   Every cross-service fact goes through `apps/auth`'s three account endpoints (H-2: `me` for the
+   profile and the role, `revoke-sessions` for legacy logout, G-3, and `DELETE`), each asked with
+   the user's own JWT at `apps/auth`'s public origin (`AUTH_URL`). A source scan pins that neither
+   service's runtime code names the other database's connection, and another that no runtime code
+   or config names the removed internal hop.
 
-   **The internal endpoints are high-value.** The profile endpoint returns any user's personal data
-   by id, so the internal credential's impact is High. Requirements:
-   - the credential is compared in constant time
-   - the internal routes are mounted **outside** Better Auth's handler path
-   - they are rate-limited
-   - delete is bound to the subject's JWT (rule 5)
-   - `apps/api` reaches profile, role and delete through `AUTH_INTERNAL_URL` over **Railway's private
-     network**, never the public domain. The layer's sign-in hop, which forwards the client IP,
-     stays as specified under Client IP.
+   **The account endpoints answer only for the token's subject.** No id appears in any path, so a
+   caller learns nothing about anyone else. Requirements:
+   - the token is verified with the algorithm, issuer, audience and expiry pinned, `sub` and `sid`
+     required, and the session must still be live (`DELETE`: unless the user is already gone)
+   - they are mounted **outside** Better Auth's handler path, so no per-IP rule applies
+   - each has a per-user budget
+   - an auth-database outage answers 500, never 401, so `apps/api` fails closed (503)
 9. **No per-request session check** (owner, I-7). `apps/api` validates the JWT against the JWKS
    only. A check would be an HTTP call to `apps/auth` on every request and a hard dependency of all
    of `apps/api` on `apps/auth`.
@@ -775,8 +813,8 @@ backfill inserts nothing, because of the unique `(user_id, provider_id)`.
 
 | Service | Database credential | Other variables |
 |---|---|---|
-| `apps/auth` | `DATABASE_URL` = **auth database**, Railway default account | `AUTH_INTERNAL_SECRET`, `AUTH_JWT_ISSUER`, `AUTH_JWT_AUDIENCE`, `ADMIN_EMAILS` (moved), `RESEND_API_KEY` and `FRONTEND_URL` (reset emails are now sent by `apps/auth`, with the same sender and legacy link shape as `apps/api/lib/email.ts`), plus the existing `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `CORS_ORIGIN` |
-| `apps/api` | `DATABASE_URL` = **app database**, Railway default account (unchanged) | `AUTH_INTERNAL_URL`, `AUTH_JWT_ISSUER`, `AUTH_JWT_AUDIENCE`, `AUTH_INTERNAL_SECRET`. The cutover PR removes `JWT_SECRET`, `ACCESS_TOKEN_EXPIRY_HOURS`, `REFRESH_TOKEN_EXPIRY_HOURS` and `ADMIN_EMAILS` |
+| `apps/auth` | `DATABASE_URL` = **auth database**, Railway default account | `AUTH_JWT_ISSUER`, `AUTH_JWT_AUDIENCE`, `ADMIN_EMAILS` (moved), `RESEND_API_KEY` and `FRONTEND_URL` (reset emails are now sent by `apps/auth`, with the same sender and legacy link shape as `apps/api/lib/email.ts`), plus the existing `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `CORS_ORIGIN` |
+| `apps/api` | `DATABASE_URL` = **app database**, Railway default account (unchanged) | `AUTH_URL` (`apps/auth`'s public origin, H-1), `AUTH_JWT_ISSUER` (set separately), `AUTH_JWT_AUDIENCE`, `AUTH_LAYER_ORIGIN`. No shared secret. The cutover PR removes `JWT_SECRET`, `ACCESS_TOKEN_EXPIRY_HOURS`, `REFRESH_TOKEN_EXPIRY_HOURS` and `ADMIN_EMAILS` |
 
 For the copy, the operator's Railway shell holds both databases' URLs as `APP_DATABASE_URL` and
 `AUTH_DATABASE_URL`, for that session only: never set on a Railway service, **never added to
@@ -786,7 +824,7 @@ name in runtime code.
 
 `DATABASE_URL` keeps one name, with a different database per Railway service, so `turbo.json`
 gains no database variable. The four `AUTH_*` names go into `globalEnv`, and the three `JWT_*`
-names leave it in the cutover PR. `AUTH_INTERNAL_SECRET` and `RESEND_API_KEY` are secrets: each has
+names leave it in the cutover PR. `BETTER_AUTH_SECRET` and `RESEND_API_KEY` are secrets: each has
 a Zod minimum length, is never logged, and uses the placeholder-not-a-real-* convention in
 `.env.ci`. Local development uses two
 databases on one local Postgres, both with owner URLs.
@@ -806,7 +844,7 @@ a commit recorded in the release notes.
 
 | PR / stage | Reference phases | What happens |
 |---|---|---|
-| **1. Cutover PR, built on the branch** | 0 to 2 (code) | The `apps/auth` config (UUIDs, `auth` schema, dual verify, `bearer()`, `jwt()`, `admin()` kept for its columns with its whole HTTP surface blocked, `change-email` and `update-user` blocked, rate limiting and client IP, the internal hop and endpoints), its Dockerfile and service; the fresh `packages/auth` `0000`; the app migrations (scaffold cleanup, `public.deleted_users`, the window migration); the rollback SQL; the copy script and audits; the `apps/api` JWKS verification, app-row creation, tombstoned deletion, role calls and compatibility layer; the CORS fix; contract tests written first against today's implementation; removal of the legacy JWT code and the `JWT_*` config (and their `globalEnv` names), with `grant-admin.ts` and `ADMIN_EMAILS` moving to `apps/auth`; the `apps/frontend` switch to `apps/auth` (agreed with the app architect); `RELEASE.md` and `CONTRIBUTING.md` |
+| **1. Cutover PR, built on the branch** | 0 to 2 (code) | The `apps/auth` config (UUIDs, `auth` schema, dual verify, `bearer()`, `jwt()`, `admin()` kept for its columns with its whole HTTP surface blocked, `change-email` and `update-user` blocked, rate limiting and client IP, the account endpoints), its Dockerfile and service; the fresh `packages/auth` `0000`; the app migrations (scaffold cleanup, `public.deleted_users`, the window migration); the rollback SQL; the copy script and audits; the `apps/api` JWKS verification, app-row creation, tombstoned deletion, role calls and compatibility layer; the CORS fix; contract tests written first against today's implementation; removal of the legacy JWT code and the `JWT_*` config (and their `globalEnv` names), with `grant-admin.ts` and `ADMIN_EMAILS` moving to `apps/auth`; the `apps/frontend` switch to `apps/auth` (agreed with the app architect); `RELEASE.md` and `CONTRIBUTING.md` |
 | **Before the window** | 2 | **Owner amendment R-2.** Staging auto-deploy off; the cutover PR merges to `develop`, which is frozen until the production window. The window runbook runs on **staging** from `develop`'s merge commit: the empirical edge check (both paths), the **rehearsal** (including a rollback rehearsal) on the staging users seeded with every anomaly class (R-1) plus the empty staging auth database, and the unmodified clients. The evidence lands as a docs-only PR to `develop`. The empty production auth database is created on Railway (or found), with backups or PITR on before the first real row (C-4). Before the merge, the branch is kept current with `develop`, and the numbering is re-checked after every merge |
 | **The window** | 3 | Merge and promote the cutover PR with `apps/api` offline: the app database's snapshot or PITR mark, the auth database's baseline, the copy and its audits, the window migration, admin roles, deploy `apps/auth`, `apps/api` and `apps/frontend`, smoke tests, then `apps/auth`'s public domain |
 | **2. Contract PR** (the first release after the 24-hour deadline passes; owner, C-2) | 4 | The contract migration: drop `password_hash`, `is_admin`, `session_version` and `tokens`, with its own `DEPLOYED_THROUGH` bump; the remaining pglite DDL; `RELEASE.md` names it as the one exception |
@@ -913,21 +951,22 @@ rollback deadline passing, and the contract PR's release.
 **App rows, deletion and system accounts (`apps/api`)**
 
 - [ ] A user created through the layer gets a `public.users` row with the same id at registration.
-  A user created directly at `apps/auth` gets it on the first `apps/api` request, from the
-  internal profile endpoint, with `ON CONFLICT (id) DO NOTHING`. Concurrent first requests create
+  A user created directly at `apps/auth` gets it on the first `apps/api` request, from
+  `GET /api/account/me` asked with that user's JWT, with `ON CONFLICT (id) DO NOTHING`. Concurrent first requests create
   one row.
 - [ ] A `sub` unknown to `apps/auth`, or tombstoned, gets 401 and never gets a row.
 - [ ] A profile whose email is held under another id, is on a reserved domain, or is held by a
   `system_key` row gets 401, no row and no 500. The pair of ids is logged by id only, and an alert
   fires.
-- [ ] The internal delete endpoint refuses a call without the subject's JWT, with an invalid JWT,
-  or with a JWT whose `sub` differs from the target id. The operator completion script deletes as
-  the auth database directly and never calls it.
-- [ ] Internal routes compare the credential in constant time, are mounted outside the Better Auth
-  handler path, are rate-limited, and are reached over the private network.
+- [ ] The account endpoints refuse a missing, forged, foreign-key, wrong-algorithm, wrong-issuer,
+  wrong-audience, expired or `sid`-less token, and a token whose session has ended (`DELETE`:
+  unless the user is already gone, then 204 with no change). The operator completion script deletes
+  as the auth database directly and never calls them.
+- [ ] The account endpoints have no id in any path, are mounted outside the Better Auth handler
+  path, have a per-user budget, and answer an auth-database outage with 500, never 401.
 - [ ] `DELETE me` refuses a system account before deleting anything. Otherwise it deletes the app
   row (cascading) and writes the tombstone in one transaction, then deletes the auth user through
-  the internal endpoint and marks the tombstone done. A failure after the first transaction is
+  `DELETE /api/account` with the user's JWT and marks the tombstone done. A failure after the first transaction is
   completed by the next request carrying that `sub`, by a retry, or by the operator script.
 - [ ] System accounts are created lazily in the app database as today, and never appear in the
   auth database.
@@ -999,7 +1038,7 @@ rollback deadline passing, and the contract PR's release.
 - [ ] Every route that used `authenticateRequest` or `requireAdmin` resolves its user from a
   verified JWT. The route set comes from a grep before merge, not from this list.
   - **Ownership checks are unchanged:** a user cannot read another user's thread.
-  - Admin routes ask `apps/auth`'s internal role endpoint **on each request**, and return the same
+  - Admin routes ask `apps/auth`'s `GET /api/account/me`, with the admin's JWT, **on each request**, and return the same
     401 and 403 codes as today. When `apps/auth` is unreachable they return 503 and never grant.
 - [ ] `/api/v1/chat/completions` (`LEADERBOARD_API_KEY`) and `/api/v2/mcp-complete` behave as today.
   There is no global `middleware.ts`.
@@ -1035,8 +1074,8 @@ rollback deadline passing, and the contract PR's release.
 - [ ] `logout` revokes **all** of the user's sessions, as today. The remaining JWT lifetime is the
   accepted window.
 - [ ] `DELETE me` succeeds with a session created more than 24 hours earlier. It goes through an
-  internal-only `apps/auth` endpoint that requires the internal credential and deletes the user
-  through Better Auth's internal adapter. `auth.api.deleteUser` is not used, because it 404s unless
+  `apps/auth` account endpoint (`DELETE /api/account`) bound to the user's own JWT, which deletes the
+  user through Better Auth's internal adapter. `auth.api.deleteUser` is not used, because it 404s unless
   enabled and enforces `freshAge`. The order is the one in "Two databases" rule 5: app row and
   tombstone first, then the auth user. Afterwards the session is dead and the user's threads,
   preferences and feedback are gone.
@@ -1046,8 +1085,8 @@ rollback deadline passing, and the contract PR's release.
   - Reset requests are limited per client IP and per normalized email, counting every request;
     an unknown email consumes the same budget. A test shows that the per-email cap holds across two
     client IPs, and that the IP cap holds across many emails.
-  - `RESEND_API_KEY` and `AUTH_INTERNAL_SECRET` have Zod minimum lengths, and a test shows neither
-    appears in logs or error output.
+  - `RESEND_API_KEY` and `BETTER_AUTH_SECRET` have Zod minimum lengths, and a test shows neither
+    appears in logs or error output, nor a user's JWT or session token in logs.
   - A system account receives no email and cannot gain a credential.
   - `checkPasswordStrength` runs before reset and before register.
 - [ ] Reserved addresses (`@system.ansari.chat`) and the `system_key` guards return the same 409 as
@@ -1093,9 +1132,10 @@ rollback deadline passing, and the contract PR's release.
 - [ ] A request carrying a two-entry `X-Forwarded-For` and a distinct `X-Real-IP` is limited under
   its `X-Real-IP`, not in a shared bucket. Forging `X-Forwarded-For` does not let a client switch
   buckets.
-- [ ] **The internal hop.** Two legacy clients with different IPs, calling through the layer, land
-  in different buckets, so the layer's own egress IP never becomes the key. A forwarded-IP header
-  without a valid internal credential is ignored.
+- [ ] **The layer (H-4, R1).** Two legacy clients with different IPs, calling through the layer,
+  land in different buckets of `apps/api`'s per-IP limit. At `apps/auth`, more than the router's
+  default maximum from `apps/api`'s one IP, across two users, draws no 429, while the per-email and
+  per-session rules still trip. The layer forwards no client IP and no credential.
 - [ ] `apps/api`'s `getClientIp` (used by `mcp-complete`, and by the layer to forward) reads
   `X-Real-IP` only. `tests/rate-limit.test.ts`, which asserts the opposite preference today, is
   updated.
@@ -1108,7 +1148,7 @@ rollback deadline passing, and the contract PR's release.
   - forged `X-Real-IP` and `X-Forwarded-For` values never appear as the observed `X-Real-IP`
   - two clients on different networks see distinct `X-Real-IP` values equal to their own public
     addresses, never a Railway or private-range address
-- [ ] The documented fallback is built in `apps/auth` behind `AUTH_RATE_LIMIT_MODE` (G-1).
+- [ ] The per-email limiter is the only sign-in and sign-up mode (G-1, superseded by H-4).
   Production ships in the staging-verdict mode, and tests pin each part of the fallback:
   - sign-in is keyed by email and counts failures only
   - a correct password is rejected while the email is locked
@@ -1245,7 +1285,7 @@ decided rate limits apply to every production sign-in, because all of them pass 
 | Token rotation in `db.transaction` with `exec` | Retired with `tokens` (dropped by the contract migration after the rollback deadline). Each cutover step is one transaction |
 | Users in `public.users` | Two databases: the auth database (only `apps/auth`) holds every Better Auth table; the app database keeps `public.users` (same UUIDs, no auth columns) for referential integrity. No service holds the other's credential |
 | System accounts by `system_key` | Unchanged, and app-only: never in the auth database |
-| (new) | Client IP comes from `X-Real-IP` only. The layer-to-`apps/auth` hop forwards it only with the internal credential |
+| (new) | Client IP comes from `X-Real-IP` only. The layer's calls to `apps/auth` are anonymous and forward no IP; no path they reach is keyed by IP (H-4) |
 | (new) | Sign-in, sign-up, reset and session logic live only in `apps/auth`. The `/v2/users/*` layer is an HTTP client of it |
 | (new) | The admin plugin's HTTP endpoints are blocked on `apps/auth` (the plugin is used for `role` only). Roles change only through the role script |
 
@@ -1265,8 +1305,7 @@ decided rate limits apply to every production sign-in, because all of them pass 
   it, or confirms it exists and is empty (C-4, clarified 2026-10-17).
 - Railway's `X-Real-IP` behaviour as stated by staff holds on our domains. It is verified on
   staging before `develop` is promoted (R-2), not assumed, and the spec carries a fallback if it does not hold.
-- `apps/api` can reach `apps/auth` reliably, over the public domain or the private network (the plan
-  chooses). The internal credential protects either.
+- `apps/api` can reach `apps/auth` reliably over its public domain (H-1). No credential is shared.
 - Released mobile builds send `Authorization: Bearer` on every authenticated call, treat
   `access_token` and `refresh_token` as opaque strings, and refresh and retry on a 401. So a
   15-minute access token only adds periodic refreshes, and nothing in the legacy client decodes the
@@ -1293,7 +1332,8 @@ As described in Desired State, with the auth tables in their own database (owner
   - The **revocation window** equals the JWT lifetime (15 minutes, Better Auth's default).
   - A new service, domain and Dockerfile.
   - Key management (`auth.jwks`, rotation, caching).
-  - An authenticated internal hop for the layer, which also carries profile, role and delete.
+  - Account endpoints bound to the user's own JWT for profile, role and delete (H-2; originally an
+    authenticated internal hop, removed by the owner on 2026-10-17).
   - A second database: a cross-database copy, app rows created on first use, deletion through a
     tombstone.
   - A client change for `apps/frontend` inside the window.
@@ -1356,9 +1396,8 @@ This was the first draft's proposal.
 - **I-4 (resolved, owner, 2026-10-16):** the owner operates the window. The owner also sets its
   date and time, which the runbook records.
 - **I-5 (resolved, owner, 2026-10-16):** `auth.askansari.ai` (production) and
-  `auth-staging.askansari.ai` (staging). `apps/api` reaches the profile, role and delete endpoints
-  over Railway's private network (security). The transport of the layer's sign-in hop, which
-  forwards the client IP with the internal credential, is chosen in the plan.
+  `auth-staging.askansari.ai` (staging). `apps/api` reaches `apps/auth` there too, at the public
+  domain, for every call (H-1; the private-network hop decided here was removed on 2026-10-17).
 - **I-6: `apps/frontend` change and release timing** (app architect).
   - The web build ships in the window.
   - If a native `apps/frontend` build pointed at `apps/auth` is released to the stores, a snapshot
@@ -1420,8 +1459,9 @@ This was the first draft's proposal.
 9f. A user created at `apps/auth` whose email is already held in `public.users` under another id
    (a legacy row, a system row) gets 401 on the first request; no row is written, the log carries
    both ids and no email, and the alert fires. The same holds for an `@system.ansari.chat` address.
-9g. With the internal credential but no JWT, with another user's JWT, or with a forged JWT, the
-   delete endpoint refuses and the target account remains.
+9g. With no JWT, a forged JWT or a token whose session has ended, the delete endpoint refuses and the
+   account remains; with a token whose subject is already gone it answers 204 and changes nothing;
+   `apps/api` never sends another user's JWT for a delete.
 9h. The copy with one password hash altered in transit fails the hash audit, and the app cutover
    migration is not run. A step 2 failure leaves no import table behind.
 9i. No verification email is sent to any copied user, and every copied user has
@@ -1459,12 +1499,12 @@ This was the first draft's proposal.
     and directly at `apps/auth`.
 20. A system account cannot log in, does not exist in the auth database, and a reset request for
     its address sends no email and creates nothing.
-21. Six sign-ins from one `X-Real-IP` in 60 seconds get 429 on the sixth, directly and through the
-    layer, from one shared budget. Forged `X-Forwarded-For` values don't change the bucket.
-    Distinct `X-Real-IP` values don't share one.
-22. Through the layer, two clients with different IPs land in different buckets. A forwarded-IP
-    header sent to `apps/auth` without the internal credential is ignored, and an internal-only
-    endpoint called without it gets 401 or 403.
+21. Six legacy logins from one `X-Real-IP` in 60 seconds get 429 on the sixth at `apps/api`, before
+    `apps/auth` is called. Forged `X-Forwarded-For` values don't change the bucket. Distinct
+    `X-Real-IP` values don't share one. The per-email lock still trips behind it, from any IPs.
+22. At `apps/auth`, more than the router's default maximum from one IP across two users draws no 429
+    on the layer's paths (R1), while the per-email and per-session rules still trip. The removed hop's
+    headers and `/internal/*` paths get nothing.
 23. JWT rejection matrix, each case a 401:
     - `alg: none`, an HS256 token, an RS256 token
     - a wrong `iss`, a wrong `aud`
@@ -1498,7 +1538,7 @@ This was the first draft's proposal.
 
 33. JWT verification on `apps/api` adds no network hop per request in steady state (JWKS cached),
     and no read beyond the `public.users` row it already reads today. Admin requests add one
-    internal call.
+    account call (`GET /api/account/me`).
 34. The runtime of the copy, the audits and the app window migration on the production-sized
     clone is measured in the rehearsal and fits the window.
 
@@ -1514,8 +1554,8 @@ This was the first draft's proposal.
 | `apps/auth` outage blocks sign-in and refresh | Medium | High | Cached JWKS keeps issued tokens working; healthcheck and alerting on `apps/auth`; rollback runbook |
 | JWKS fetch amplification via random `kid` | Low | Medium | Rate-limited re-fetch; test |
 | `apps/auth` reachable before the copy, accepting sign-ups | Low | High | Not deployed to production before the window; deployed after the copy; domain attached last; the copy guard aborts on a non-empty `auth.users` |
-| Rate limit collapses into one global login bucket (edge or internal hop) | Medium without the fix | High | `X-Real-IP` only; authenticated forwarded IP on the hop; multi-entry XFF and two-client tests; empirical edge verification |
-| Internal credential leaked | Low | High (any user's profile and role readable by id; rate-limit key chosen) | Constant-time compare; internal routes outside the Better Auth handler path; rate-limited; delete bound to the subject's JWT; profile, role and delete only over the private network; held in two service environments, rotated with them, never logged |
+| Rate limit collapses into one global login bucket (edge, or the layer's one egress IP) | Medium without the fix | High | `X-Real-IP` only; no per-IP rule on any path the layer calls (R1); per-IP limits in `apps/api`; multi-entry XFF, two-client and one-IP-many-calls tests; empirical edge verification |
+| A user's JWT stolen | Low | Medium (that user's profile read, their sessions revoked, their account deleted, within 15 min) | The same power it has through `apps/api`; live-session check; per-user budgets; a direct delete is the H-6 residual with its operator response |
 | Railway changes `X-Real-IP` semantics later | Low | Medium | Documented header; re-verify on any Railway networking change; an arch-critical fact makes the dependency visible |
 | Admin HTTP surface abused (stolen admin token or frontend XSS leads to account takeover) | Low | Critical | Whole admin surface blocked: `disabledPaths` plus a case-insensitive prefix middleware before `toNodeHandler`; variant tests; enumerating regression test |
 | `apps/frontend` client change slips or breaks in the window | Medium | High | Agreed with the app architect up front; rehearsed; web rollback by redeploy; native release timing decided (I-6) |

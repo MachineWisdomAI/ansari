@@ -47,12 +47,35 @@ the verifier without wiring it to any route. Phase 8 switches every route and th
 commit**, so no intermediate commit mixes legacy-issued tokens with JWT-verified routes. The legacy
 JWT modules remain until phase 9 deletes them.
 
+## Owner amendment, 2026-10-17: the internal hop is removed (at the pr gate)
+
+After phase 13, at the pr gate, the owner removed the shared secret and the internal hop (spec
+amendment H-1 to H-6). This section supersedes P-1 and P-3 and every phase passage below about
+`AUTH_INTERNAL_SECRET`, `AUTH_INTERNAL_URL`, `INTERNAL_PORT`, the internal listener, the forwarded
+client IP, `/internal/*` and `AUTH_RATE_LIMIT_MODE`; the phases record how they were built, and
+the code no longer has them.
+
+| Was (phases 4, 5, 7, 8, 11, 12) | Now |
+|---|---|
+| Two listeners; `INTERNAL_PORT` 3101 on Railway's private network, behind `X-Ansari-Internal-Auth` | One listener (`PORT` 3100) behind the public domain (`apps/auth/src/app.ts` `createApp`) |
+| `/internal/users/:id/{profile,role}`, `DELETE /internal/users/:id`, `POST …/revoke-sessions` | `GET /api/account/me`, `POST /api/account/revoke-sessions`, `DELETE /api/account`, bound to the caller's own JWT and a live `sid`; `DELETE` is 204 first when the user is already gone (`apps/auth/src/routes/account.ts`) |
+| `apps/api` fetched the JWKS from `AUTH_INTERNAL_URL` with the credential | The public `/api/auth/jwks` at `AUTH_URL`, no credential, under the router's per-IP default |
+| The layer forwarded `X-Real-IP` in `X-Ansari-Forwarded-Client-IP` over the credentialed hop | Anonymous pass-through; `apps/api` limits the layer's routes per `X-Real-IP` (`lib/auth-service/limits.ts`) |
+| `AUTH_RATE_LIMIT_MODE` (`ip` / `email`); per-IP sign-in, sign-up, reset and `/token` rules | Per-email only; `ROUTER_RULES` are all `false` on the layer's paths; reset request per email plus a global ceiling, reset consume global, `/token` and `/get-session` per session token, account endpoints per user (`packages/auth/src/limits.ts`). TEMPORARY until the legacy system is replaced |
+| Window: smoke tests on the private network (step 11), the auth domain attached last (step 15) | The auth domain is attached right after step 10, before `apps/api` deploys, with a DNS precheck and a certificate check (runbook step 11) |
+| A direct call could not delete without the credential | A direct `DELETE /api/account` leaves the app row: the owner-accepted residual H-6, with its operator response in the runbook |
+
+Tests: `apps/auth/tests/account.test.ts` (each `DELETE` branch, live `sid`, forged tokens, planted
+keys, per-user budgets, outage 500), `apps/auth/tests/limits.test.ts` ("the layer's view", R1, shown
+to fail with a per-IP rule restored), `apps/api/tests/auth/layer.test.ts` (per-IP at `apps/api`, a
+stand-in edge in front of production-mode `apps/auth`), and source scan 4 for the removed names.
+
 ## Decisions this plan makes (the spec delegated them)
 
 These are the items the spec left to the plan, and the security architect's plan-phase notes. Each
 is final for implementation unless the gate overturns it.
 
-### P-1. Transport of the layer's sign-in hop: Railway's private network
+### P-1. Transport of the layer's sign-in hop: Railway's private network (superseded 2026-10-17)
 
 **`apps/auth` runs two listeners** (security review of `11608c4`, amendment A):
 
@@ -147,7 +170,7 @@ dashboard. The operator runs them, and the results go into this file, amended be
   rows by `created_at`, inside the retention window. It sizes the internal-endpoint and `/token`
   limits.
 
-### P-3. The IP fallback is built in, switched by one variable (gate question G-1)
+### P-3. The IP fallback is built in, switched by one variable (gate question G-1; superseded 2026-10-17)
 
 The spec makes the fallback conditional on the edge check failing. But the edge check can only
 observe the **production** domains once the cutover code serves them, which is at the window (see

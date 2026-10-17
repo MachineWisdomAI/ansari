@@ -38,7 +38,8 @@ A clone would have shown two things that staging cannot:
 
 - Staging, isolated from production. Each service is deployed **by hand from the cutover PR's
   merge commit on `develop`**, with auto-deploy off (set before the merge), and
-  `auth-staging.askansari.ai` attached at step 15.
+  `auth-staging.askansari.ai` attached at step 11 (spec H-5), after the admin roles and before
+  the staging `backend` deploys.
 - Postgres 18 on both the staging app and auth servers. `psql --version` in the auth image reports
   18 (the window's step 1 precondition, rehearsed).
 - The operator environment is the window's, in staging:
@@ -52,6 +53,23 @@ A clone would have shown two things that staging cannot:
   with `EXPO_PUBLIC_AUTH_URL` and the domain checks. Production's change of the web service's
   Dockerfile path, from legacy web to `apps/frontend`, is not rehearsed. Its rollback,
   [`rollback.md`](rollback.md) step 4 (restore the previous legacy web deployment), is unchanged.
+
+## Owner-accepted residuals (not a rehearsal gap)
+
+- **A delete made directly at `apps/auth` (spec H-6, R3).** `DELETE /api/account` called with the
+  user's own token, bypassing `apps/api`, leaves the app row and no tombstone; a later sign-up with
+  the same email is refused as an email conflict until an operator clears it. The response: the
+  `email-conflict` Sentry alert names the holder id; the audit and the one-transaction cleanup in
+  the runbook's "Orphan app rows" section clear it. `apps/api/tests/auth/resolve-user.test.ts`
+  runs that cleanup against the refusal. On staging, rehearse it once: sign up a throwaway user,
+  delete it at `apps/auth` directly, sign up again with the same address, confirm the alert, run
+  the audit and the cleanup, and confirm the second account's first request succeeds.
+
+| Check | Result |
+|---|---|
+| direct delete → re-sign-up refused, alert names the holder | |
+| audit lists the holder id | |
+| cleanup prints `INSERT 0 1`; the new account's first request succeeds | |
 
 ## Part A: the guards fire (runbook steps 6 to 8)
 
@@ -119,8 +137,7 @@ Follow the window runbook step by step, as written. For each step, record the st
 the **Check:** output (counts and checksums only).
 
 After the copy, sign each seeded user in against the staging auth service with
-`REHEARSAL_PASSWORD`, once its public domain is attached (step 15) or on the private network in
-step 11. Each must return the seeded id (the `e0300000-…` ids in the script):
+`REHEARSAL_PASSWORD`, once its public domain is attached (step 11). Each must return the seeded id (the `e0300000-…` ids in the script):
 - The mixed-case row signs in with its address in **upper case**.
 - The `$2a$` and `$2b$` rows both sign in.
 - The legacy admin holds `role = 'admin'` after `grant-admin.ts`, and `05` lists it.
@@ -230,5 +247,6 @@ production receives.
 
 **Staging edge verdict:** _pending_
 
-The verdict is recorded only after both paths are measured. It records the `AUTH_RATE_LIMIT_MODE`
-production ships in, with the measured shapes copied into `edge-header-shapes.json`.
+The verdict is recorded only after both paths are measured, with the measured shapes copied into
+`edge-header-shapes.json`. It selects no mode (spec H-4): it is the evidence `apps/api`'s per-IP
+limits on the layer, and the router's per-IP default on `apps/auth`, rest on.

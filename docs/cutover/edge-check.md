@@ -1,11 +1,13 @@
 # Edge check: is `X-Real-IP` the client's address? (spec 300, plan P-4)
 
-`apps/auth` keys its per-IP limits on `X-Real-IP` (`advanced.ipAddress.ipAddressHeaders`), and
-`apps/api` forwards the same header on the internal hop. That is only safe if Railway's edge
-**overwrites** `X-Real-IP` with the real client address on every domain, and gives different
-clients different addresses. This file holds the method and the recorded observations. The
-verdict sets `AUTH_RATE_LIMIT_MODE` for production (`ip` if both properties hold everywhere,
-otherwise `email`); the window's step 14 can only move it to `email`.
+`apps/auth` keys the router's per-IP default on `X-Real-IP` (`advanced.ipAddress.ipAddressHeaders`),
+and `apps/api` keys its per-IP limits on the `/v2/users` layer's routes on the same header. No
+path the layer calls is keyed by IP on `apps/auth` (spec H-4), and nothing forwards the header
+between the services any more. Both per-IP keys are only sound if Railway's edge **overwrites**
+`X-Real-IP` with the real client address on every domain, and gives different clients different
+addresses. This file holds the method and the recorded observations. The verdict selects no mode
+(`AUTH_RATE_LIMIT_MODE` is removed, H-4); a failure goes to the security architect (window step
+14's abort).
 
 ## Method
 
@@ -70,8 +72,9 @@ read. The staging verdict is recorded only after **both** paths are measured.
 **Pre-merge passive check of each production domain** (no code deployed): record the `dig` chain
 and the `curl -sI` headers, which show whether Cloudflare is in front.
 
-The **in-window production probe** (G-2, window steps 14 and 15) runs the same two paths on the
-production domains and stays the final word.
+The **in-window production probe** (G-2, window steps 11 and 14; the auth domain's moved to step
+11 with its attach, spec H-5) runs the same two paths on the production domains and stays the
+final word.
 
 ## Observations (phase 13 and the window)
 
@@ -84,9 +87,9 @@ production domains and stays the final word.
 | staging `*.up.railway.app` (backend, auth) | phase 13 | | | | |
 | `api.askansari.ai` | window step 14 | | | | passive check before the merge (2026-10-17): no CNAME to Railway; A 104.21.29.181, 172.67.149.151, AAAA 2606:4700:3033::6815:1db5, 2606:4700:3031::ac43:9597 (Cloudflare); `curl -sI`: `server: cloudflare`, `cf-ray`, then `x-railway-edge: sin1`. **Cloudflare proxies in front of Railway's edge (measured).** What `X-Real-IP` carries on this path is not yet measured: see the finding below |
 | `api-35.ansari.chat` | window step 14 | | | | passive check before the merge (2026-10-17): CNAME `vyex12qb.up.railway.app.` → 69.46.46.35; `curl -sI`: `server: railway-hikari`, `x-railway-edge: sjc1`, no proxy headers; same edge as staging |
-| `auth.askansari.ai` | window step 15 | | | | passive check before the merge (2026-10-17): no DNS record yet (attached in window step 15) |
+| `auth.askansari.ai` | window step 11 | | | | passive check before the merge (2026-10-17): no DNS record yet. The record must exist, unattached, before the window (runbook step 1, spec H-5); it is attached in window step 11 |
 
-**Verdict for production `AUTH_RATE_LIMIT_MODE`:** _(recorded by phase 13)_
+**Verdict (the per-IP keys rest on it; no mode is selected):** _(recorded by phase 13)_
 
 ## Finding: `api.askansari.ai` is Cloudflare-proxied (2026-10-17; revised the same day)
 
@@ -117,8 +120,8 @@ proposed.
 
 **Open, as a measurement rather than a decision:** does `X-Real-IP` on our Cloudflare path carry
 the true client? The method above measures it on staging via Cloudflare and direct, and the
-in-window production probe (G-2) is the final word. If it does **not**, note that
-`AUTH_RATE_LIMIT_MODE=email` would not be enough on its own. `routerRules()` switches off only
-the per-IP sign-in and sign-up rules, so the reset caps, `/token` and `/get-session`, the internal
-endpoints and the global default would still be keyed by a shared address. That outcome would go
-back to the owner and the security architect.
+in-window production probe (G-2) is the final word. If it does **not**, then since spec H-4 the
+only keys affected are `apps/api`'s per-IP limits on the layer and the router's per-IP default on
+`apps/auth` (the JWKS fetch and the paths no client of the layer reaches); every path the layer
+calls is limited per email, per session token, per user or globally, whatever the edge does.
+That outcome still goes back to the owner and the security architect.

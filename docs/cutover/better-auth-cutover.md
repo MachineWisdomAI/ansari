@@ -66,7 +66,7 @@ promote `develop`. Each step is run as written, except for these differences:
 | Step 1 records the rollback targets: `backend` and the legacy web service (deployment ID and commit) | Record `backend` and the **staging web service** (it already serves `apps/frontend`); the rollback rehearsal redeploys exactly those IDs |
 | Step 2: the public maintenance notice | The team only; no public notice |
 | Step 16 replaces legacy web with `apps/frontend`; its rollback is [`rollback.md`](rollback.md) step 4 (the previous legacy web deployment) | Staging web **already serves `apps/frontend`**. Step 16 rehearses only its rebuild with `EXPO_PUBLIC_AUTH_URL` and the domain checks; the swap itself is **not rehearsed** ([`rehearsal.md`](rehearsal.md), residuals) |
-| Steps 14 and 15: production domains | The staging domains, on **both paths**: via Cloudflare once the owner orange-clouds `api-staging` and `auth-staging`, and direct with `--resolve` ([`edge-check.md`](edge-check.md)). The staging verdict is recorded only after both paths are measured |
+| Steps 11 and 14: production domains (the auth domain attaches at step 11, spec H-5) | `auth-staging.askansari.ai` attaches at step 11, after the admin roles and before the staging `backend` deploys, and staging `backend`'s `AUTH_URL` is that domain from its first deploy; its DNS record exists, unattached, before the run. The staging domains are probed on **both paths**: via Cloudflare once the owner orange-clouds `api-staging` and `auth-staging`, and direct with `--resolve` ([`edge-check.md`](edge-check.md)). The staging verdict is recorded only after both paths are measured |
 | Step 18 closes the window | Then the **rollback** is rehearsed ([`rollback.md`](rollback.md), all of it). Then the second forward run (rollback's restart procedure), so staging ends on `develop`. Then auto-deploy goes back on |
 
 **`cutover_at` on staging** is the staging app database's clock at step 6, as in production. In
@@ -110,8 +110,9 @@ forward run, `rehearsal-anomalies.ts remove | psql …` deletes the seeded rows.
   this item reads: the cutover PR's merge commit on `develop` is recorded.
 - The phase 13 image check passed: `docker build -f apps/auth/Dockerfile .`, run as the image's
   `node` user, `./node_modules/.bin/tsx scripts/grant-admin.ts --list` inside it.
-- Baselines B-1 to B-4 are recorded in [`baselines.md`](baselines.md). `AUTH_RATE_LIMIT_MODE` for
-  production is the staging edge check's verdict ([`edge-check.md`](edge-check.md)).
+- Baselines B-1 to B-4 are recorded in [`baselines.md`](baselines.md). The staging edge check's
+  verdict is recorded ([`edge-check.md`](edge-check.md)); it selects no mode any more (spec H-4:
+  per-email is the only mode), but `apps/api`'s per-IP limits on the layer rest on it.
 - The owner has approved the **admin list** (by address), from `00-preflight-app.sql`'s
   inventory.
 - **Postgres 18 on both servers, so the cutover runs 18 to 18.** The production app database
@@ -143,9 +144,12 @@ forward run, `rehearsal-anomalies.ts remove | psql …` deletes the seeded rows.
 - The cutover PR is approved and merged to `develop`; record its merge commit.
 - Railway (main architect's runbook section): the `auth` service exists (in production it is
   created for this window, or found; in staging it already exists) with its variables set
-  (see `docs/self-hosting.md`) **and `ADMIN_EMAILS` empty** until step 10; private networking on;
-  **no domain on `INTERNAL_PORT` (3101)**; its own Postgres with snapshots or PITR **on**. The
-  auth database is **empty** (no schema yet).
+  (see `docs/self-hosting.md`) **and `ADMIN_EMAILS` empty** until step 10; one port,
+  `PORT=3100`, and **no domain yet**; its own Postgres with snapshots or PITR **on**. The auth
+  database is **empty** (no schema yet). Neither `auth` nor `backend` carries
+  `AUTH_INTERNAL_SECRET`, `AUTH_INTERNAL_URL` or `INTERNAL_PORT` (spec H-1: there is no internal
+  hop). `backend` has `AUTH_URL=https://auth.askansari.ai` (the public domain, from its first
+  deploy in step 12) and `AUTH_JWT_ISSUER=https://auth.askansari.ai`, set separately.
 - **Auto-deploy is OFF for `backend`, the web service and `auth`** for the window. Railway deploys
   `backend` from `main` on every push, so with auto-deploy on, the promotion in step 4 would boot
   the new `apps/api` before `0011` and the auth database exist. Every deploy below is manual,
@@ -157,7 +161,11 @@ forward run, `rehearsal-anomalies.ts remove | psql …` deletes the seeded rows.
   check can see this; if it is wrong, every web sign-in fails.
 - The web service has both build variables set, for production:
   `EXPO_PUBLIC_API_URL=https://api.askansari.ai`, `EXPO_PUBLIC_AUTH_URL=https://auth.askansari.ai`.
-- DNS for `auth.askansari.ai` points at Railway, and the domain is **not yet attached**.
+- **The DNS record for `auth.askansari.ai` exists before the window and is not attached** (spec
+  H-5): `dig +short auth.askansari.ai` answers (the Railway target, or Cloudflare's proxy if it is
+  orange-clouded), and the `auth` service lists no custom domain. Step 11 attaches it; a record
+  created inside the window could leave `apps/api` unable to reach `apps/auth` while DNS and the
+  certificate catch up.
 
 **Check:** each item ticked in the release record by name. **Abort:** postpone the window.
 
@@ -288,24 +296,43 @@ the role, and exits otherwise. A legacy admin left off the list holds no admin r
 **Abort:** `(cd apps/auth && ./node_modules/.bin/tsx scripts/grant-admin.ts --revoke <email>)`
 for any extra; fix and re-check.
 
-## 11. Private-network smoke tests
+## 11. Attach `auth.askansari.ai` (spec H-5)
 
-From the `backend` service's ssh (the network path `apps/api` will use), with the internal
-credential:
+Only now, after the copy (step 8) and the admin roles (step 10), and before `apps/api` deploys:
+`apps/api` reaches `apps/auth` at this domain from its first deploy (its JWKS, its account
+endpoints, the layer). Never earlier: a reachable `apps/auth` before the copy would accept
+sign-ups into `auth.users`, and the copy's empty-target guard would abort. Attach the domain to
+the `auth` service, targeting **`PORT` (3100)**. Railway's certificate can take minutes: wait for
+it.
 
 ```bash
-curl -s -o /dev/null -w '%{http_code}' http://<auth>.railway.internal:3101/api/auth/jwks
-curl -s -H "X-Ansari-Internal-Auth: $AUTH_INTERNAL_SECRET" http://<auth>.railway.internal:3101/api/auth/jwks | jq '.keys | length'
+curl -fsS https://auth.askansari.ai/health
+curl -fsS https://auth.askansari.ai/api/auth/jwks | jq '.keys | length'
+curl -s -o /dev/null -w '%{http_code}' https://auth.askansari.ai/internal/users/00000000-0000-0000-0000-000000000000/profile
+curl -s -o /dev/null -w '%{http_code}' https://auth.askansari.ai/api/account/me
 ```
 
-**Check:** the first prints `401` (the internal listener demands the credential); the second
-prints `1` or more. `apps/auth` is still unreachable from the public internet (scenario 31): it
-has no domain, and its `*.up.railway.app` domain is not generated.
-**Abort:** follow [`rollback.md`](rollback.md).
+Then the edge properties on its probe, as in step 14, on every path the domain has (via
+Cloudflare if proxied, and direct with `--resolve`), over IPv4 and IPv6:
+`curl -s -H 'X-Real-IP: 192.0.2.66' -H 'X-Forwarded-For: 192.0.2.66' -H 'CF-Connecting-IP: 192.0.2.66' https://auth.askansari.ai/__diag/client-ip`.
+
+**Check:** `/health` returns 200 over https with a **valid certificate** (plain `curl`, never
+`-k`; a certificate error is not a pass); the JWKS prints `1` or more; `/internal/…` prints `404`
+(there is no internal route); `/api/account/me` with no token prints `401`; the probe shows your
+real address on every path, and a second network a different one. Record them in
+[`edge-check.md`](edge-check.md).
+
+**Exposure, accepted (spec H-5):** from here until step 12 deploys `apps/api`, the public can sign
+up and sign in at `apps/auth` directly, a few minutes earlier than the old order (attach last)
+allowed; it is the same exposure as after step 15 before. Those users are created after
+`cutover_at`, so the rollback removes them.
+**Abort:** detach the domain; follow [`rollback.md`](rollback.md). An edge failure alone is step
+14's abort.
 
 ## 12. Deploy `apps/api` and `apps/frontend`
 
-Deploy the `backend` service and the web service from the promoted commit.
+Deploy the `backend` service and the web service from the promoted commit. `backend`'s
+`AUTH_URL` is `https://auth.askansari.ai`, attached and checked in step 11.
 
 **Check:** both deployments healthy. On each `*.up.railway.app` production domain of `backend`,
 the P-4 probe `curl -s https://<backend>.up.railway.app/api/v2/_diag/client-ip` shows your own
@@ -336,25 +363,18 @@ curl -4 -s -H 'X-Real-IP: 192.0.2.66' -H 'X-Forwarded-For: 192.0.2.66' -H 'CF-Co
 **Check:** **overwrite:** on every path, `x_real_ip` is your real address, never `192.0.2.66`;
 **distinctness:** the same probe from a second network (a phone hotspot) shows a different
 `x_real_ip`. Record both, per domain and path, in `edge-check.md`.
-**Abort (no rollback):** if either property fails, set `AUTH_RATE_LIMIT_MODE=email` on `auth`,
-redeploy it, and tell the security architect at once. Email mode switches off only the per-IP
-sign-in and sign-up rules, and the other IP-keyed limits stay on a bad key (the finding in
-`edge-check.md`). The mode can only move to `email` here, never to `ip`.
+**Abort (no rollback):** if either property fails, tell the security architect at once. There is
+no mode to switch (spec H-4): `apps/auth` keys nothing the layer calls by IP, and its per-email,
+per-session and global limits hold whatever the edge does. What fails is `apps/api`'s per-IP
+limit on the layer's routes, which would then be keyed by a value a client can choose; the
+security architect decides whether the window goes on.
 
-## 15. Attach `auth.askansari.ai`
+## 15. (Moved to step 11)
 
-Attach the public domain to the `auth` service, targeting **`PORT` (3100) only**. This comes
-before the web swap: the new web app signs in, and provisions guests, only through this domain.
+`auth.askansari.ai` is attached, and its edge probe run, in step 11 (spec H-5): `apps/api` needs
+it from its first deploy. Confirm only that the record still holds every step 11 output.
 
-**Check:** `curl -fsS https://auth.askansari.ai/health` returns 200;
-`curl -s -o /dev/null -w '%{http_code}' https://auth.askansari.ai/internal/users/00000000-0000-0000-0000-000000000000/profile`
-prints `404` (the internal routes are not on the public listener); and the edge properties, as
-in step 14, on its probe:
-`curl -s -H 'X-Real-IP: 192.0.2.66' -H 'X-Forwarded-For: 192.0.2.66' -H 'CF-Connecting-IP: 192.0.2.66' https://auth.askansari.ai/__diag/client-ip`
-shows your real address on every path the domain has (via Cloudflare if proxied, and direct with
-`--resolve`), and a second network shows a different one. Record them.
-**Abort:** detach the domain; follow [`rollback.md`](rollback.md). An edge failure alone is step
-14's abort: `AUTH_RATE_LIMIT_MODE=email`, redeploy `auth`.
+**Check:** step 11's outputs are in the record. **Abort:** n/a.
 
 ## 16. Replace legacy web with `apps/frontend`
 
@@ -383,6 +403,42 @@ Un-silence the alerts from step 2. Re-enable auto-deploy for `backend`, the web 
 
 **Check:** the record is complete and posted; auto-deploy is on again.
 **Abort:** n/a.
+
+## Orphan app rows (owner-accepted residual, spec H-6)
+
+A user can call `apps/auth`'s `DELETE /api/account` with their own token directly, bypassing
+`apps/api`. That deletes their auth account but leaves their `public.users` row (and its threads)
+with **no tombstone**. If they later sign up with the same email, `apps/auth` gives them a new id,
+and `apps/api`'s first use refuses it as an email conflict, every time. Without an internal hop,
+`apps/api` cannot tell that the holder row has no auth user.
+
+**The signal:** the Sentry alert `auth user has no app row: email-conflict`, whose `extra` names
+`sub` (the new id) and `holderId` (the old app row). Ids only, never the email.
+
+**The audit** (operator environment, read-only): app user ids that have no auth user. System
+rows are excluded; they never have one.
+
+```bash
+psql "$APP_DATABASE_URL" -X -At -c "select id from users where system_key is null" | LC_ALL=C sort > /tmp/app_ids
+psql "$AUTH_DATABASE_URL" -X -At -c "select id from auth.users" | LC_ALL=C sort > /tmp/auth_ids
+LC_ALL=C comm -23 /tmp/app_ids /tmp/auth_ids
+```
+
+**The cleanup**, for one `holderId` the alert named, only if the audit lists it: delete the orphan
+row (its threads, preferences and feedback cascade, as the user's own delete would have done) and
+write its tombstone, in one transaction. It writes the tombstone only if it deleted a non-system
+row, and prints `INSERT 0 1` when it did.
+
+```bash
+psql "$APP_DATABASE_URL" -X -v ON_ERROR_STOP=1 --single-transaction -v id='<holderId>' <<'SQL'
+WITH gone AS (DELETE FROM users WHERE id = :'id' AND system_key IS NULL RETURNING id)
+INSERT INTO deleted_users (id, auth_deleted_at) SELECT id, now() FROM gone;
+SQL
+```
+
+The user's next request then creates their new app row on first use. Remove `/tmp/app_ids` and
+`/tmp/auth_ids` afterwards. `apps/api/tests/auth/resolve-user.test.ts` ("owner-accepted residual
+R3") runs this cleanup against the refusal it clears.
 
 ## What users and operators will notice
 

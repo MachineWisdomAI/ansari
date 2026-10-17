@@ -39,8 +39,9 @@ runs at first config access, and a production server also runs it at boot
 
 Accounts, passwords, sessions, roles, password-reset email and `ADMIN_EMAILS` belong
 to the auth service, `apps/auth` (spec 300). `apps/api` holds no credential and no
-signing secret: it verifies `apps/auth`'s JWTs against its JWKS and calls its
-internal endpoints.
+signing secret, and shares no secret with `apps/auth`: it reaches `apps/auth` at its
+public origin like any other client, verifying its JWTs against the public JWKS and
+calling its account endpoints with the user's own JWT.
 
 ### Required (validation throws when absent)
 
@@ -57,10 +58,9 @@ them); a production server refuses to boot when any is unset, naming the missing
 
 | Variable | Notes |
 |----------|-------|
-| `AUTH_INTERNAL_URL` | `apps/auth`'s INTERNAL listener (private network, no public domain). The JWKS and the internal endpoints are fetched here |
-| `AUTH_JWT_ISSUER` | Must equal `apps/auth`'s `AUTH_JWT_ISSUER` |
+| `AUTH_URL` | `apps/auth`'s public origin (its domain). The JWKS, the account endpoints and the `/v2/users/*` layer's calls go here, with no shared secret |
+| `AUTH_JWT_ISSUER` | Must equal `apps/auth`'s `AUTH_JWT_ISSUER`. Set on its own, never derived from `AUTH_URL` |
 | `AUTH_JWT_AUDIENCE` | Must equal `apps/auth`'s `AUTH_JWT_AUDIENCE` |
-| `AUTH_INTERNAL_SECRET` | Min 32 characters; the same value as `apps/auth`'s. Sent on every internal call, the JWKS fetch included |
 | `AUTH_LAYER_ORIGIN` | `apps/api`'s own public origin, sent as `Origin` on the `/v2/users/*` layer's calls. `apps/auth` trusts it for CSRF only, never for CORS; the same value as `apps/auth`'s |
 
 ### Gemini facilitator (one of two paths, checked at first use)
@@ -145,14 +145,14 @@ pnpm db:migrate             # applies drizzle/ migrations to DATABASE_URL (the a
 cd ../..
 
 # The auth service, on its own database (apps/api signs no one in; it verifies
-# apps/auth's JWTs, so both run). Set the same AUTH_INTERNAL_SECRET in both.
+# apps/auth's JWTs, so both run). apps/api's AUTH_URL is apps/auth's origin.
 createdb ansari_auth
 cd apps/auth
 cp .env.example .env        # DATABASE_URL = the auth database
 pnpm db:migrate             # applies packages/auth/drizzle/ to DATABASE_URL (the auth database)
 cd ../..
 
-pnpm auth dev               # apps/auth on :3100 (public) and :3101 (internal)
+pnpm auth dev               # apps/auth on :3100
 pnpm api dev                # apps/api on :3000, in a second terminal
 ```
 

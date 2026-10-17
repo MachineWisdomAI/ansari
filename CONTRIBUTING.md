@@ -65,9 +65,9 @@ pnpm auth dev
 **Two databases.** Development and CI use two: the app database (`apps/api`,
 e.g. `ansari`) and the auth database (`apps/auth`, e.g. `ansari_auth`), each
 with its own owner URL. `apps/api` never reads the auth database; it reaches
-`apps/auth` over HTTP, so set its `AUTH_INTERNAL_URL=http://localhost:3101` and
-the same `AUTH_INTERNAL_SECRET` in both services (`pnpm auth dev` serves
-`:3100` public and `:3101` internal). An auth database you set up earlier by
+`apps/auth` over HTTP at its origin, like any client, so set its
+`AUTH_URL=http://localhost:3100` (`pnpm auth dev` serves `:3100`). No secret is
+shared between the two. An auth database you set up earlier by
 applying `0000_auth_schema.sql` with psql has no drizzle journal row, so
 `db:migrate` re-runs `0000` against it and fails (drizzle-kit prints no
 reason); drop and recreate `ansari_auth`
