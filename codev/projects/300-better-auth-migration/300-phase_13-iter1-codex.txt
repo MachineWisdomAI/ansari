@@ -1,8 +1,0 @@
----
-VERDICT: REQUEST_CHANGES
-SUMMARY: Phase 13 preparation is largely complete, but the mandatory pre-merge production baselines remain missing.
-CONFIDENCE: HIGH
----
-KEY_ISSUES:
-- `docs/cutover/baselines.md` has empty B-1 through B-4 results. The plan explicitly makes completed baselines a precondition of merge and requires any resulting `limits.ts` adjustment in this PR.
-- Edge-shape tests hardcode provisional counts/values rather than fully deriving expectations from `edge-header-shapes.json`. A docs-only evidence update could fail if staging’s measured header shape differs structurally from the provisional sibling deployment.
