@@ -106,11 +106,15 @@ describe('the window runbook', () => {
     expect(stepOf(/Attach `auth\.askansari\.ai`/)).toBeLessThan(stepOf(/Replace legacy web/));
   });
 
-  it('deploys apps/auth privately with ADMIN_EMAILS empty before any database step, and sets it after the grants', () => {
+  it('deploys apps/auth privately before any database step; admins are granted by id, with no list and no redeploy (H-7)', () => {
     const deployAuth = stepOf(/Deploy `apps\/auth` privately/);
     expect(deployAuth).toBeLessThan(stepOf(/The auth baseline/));
-    expect(steps[deployAuth - 1]).toMatch(/`ADMIN_EMAILS` empty/);
-    expect(steps[stepOf(/Admin roles/) - 1]).toMatch(/set `ADMIN_EMAILS`.*redeploy `auth`/s);
+    const admins = steps[stepOf(/Admin roles/) - 1] as string;
+    expect(admins).toContain('grant-admin.ts <email> --confirm <id>');
+    expect(admins).toContain('05-audit-admins-auth.sql');
+    expect(admins).toMatch(/no `ADMIN_EMAILS` to set and no `auth` redeploy/);
+    expect(admins).not.toMatch(/set `ADMIN_EMAILS`/);
+    expect(steps[deployAuth - 1]).not.toMatch(/`ADMIN_EMAILS` empty/);
   });
 
   it('names the exact operator environment, and every database step runs in it', () => {

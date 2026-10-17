@@ -144,7 +144,7 @@ forward run, `rehearsal-anomalies.ts remove | psql …` deletes the seeded rows.
 - The cutover PR is approved and merged to `develop`; record its merge commit.
 - Railway (main architect's runbook section): the `auth` service exists (in production it is
   created for this window, or found; in staging it already exists) with its variables set
-  (see `docs/self-hosting.md`) **and `ADMIN_EMAILS` empty** until step 10; one port,
+  (see `docs/self-hosting.md`; `auth` has no `ADMIN_EMAILS`: spec H-7); one port,
   `PORT=3100`, and **no domain yet**; its own Postgres with snapshots or PITR **on**. The auth
   database is **empty** (no schema yet). Neither `auth` nor `backend` carries
   `AUTH_INTERNAL_SECRET`, `AUTH_INTERNAL_URL` or `INTERNAL_PORT` (spec H-1: there is no internal
@@ -210,9 +210,8 @@ Take a Railway snapshot (or note the PITR mark) of the **app database**, and of 
 
 ## 6. Deploy `apps/auth` privately (the operator environment)
 
-Deploy the `auth` service from the promoted commit, with **`ADMIN_EMAILS` empty** and **no
-domain**. It boots without a schema (`/health` only pings the database), and with no
-configured admins its boot assertion has nothing to check. Then open the operator environment
+Deploy the `auth` service from the promoted commit, with **no domain**. It boots without a
+schema (`/health` only pings the database), and it runs no admin check at boot (spec H-7). Then open the operator environment
 above (`railway ssh`, the two exports).
 
 Then take **`cutover_at`** from the app database's own clock:
@@ -282,19 +281,23 @@ still stop, follow [`rollback.md`](rollback.md).
 ## 10. Admin roles
 
 In the operator environment (the service's own `DATABASE_URL` is the auth database), for each
-address on the approved list, then the audit:
+address on the approved list: show the account, check it, then grant it by its id. Then run
+the audit.
 
 ```bash
-(cd apps/auth && ./node_modules/.bin/tsx scripts/grant-admin.ts <email>)
+(cd apps/auth && ./node_modules/.bin/tsx scripts/grant-admin.ts <email>)                  # shows id, email, created_at, email_verified, role; grants nothing
+(cd apps/auth && ./node_modules/.bin/tsx scripts/grant-admin.ts <email> --confirm <id>)   # grants exactly that account
 psql "$AUTH_DATABASE_URL" -X -q -v ON_ERROR_STOP=1 -f apps/auth/scripts/cutover/05-audit-admins-auth.sql
 ```
 
-Then set `ADMIN_EMAILS` on the `auth` service to exactly the approved list, and redeploy `auth`
-(same commit, still no domain).
+A copied legacy admin shows `email_verified true` and an old `created_at`. A **warning** (a
+recent or unverified account: the signs of a squatted address) means you stop and confirm the
+person out of band before `--confirm`. There is no `ADMIN_EMAILS` to set and no `auth` redeploy
+in this step (spec H-7): the window has one fewer `auth` redeploy than before.
 
-**Check:** `05-audit-admins-auth.sql` prints exactly the approved list, one address per line. The
-redeployed `auth` is healthy: its production boot asserts that every `ADMIN_EMAILS` address holds
-the role, and exits otherwise. A legacy admin left off the list holds no admin role.
+**Check:** `05-audit-admins-auth.sql` prints exactly the approved list, one address per line. A
+legacy admin left off the list holds no admin role. The role in `auth.users` is the only admin
+truth; nothing at boot checks a list.
 **Abort:** `(cd apps/auth && ./node_modules/.bin/tsx scripts/grant-admin.ts --revoke <email>)`
 for any extra; fix and re-check.
 

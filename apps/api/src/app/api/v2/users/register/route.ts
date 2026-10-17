@@ -20,9 +20,9 @@ import { safeErrorMeta } from '@/lib/log';
 // Legacy register over apps/auth (spec 300, plan phase 8). The order is the
 // legacy one, so registration is no oracle: validation (422, here) → reserved
 // or taken (one identical 409) → strength (400) → create. apps/auth enforces
-// the reserved/taken → strength part, including its own ADMIN_EMAILS and the
-// system domain; this route also refuses an address any `public.users` row
-// holds (a system account's, or a leftover), before apps/auth sees it.
+// the reserved/taken → strength part, including the system domain; this route
+// also refuses an address any `public.users` row holds (a system account's, or
+// a leftover), before apps/auth sees it.
 // The newsletter opt-in is forwarded; apps/auth subscribes.
 
 const registerSchema = z.object({

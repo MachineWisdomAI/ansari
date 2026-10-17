@@ -114,6 +114,18 @@ This spec defines WHAT and WHY. The plan defines HOW and WHEN.
 >   the orphan holder in the Sentry alert. The operator response (an audit for app ids with no auth
 >   user and a one-transaction cleanup) is in the runbook. A stolen JWT can delete at `apps/auth`
 >   directly, the same power it has through `apps/api`.
+> - **H-7 (owner, 2026-10-17, security conditions folded in).** `ADMIN_EMAILS` is **removed**
+>   from `apps/auth`: no configured-admin reservation at sign-up and no boot assertion. The role in
+>   `auth.users` is the only admin truth; a stale list can no longer stop sign-in. The reservation's
+>   one protection (no email verification, so an admin address could be squatted before promotion)
+>   moves into `grant-admin.ts`: `grant-admin.ts <email>` shows id, email, `created_at`,
+>   `email_verified` and role, grants nothing and exits non-zero; only `--confirm <that id>` grants;
+>   it never creates an account, refuses the system domain, and warns on a recent or unverified
+>   account. The window verifies admins with `05-audit-admins-auth.sql` after step 10, and step 10
+>   no longer redeploys `apps/auth`. The frozen contract case "refuses a configured admin address
+>   with the IDENTICAL 409" is deleted under the pin, with the security architect's sign-off.
+>   `apps/api`'s **legacy** `ADMIN_EMAILS` stays set on the `backend` service until the contract
+>   PR (the rollback's previous `apps/api` needs it).
 >
 > This amendment supersedes every passage below about the internal credential, the internal
 > listener, the private network, the forwarded IP and `AUTH_RATE_LIMIT_MODE`; those passages are
@@ -320,8 +332,8 @@ After the cutover:
    cutover, and sends the JWT to `apps/api`. This change is agreed with the app architect first.
 8. **Admins are identified by the admin plugin's `role`** in the auth database, assigned by
    `grant-admin.ts`, which moves to `apps/auth/scripts/` (same name, one script) and runs against
-   the auth database. Admin is never an email match. `ADMIN_EMAILS` moves to `apps/auth` and
-   keeps only its reservation role and the boot assertion, rewritten against `role`. **Admin routes
+   the auth database. Admin is never an email match. `ADMIN_EMAILS` is removed from `apps/auth`
+   (H-7): no reservation, no boot assertion; `grant-admin.ts` promotes by id with a confirmation. **Admin routes
    on `apps/api` ask `apps/auth` for the role on each request** rather than trusting a claim, so a
    demotion takes effect immediately, and they fail closed when `apps/auth` is unreachable.
 9. **System accounts are identified by `system_key`** on `public.users`, and exist **only in the app
@@ -650,7 +662,8 @@ issue's dedicated-schema decision): `auth.users`, `auth.session`, `auth.account`
    asks `apps/auth`'s `GET /api/account/me` for the user's role **with the admin's own JWT** (H-2),
    so a demotion, a ban or a revoked session still takes effect immediately. If `apps/auth` is unreachable, the admin route **fails closed** (503) and never
    grants access. The only admin route is `admin/stats`, so the traffic is small.
-   - `ADMIN_EMAILS` (the reservation and the boot assertion) moves to `apps/auth`.
+   - `ADMIN_EMAILS` does not move to `apps/auth`: it is removed (H-7). `apps/api`'s legacy one
+     stays on the `backend` service until the contract PR, for the rollback only.
    - `grant-admin.ts` moves to `apps/auth/scripts/`, keeps its name, sets `auth.users.role`, and
      runs against the auth database.
 7. **System accounts stay app-only.** `ai-skill` and `leaderboard` are `public.users` rows with
@@ -813,7 +826,7 @@ backfill inserts nothing, because of the unique `(user_id, provider_id)`.
 
 | Service | Database credential | Other variables |
 |---|---|---|
-| `apps/auth` | `DATABASE_URL` = **auth database**, Railway default account | `AUTH_JWT_ISSUER`, `AUTH_JWT_AUDIENCE`, `ADMIN_EMAILS` (moved), `RESEND_API_KEY` and `FRONTEND_URL` (reset emails are now sent by `apps/auth`, with the same sender and legacy link shape as `apps/api/lib/email.ts`), plus the existing `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `CORS_ORIGIN` |
+| `apps/auth` | `DATABASE_URL` = **auth database**, Railway default account | `AUTH_JWT_ISSUER`, `AUTH_JWT_AUDIENCE`, `RESEND_API_KEY` and `FRONTEND_URL` (reset emails are now sent by `apps/auth`, with the same sender and legacy link shape as `apps/api/lib/email.ts`), plus the existing `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `CORS_ORIGIN` |
 | `apps/api` | `DATABASE_URL` = **app database**, Railway default account (unchanged) | `AUTH_URL` (`apps/auth`'s public origin, H-1), `AUTH_JWT_ISSUER` (set separately), `AUTH_JWT_AUDIENCE`, `AUTH_LAYER_ORIGIN`. No shared secret. The cutover PR removes `JWT_SECRET`, `ACCESS_TOKEN_EXPIRY_HOURS`, `REFRESH_TOKEN_EXPIRY_HOURS` and `ADMIN_EMAILS` |
 
 For the copy, the operator's Railway shell holds both databases' URLs as `APP_DATABASE_URL` and
@@ -844,7 +857,7 @@ a commit recorded in the release notes.
 
 | PR / stage | Reference phases | What happens |
 |---|---|---|
-| **1. Cutover PR, built on the branch** | 0 to 2 (code) | The `apps/auth` config (UUIDs, `auth` schema, dual verify, `bearer()`, `jwt()`, `admin()` kept for its columns with its whole HTTP surface blocked, `change-email` and `update-user` blocked, rate limiting and client IP, the account endpoints), its Dockerfile and service; the fresh `packages/auth` `0000`; the app migrations (scaffold cleanup, `public.deleted_users`, the window migration); the rollback SQL; the copy script and audits; the `apps/api` JWKS verification, app-row creation, tombstoned deletion, role calls and compatibility layer; the CORS fix; contract tests written first against today's implementation; removal of the legacy JWT code and the `JWT_*` config (and their `globalEnv` names), with `grant-admin.ts` and `ADMIN_EMAILS` moving to `apps/auth`; the `apps/frontend` switch to `apps/auth` (agreed with the app architect); `RELEASE.md` and `CONTRIBUTING.md` |
+| **1. Cutover PR, built on the branch** | 0 to 2 (code) | The `apps/auth` config (UUIDs, `auth` schema, dual verify, `bearer()`, `jwt()`, `admin()` kept for its columns with its whole HTTP surface blocked, `change-email` and `update-user` blocked, rate limiting and client IP, the account endpoints), its Dockerfile and service; the fresh `packages/auth` `0000`; the app migrations (scaffold cleanup, `public.deleted_users`, the window migration); the rollback SQL; the copy script and audits; the `apps/api` JWKS verification, app-row creation, tombstoned deletion, role calls and compatibility layer; the CORS fix; contract tests written first against today's implementation; removal of the legacy JWT code and the `JWT_*` config (and their `globalEnv` names), with `grant-admin.ts` moving to `apps/auth` (and `ADMIN_EMAILS` removed, H-7); the `apps/frontend` switch to `apps/auth` (agreed with the app architect); `RELEASE.md` and `CONTRIBUTING.md` |
 | **Before the window** | 2 | **Owner amendment R-2.** Staging auto-deploy off; the cutover PR merges to `develop`, which is frozen until the production window. The window runbook runs on **staging** from `develop`'s merge commit: the empirical edge check (both paths), the **rehearsal** (including a rollback rehearsal) on the staging users seeded with every anomaly class (R-1) plus the empty staging auth database, and the unmodified clients. The evidence lands as a docs-only PR to `develop`. The empty production auth database is created on Railway (or found), with backups or PITR on before the first real row (C-4). Before the merge, the branch is kept current with `develop`, and the numbering is re-checked after every merge |
 | **The window** | 3 | Merge and promote the cutover PR with `apps/api` offline: the app database's snapshot or PITR mark, the auth database's baseline, the copy and its audits, the window migration, admin roles, deploy `apps/auth`, `apps/api` and `apps/frontend`, smoke tests, then `apps/auth`'s public domain |
 | **2. Contract PR** (the first release after the 24-hour deadline passes; owner, C-2) | 4 | The contract migration: drop `password_hash`, `is_admin`, `session_version` and `tokens`, with its own `DEPLOYED_THROUGH` bump; the remaining pglite DDL; `RELEASE.md` names it as the one exception |
@@ -923,7 +936,6 @@ rollback deadline passing, and the contract PR's release.
     rows in `auth.account`
   - the number of `credential` rows equals the number of non-system users
   - **no system account exists in the auth database**
-  - every `ADMIN_EMAILS` entry has `role = 'admin'` after the role script
   - the set of `role = 'admin'` users equals the owner-approved inventory
 - [ ] Re-running the `account` backfill on its own creates zero duplicate rows.
 - [ ] **Email case is normalized, and collisions are decided before the window.**
@@ -1043,13 +1055,12 @@ rollback deadline passing, and the contract PR's release.
 - [ ] `/api/v1/chat/completions` (`LEADERBOARD_API_KEY`) and `/api/v2/mcp-complete` behave as today.
   There is no global `middleware.ts`.
 - [ ] **Existing admins are preserved deliberately.**
-  - Before the window, the operator produces an inventory of every `is_admin = true` user and
-    compares it with `ADMIN_EMAILS`.
+  - Before the window, the operator produces an inventory of every `is_admin = true` user.
   - The owner approves the post-cutover admin list.
   - The role script assigns `role = 'admin'` to exactly that list.
   - An audit checks that the set of `role = 'admin'` users equals the list.
-- [ ] `apps/auth`'s production boot assertion checks that every `ADMIN_EMAILS` entry exists with
-  `role = 'admin'`, gated like today's `shouldRunAdminStartupCheck`.
+- [ ] No boot assertion on admins (H-7). `grant-admin.ts` shows the account and grants only with
+  `--confirm <its id>`; it refuses the system domain and warns on a recent or unverified account.
 
 **Compatibility layer on `apps/api`: frozen contract**
 
@@ -1279,7 +1290,7 @@ decided rate limits apply to every production sign-in, because all of them pass 
 
 | Current | After |
 |---|---|
-| Admin = `users.is_admin` | Admin = admin-plugin `role` on `auth.users` in the auth database, asked of `apps/auth` on each admin request (fail closed), never from a token claim. `ADMIN_EMAILS` (in `apps/auth`) = reservation + boot assertion only |
+| Admin = `users.is_admin` | Admin = admin-plugin `role` on `auth.users` in the auth database, asked of `apps/auth` on each admin request (fail closed), never from a token claim. No `ADMIN_EMAILS` in `apps/auth` (H-7); grants by id with confirmation |
 | `session_version` = the "kill all sessions" primitive | Deleting a user's Better Auth session rows is the primitive. Already-issued JWTs live until `exp` (15 minutes, Better Auth's default), which is the documented revocation window. No per-request session check |
 | JWT config through `config` | `apps/auth` is the only issuer (EdDSA, `auth.jwks`). `apps/api` only verifies, against the JWKS, with `alg`, `iss`, `aud` and `exp` pinned. `apps/api` never imports `better-auth` |
 | Token rotation in `db.transaction` with `exec` | Retired with `tokens` (dropped by the contract migration after the rollback deadline). Each cutover step is one transaction |
@@ -1486,8 +1497,8 @@ This was the first draft's proposal.
     `Bob@x.com` and `bob@x.com`, abort with no changes, and the pre-window audit reports that pair.
 15. The scaffold cleanup run against a `public.account` scaffold table holding one row aborts and
     changes nothing. Against empty scaffold tables, or none, it succeeds.
-16. Admin inventory: a legacy admin missing from `ADMIN_EMAILS` but on the owner-approved list holds
-    `role = 'admin'` after the role script. A legacy admin left off the list does not.
+16. Admin inventory: a legacy admin on the owner-approved list holds `role = 'admin'` after the
+    role script. A legacy admin left off the list does not.
 17. A JWKS key rotation on `apps/auth`: new tokens carry the new `kid`, `apps/api` re-fetches once
     and accepts them, and old unexpired tokens still verify while their key is published.
 18. With `apps/auth` stopped, an unexpired JWT still works on `apps/api`, and sign-in and refresh

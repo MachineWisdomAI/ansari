@@ -362,6 +362,39 @@ The owner removed `AUTH_INTERNAL_SECRET` and the internal hop in this PR ("no ti
     `requireAdminRole`: `GET /api/account/me` answers 401, which reads as "no account", so the
     route denies. Acceptable, because access is denied either way.
 
+### Owner amendment H-7: `ADMIN_EMAILS` removed
+
+The owner removed `ADMIN_EMAILS` from `apps/auth`: the role in `auth.users` is the only admin
+truth, and a stale list could take sign-in down at boot. The security architect set the
+conditions and signed off on the contract re-pin; main's guard is that `backend` keeps its
+legacy variable until the contract PR.
+
+- [x] Gone: the env key, the configured-admin reservation (`reserved.ts` keeps the system domain
+  only), `apps/auth/src/startup-checks.ts` and its boot call, the template line, and the
+  `globalEnv` entry. `--dry=json`: `ADMIN_EMAILS` x → y moves neither `ansari-api#test` nor
+  `ansari-auth#build`.
+- [x] `grant-admin.ts`, two steps. `<email>` shows id, email, `created_at`, `email_verified` and
+  role, grants nothing, and exits 2. `<email> --confirm <id>` grants exactly that account and is
+  idempotent. A wrong or made-up id grants nothing (`ConfirmMismatchError`). It never creates an
+  account and refuses the system domain. It warns on an account under 7 days old or with an
+  unverified address (copied legacy admins are verified and old). Tests in `grant-admin.test.ts`
+  cover each of these, plus the 7-day boundary.
+- [x] Runbook step 10: show, then `--confirm <id>`, then `05-audit-admins-auth.sql`, which must
+  print exactly the approved list. No `ADMIN_EMAILS` to set and **no `auth` redeploy**, so the
+  window has one fewer. Step 6 has no "empty `ADMIN_EMAILS`" any more. The precondition that
+  `backend` keeps `ADMIN_EMAILS` among its legacy variables until the contract PR stays, and
+  `cutover-docs.test.ts` ("keeps the legacy variables on backend for the rollback (R3)") pins it.
+  RELEASE.md's contract-PR line still lists it.
+- [x] **Frozen contract, re-pinned once.** The case "refuses a configured admin address with the
+  IDENTICAL 409, in any case" is deleted (11 lines, nothing else in the pinned body).
+  `ASSERTIONS_AT_PHASE_1` moved to `eb100e85…` with a dated note; the preamble hash is unchanged.
+  The system-domain identical 409 stays covered in the frozen file: "refuses a reserved system
+  address with the IDENTICAL 409 a taken email gets", and the guard-order case "a reserved address
+  with a weak password gets 409, not 400".
+- [x] Source scan 4 names `ADMIN_EMAILS`, with two planted lines and two near-misses.
+  `self-hosting-docs.test.ts` now pins "no boot admin check" and the two-step grant in place of
+  the old crash-loop triage.
+
 ## Deviations from Plan
 
 The thread (`codev/state/spir-300_thread.md`, one section per phase) has each deviation with its

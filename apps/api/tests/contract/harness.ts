@@ -12,7 +12,6 @@ import { resetRateLimitStore } from '@/lib/rate-limit';
 import {
   freshIp,
   startService,
-  TEST_ADMIN_EMAIL,
   type Service,
 } from '../../../auth/tests/helpers/service';
 import { POST as register } from '../../src/app/api/v2/users/register/route';
@@ -127,8 +126,6 @@ export interface ContractHarness {
   sentEmails(): readonly SentEmail[];
   /** The `${FRONTEND_URL}` the reset link is built from. */
   readonly frontendUrl: string;
-  /** An address configured as an admin address (`ADMIN_EMAILS`), reserved at registration. */
-  readonly reservedAdminEmail: string;
   reset(): Promise<void>;
   close(): Promise<void>;
 }
@@ -199,7 +196,6 @@ export async function createHarness(state: MockState): Promise<ContractHarness> 
   const harness: ContractHarness = {
     backend: 'better-auth',
     frontendUrl,
-    reservedAdminEmail: TEST_ADMIN_EMAIL,
 
     async call(route, init = {}) {
       vi.advanceTimersByTime(1000);

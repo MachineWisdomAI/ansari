@@ -22,10 +22,17 @@ import path from 'node:path';
  * email template and `resend`) and updated the header. Its only mock is the db
  * handle. Changing any constant is a change to the frozen contract and needs
  * the security architect's sign-off.
+ *
+ * 2026-10-17: the assertions hash moved ONCE, for one deletion, with the
+ * security architect's sign-off: the case "refuses a configured admin address
+ * with the IDENTICAL 409, in any case" was removed with ADMIN_EMAILS (owner
+ * decision). The reserved-admin 409 was a server policy, not wire behaviour the
+ * released client relies on; a taken address still gets the identical 409.
+ * Nothing else in the pinned body changed.
  */
 
 const FIXTURES_AT_PHASE_1 = '914746551d65187a4d82e10ca299fe5822285b8873ecdb86ade27c60ed8de0f8';
-const ASSERTIONS_AT_PHASE_1 = 'c42356fcc0c1030b3180c3acee2e9f83d320ae68700c42a9d451caf68a4feea5';
+const ASSERTIONS_AT_PHASE_1 = 'eb100e85c8dd5de430abfbb4407f93613c0565e3156190f9a9cebdcec72782ec';
 const PREAMBLE_REVIEWED = '00134c88c350c015dabbf501267cc27374c46793ea04ae37b6679118215d20d3';
 const BODY_START = 'type FixtureName';
 

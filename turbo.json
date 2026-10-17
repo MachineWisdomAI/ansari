@@ -134,9 +134,9 @@
     "KALEMAT_API_KEY",
     "USUL_API_TOKEN",
     "USUL_BASE_URL",
-    // apps/auth's since spec 300 (packages/auth env), as are FRONTEND_URL,
-    // MARKETMAKER_URL and RESEND_API_KEY below.
-    "ADMIN_EMAILS",
+    // FRONTEND_URL, MARKETMAKER_URL and RESEND_API_KEY below are apps/auth's
+    // since spec 300 (packages/auth env). Neither schema has an admin list any
+    // more (owner amendment 2026-10-17).
     "LEADERBOARD_API_KEY",
     "MAINTENANCE_MODE",
     "IOS_MINIMUM_BUILD_VERSION",

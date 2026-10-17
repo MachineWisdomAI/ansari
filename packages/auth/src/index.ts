@@ -264,7 +264,7 @@ export function createAuth(db: Db = createDb(), extensions: AuthExtensions = {})
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
         await extensions.before?.(ctx);
-        if (ctx.path === '/sign-up/email') return signUpGuard(ctx.body, ctx.context, env);
+        if (ctx.path === '/sign-up/email') return signUpGuard(ctx.body, ctx.context);
         if (ctx.path === '/reset-password') {
           return resetGuard(asBody(ctx.body), ctx.query, ctx.context);
         }
@@ -302,7 +302,7 @@ export function createAuth(db: Db = createDb(), extensions: AuthExtensions = {})
           before: async (user, ctx) => {
             // Defence in depth behind signUpGuard: no path may ever create a
             // reserved address in the auth database.
-            if (isReservedAddress(user.email, env.ADMIN_EMAILS)) throw emailTaken();
+            if (isReservedAddress(user.email)) throw emailTaken();
             const extra = user as typeof user & { first_name?: string | null; last_name?: string | null };
             return {
               data: {
@@ -379,7 +379,7 @@ type HookContext = {
  * not better-auth's own body validation would have run before this hook. The
  * name is derived when the client sent none.
  */
-async function signUpGuard(rawBody: unknown, context: HookContext, env: AuthEnv) {
+async function signUpGuard(rawBody: unknown, context: HookContext) {
   const body = asBody(rawBody);
   const email = str(body.email);
   const password = str(body.password);
@@ -395,7 +395,7 @@ async function signUpGuard(rawBody: unknown, context: HookContext, env: AuthEnv)
     throw APIError.from('BAD_REQUEST', BASE_ERROR_CODES.PASSWORD_TOO_LONG);
   }
 
-  if (isReservedAddress(email, env.ADMIN_EMAILS)) throw emailTaken();
+  if (isReservedAddress(email)) throw emailTaken();
   if (await context.internalAdapter.findUserByEmail(normalizeEmail(email))) throw emailTaken();
 
   const strength = checkPasswordStrength(password);

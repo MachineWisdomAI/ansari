@@ -150,17 +150,6 @@ describe('POST /v2/users/register', () => {
     expect(await harness.appUser(SYSTEM_ADDRESS)).toBeUndefined();
   });
 
-  it('refuses a configured admin address with the IDENTICAL 409, in any case', async () => {
-    await harness.seedUser({ email: 'taken@example.com', password: PASSWORD });
-    const taken = await harness.call('register', { body: { email: 'taken@example.com', password: PASSWORD } });
-    const reserved = await harness.call('register', {
-      body: { email: harness.reservedAdminEmail.toUpperCase(), password: WEAK_PASSWORD },
-    });
-    expectWire(reserved, 'register.email_taken');
-    expect(reserved).toEqual(taken);
-    expect(await harness.appUser(harness.reservedAdminEmail)).toBeUndefined();
-  });
-
   it('refuses a weak password with 400 and creates nothing', async () => {
     expectWire(
       await harness.call('register', { body: { email: 'weak@example.com', password: WEAK_PASSWORD } }),

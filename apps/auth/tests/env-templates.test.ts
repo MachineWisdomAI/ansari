@@ -45,7 +45,7 @@ describe('apps/auth/.env.example', () => {
   const documented = new Set([...set.keys(), ...commentedKeys(text)]);
 
   it('names every variable the schema declares, and nothing else', () => {
-    expect(SCHEMA_KEYS.length).toBeGreaterThanOrEqual(14);
+    expect(SCHEMA_KEYS.length).toBeGreaterThanOrEqual(13);
     expect(SCHEMA_KEYS.filter((key) => !documented.has(key))).toEqual([]);
     expect([...documented].filter((key) => !SCHEMA_KEYS.includes(key))).toEqual([]);
   });

@@ -71,13 +71,17 @@ describe('guard order: validation → reserved/taken → strength', () => {
   it.each([
     ['any @system.ansari.chat address', 'anything@system.ansari.chat'],
     ['the system domain in mixed case', 'Leaderboard@SYSTEM.Ansari.Chat'],
-    ['an ADMIN_EMAILS entry', TEST_ADMIN_EMAIL],
-    ['an ADMIN_EMAILS entry in mixed case', TEST_ADMIN_EMAIL.toUpperCase()],
   ])('reserves %s, and creates no row', async (_label, email) => {
     const res = await signUp({ email, password: STRONG, name: 'X' });
     expect(res.status).toBe(409);
     expect((await json(res)).message).toBe(EMAIL_TAKEN_MESSAGE);
     expect(await userRow(email.toLowerCase())).toBeUndefined();
+  });
+
+  it('an address that would once have been a configured admin registers like any other (no admin list)', async () => {
+    const res = await signUp({ email: TEST_ADMIN_EMAIL, password: STRONG, name: 'X' });
+    expect(res.status).toBe(200);
+    expect((await userRow(TEST_ADMIN_EMAIL))?.role).not.toBe('admin');
   });
 
   it('an invalid email is refused before the reservation check', async () => {

@@ -54,6 +54,7 @@ export function drizzleFor(client: PGlite): Db {
 
 export const TEST_JWT_ISSUER = 'https://auth.test.example';
 export const TEST_JWT_AUDIENCE = 'ansari-api-test';
+/** An ordinary address; it was the configured-admin address before the list was removed. */
 export const TEST_ADMIN_EMAIL = 'admin@ansari.test';
 /** apps/api's origin in tests: the Origin its layer sends. */
 export const TEST_LAYER_ORIGIN = 'https://api.test.example';
@@ -69,7 +70,6 @@ export function setAuthEnv(baseUrl: string): void {
   process.env.AUTH_JWT_AUDIENCE = TEST_JWT_AUDIENCE;
   process.env.RESEND_API_KEY = 're_test_key_at_least_20_chars';
   process.env.FRONTEND_URL = 'http://localhost:8081';
-  process.env.ADMIN_EMAILS = TEST_ADMIN_EMAIL;
   delete process.env.MARKETMAKER_URL;
   resetEnvCache();
 }

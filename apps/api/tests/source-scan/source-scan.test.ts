@@ -202,6 +202,8 @@ describe('scan 4: the removed internal hop stays gone (owner amendment 2026-10-1
       "const url = getEnv()['AUTH_INTERNAL_URL'];",
       'app.listen(env.INTERNAL_PORT);',
       "const mode = process.env.AUTH_RATE_LIMIT_MODE ?? 'email';",
+      'await assertConfiguredAdminsExist(db, env.ADMIN_EMAILS);',
+      "const admins = (process.env.ADMIN_EMAILS ?? '').split(',');",
       "headers['x-ansari-internal-auth'] = secret;",
       "headers['X-Ansari-Forwarded-Client-IP'] = ip;",
       'headers[INTERNAL_AUTH_HEADER] = secret;',
@@ -223,6 +225,8 @@ describe('scan 4: the removed internal hop stays gone (owner amendment 2026-10-1
       "fetch('/api/account/me');",
       "const path = '/internals-guide';",
       'const url = process.env.AUTH_URL;',
+      'const admins = await users.listAdmins(db);',
+      "const role = users.ADMIN_ROLE; // 'admin'",
     ]) {
       expect(removedHopHits(fine), fine).toEqual([]);
     }

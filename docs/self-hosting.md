@@ -37,8 +37,8 @@ direct `process.env` reads. `apps/api/.env.example` mirrors this contract. Valid
 runs at first config access, and a production server also runs it at boot
 (`apps/api/lib/boot-check.ts`), so missing required values fail loudly at startup.
 
-Accounts, passwords, sessions, roles, password-reset email and `ADMIN_EMAILS` belong
-to the auth service, `apps/auth` (spec 300). `apps/api` holds no credential and no
+Accounts, passwords, sessions, roles and password-reset email belong to the auth
+service, `apps/auth` (spec 300). `apps/api` holds no credential and no
 signing secret, and shares no secret with `apps/auth`: it reaches `apps/auth` at its
 public origin like any other client, verifying its JWTs against the public JWKS and
 calling its account endpoints with the user's own JWT.
@@ -127,11 +127,16 @@ empty-final retry ladder still applies as same-model retries.
 
 ### Provisioning admins
 
-Admins are an `apps/auth` concern: admin access is the auth user's `role`, set out of
-band with `apps/auth/scripts/grant-admin.ts`, and `ADMIN_EMAILS` (reserved at sign-up,
-asserted at `apps/auth`'s production boot) is configured on `apps/auth`. `apps/api`
-asks `apps/auth` for the role on every admin request. RELEASE.md carries the
-onboarding order.
+Admins are an `apps/auth` concern: admin access is the auth user's `role`, the only
+admin truth, set out of band with `apps/auth/scripts/grant-admin.ts`, run from
+`apps/auth/`. It works in two steps: `grant-admin.ts <email>` shows the account (id,
+email, `created_at`, `email_verified`, role) and grants nothing, and
+`grant-admin.ts <email> --confirm <id>` grants exactly that account. It warns on a recent
+or unverified account; confirm the person out of band before `--confirm`. `apps/api` asks
+`apps/auth` for the role on every admin request. There is no `ADMIN_EMAILS` on
+`apps/auth`. `apps/api`'s **legacy** `ADMIN_EMAILS` (old code only) stays set on the
+`backend` service until the contract PR, because a rollback redeploys the previous
+`apps/api`, which needs it. RELEASE.md carries the onboarding order.
 
 ## Running it
 
@@ -209,30 +214,11 @@ database for `packages/auth/drizzle/`), as `RELEASE.md` describes. Never `db:pus
 `apps/auth`'s `/health` is the same kind of gate: it answers 200 only while the auth
 database does.
 
-### Troubleshooting: crash loop at boot (admin bootstrap check)
+### Boot checks
 
-The admin bootstrap check runs at `apps/auth`'s production boot
-(`assertConfiguredAdminsExist` in `apps/auth/src/startup-checks.ts`), not at
-`apps/api`'s: it queries the auth database to verify that every `ADMIN_EMAILS` entry
-already exists as an admin, and **throws if it cannot verify this** — including when
-the database is simply unreachable. Coupling boot to database reachability is
-deliberate fail-fast behavior: a server that cannot verify its admins refuses to start
-rather than serving with unknown admin state.
-
-**Symptom.** On platforms that restart on crash (e.g. Railway with
-`restartPolicyType = "ON_FAILURE"`), a database blip while `apps/auth` boots presents
-as a **crash loop** that looks identical to a mis-provisioned deploy. The check runs
-only on a production boot — never in dev or tests.
-
-**Triage: read the boot error text — it distinguishes the two cases.**
-
-| Boot error contains | Meaning | What to do |
-|---|---|---|
-| `Admin bootstrap check could not reach the database` | The auth database was unreachable when boot ran. This is an **outage, not a provisioning error** — do not re-run the bootstrap script. | Restore database reachability (`apps/auth`'s `DATABASE_URL` correct, network path open, database up). The next restart succeeds once the database answers; on restart-on-crash platforms recovery is automatic. |
-| `has no account` or `role is not admin` | A real provisioning gap: the configured admin never signed up, was never granted, or was deleted/demoted since. Restarting will not fix it. | Run `pnpm exec tsx scripts/grant-admin.ts <email>` from `apps/auth/` (in the auth image's shell: `./node_modules/.bin/tsx scripts/grant-admin.ts <email>`) for the identified entry (see [Provisioning admins](#provisioning-admins)), then restart. |
-
-The error identifies the failing entry by its **position** in `ADMIN_EMAILS`
-(e.g. `configured admin #2 of 3`), never by the address itself — boot logs carry
-no email content. Map the index back to your configured list.
+`apps/auth` runs no admin check at boot (spec 300 amendment H-7): a stale admin list can never
+stop sign-in. Its only boot requirement is the environment validation. `/health` answers 200
+only while the auth database does, so a deploy with an unreachable database fails its
+healthcheck instead of serving. Verify admins with `grant-admin.ts --list` from `apps/auth/`.
 
 `apps/api`'s own boot check is the environment validation above; it queries nothing.

@@ -53,7 +53,7 @@ WHERE system_key IS NULL
   AND lower(trim(email)) ~ '^guest_[a-z0-9]{10}@(askansari\.ai|ansari\.chat)$'
   AND first_name = 'Welcome' AND last_name = 'Guest';
 
-\echo '== Legacy admin inventory (is_admin): compare with the owner-approved list and ADMIN_EMAILS'
+\echo '== Legacy admin inventory (is_admin): compare with the owner-approved list'
 SELECT id, lower(trim(email)) AS email
 FROM public.users
 WHERE is_admin

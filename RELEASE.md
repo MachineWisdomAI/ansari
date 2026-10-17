@@ -279,18 +279,19 @@ Order proven for migration `0003` on 2026-08-02:
    - **Admins** live in `apps/auth` (spec 300): from `apps/auth/`, with the
      auth database's `DATABASE_URL`, `pnpm exec tsx scripts/grant-admin.ts <email>`
      (in the auth service's Railway shell: `./node_modules/.bin/tsx scripts/grant-admin.ts <email>`).
-     It grants the admin role to an account that already exists; it never
-     creates an account or touches a password. A new admin therefore signs up
-     first, then their address joins `apps/auth`'s `ADMIN_EMAILS`, then the
-     script runs, then the deploy. Adding the address to `ADMIN_EMAILS` before
-     sign-up locks the person out (a reserved address is refused at sign-up)
-     and fails `apps/auth`'s boot assertion ("has no account").
+     It grants the admin role to an account that already exists, in two
+     steps: `grant-admin.ts <email>` shows the account (id, email, created_at,
+     email_verified, role) and grants nothing; `grant-admin.ts <email> --confirm
+     <id>` grants exactly that account. It never creates an account or touches a
+     password, and it refuses the system domain. A new admin signs up first; a
+     warning on a recent or unverified account means: confirm the person out of
+     band before `--confirm`. There is no `ADMIN_EMAILS` on `apps/auth` (spec
+     H-7): the role in the auth database is the only admin truth.
    - **System accounts** (`ai-skill`, `leaderboard`) self-provision lazily by
      `system_key` — no manual step.
-4. **Then run the standard release checklist above.** The order matters:
-   `apps/auth`'s production boot asserts that every `ADMIN_EMAILS` entry
-   already exists as an admin, so deploying before migration + bootstrap fails fast at startup
-   — by design.
+4. **Then run the standard release checklist above.** Nothing at `apps/auth`'s
+   boot checks admins (spec H-7); verify them with `grant-admin.ts --list` (or
+   the cutover's `05-audit-admins-auth.sql`).
 
 Migrations must be backward-compatible with the currently-deployed code: the
 SQL is applied while the previous deployment is still serving traffic.

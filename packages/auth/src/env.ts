@@ -46,18 +46,6 @@ export const envSchema = z.object({
   RESEND_API_KEY: z.string().min(20, 'RESEND_API_KEY must be at least 20 characters'),
   // Base of the emailed reset link: `${FRONTEND_URL}/reset-password?token=…`.
   FRONTEND_URL: z.string().url('FRONTEND_URL must be a valid URL'),
-  // Comma-separated. Reserved at sign-up and asserted at boot; never an
-  // authorization source (admin is `auth.users.role`).
-  ADMIN_EMAILS: z
-    .string()
-    .optional()
-    .default('')
-    .transform((raw) =>
-      raw
-        .split(',')
-        .map((e) => e.trim().toLowerCase())
-        .filter((e) => e.length > 0)
-    ),
   // Optional newsletter integration; unset disables the opt-in subscribe.
   MARKETMAKER_URL: z.string().url('MARKETMAKER_URL must be a valid URL').optional(),
   // apps/auth's one listener, behind the public domain. There is no internal

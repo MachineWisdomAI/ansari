@@ -122,6 +122,9 @@ const REMOVED_HOP: readonly RegExp[] = [
   /\bAUTH_INTERNAL_(?:SECRET|URL)\b/,
   /\bINTERNAL_PORT\b/,
   /\bAUTH_RATE_LIMIT_MODE\b/,
+  // apps/auth's admin list (H-7). apps/api's legacy variable of the same name
+  // lives only on the backend service until the contract PR, never in code.
+  /\bADMIN_EMAILS\b/,
   /\bINTERNAL_AUTH_HEADER\b/,
   /\bFORWARDED_IP_HEADER\b/,
   /x-ansari-internal-auth/i,

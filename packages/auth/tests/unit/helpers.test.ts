@@ -52,35 +52,28 @@ describe('env', () => {
     }
   });
 
-  it('normalizes ADMIN_EMAILS', () => {
+  it('declares no shared credential, internal port, rate-limit mode or admin list (owner amendment 2026-10-17)', () => {
     setAuthEnv(BASE);
-    process.env.ADMIN_EMAILS = ' Admin@Example.com , ,second@example.com';
-    resetEnvCache();
-    expect(getEnv().ADMIN_EMAILS).toEqual(['admin@example.com', 'second@example.com']);
-  });
-
-  it('declares no shared credential, internal port or rate-limit mode (owner amendment 2026-10-17)', () => {
-    setAuthEnv(BASE);
+    process.env.ADMIN_EMAILS = 'admin@example.com';
     resetEnvCache();
     const keys = Object.keys(getEnv());
-    for (const removed of ['AUTH_INTERNAL_SECRET', 'INTERNAL_PORT', 'AUTH_RATE_LIMIT_MODE']) {
+    delete process.env.ADMIN_EMAILS;
+    for (const removed of ['AUTH_INTERNAL_SECRET', 'INTERNAL_PORT', 'AUTH_RATE_LIMIT_MODE', 'ADMIN_EMAILS']) {
       expect(keys).not.toContain(removed);
     }
   });
 });
 
-describe('reserved addresses', () => {
-  const admins = ['admin@example.com'];
+describe('reserved addresses: the system domain only', () => {
   it.each([
-    ['admin@example.com', true],
-    [' ADMIN@Example.com ', true],
+    ['admin@example.com', false],
     ['ai-skill@system.ansari.chat', true],
     ['Anyone@System.Ansari.Chat', true],
     ['user@example.com', false],
     ['user@notsystem.ansari.chat', false],
     ['system.ansari.chat@example.com', false],
   ])('%s → %s', (email, reserved) => {
-    expect(isReservedAddress(email, admins)).toBe(reserved);
+    expect(isReservedAddress(email)).toBe(reserved);
   });
 
   it('isSystemAddress matches the domain only', () => {

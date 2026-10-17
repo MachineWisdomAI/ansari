@@ -8,21 +8,14 @@ import { createDb, getEnv } from '@ansari/auth';
 
 import { initSentry } from './alerts';
 import { createApp, createServiceAuth } from './app';
-import { assertConfiguredAdminsExist, shouldRunAdminStartupCheck } from './startup-checks';
 
 const env = getEnv();
 initSentry(env.SENTRY_DSN, env.NODE_ENV);
 
+// No admin check at boot (owner amendment 2026-10-17): admin is the role in
+// auth.users alone, granted by scripts/grant-admin.ts, and the window audits it
+// (05-audit-admins-auth.sql), so a stale list can never stop sign-in.
 const db = createDb();
-
-if (shouldRunAdminStartupCheck(env)) {
-  try {
-    await assertConfiguredAdminsExist(db, env.ADMIN_EMAILS);
-  } catch (err) {
-    console.error(err instanceof Error ? err.message : 'Admin bootstrap check failed');
-    process.exit(1);
-  }
-}
 
 const auth = createServiceAuth(db);
 
