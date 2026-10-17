@@ -46,7 +46,7 @@ const DRIZZLE_DIR = path.resolve(__dirname, '../../drizzle');
 // the migration must be applied on staging AND production before the code
 // deploys (arch-critical.md deploy order). It is not evidence that anyone
 // applied it: a bumped constant goes green whether or not the migration ran.
-const DEPLOYED_THROUGH = '0008_model_provenance';
+const DEPLOYED_THROUGH = '0011_better_auth_window';
 
 type JournalEntry = { idx: number; tag: string };
 const journal: JournalEntry[] = JSON.parse(
