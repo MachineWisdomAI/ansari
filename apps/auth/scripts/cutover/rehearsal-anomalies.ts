@@ -12,7 +12,8 @@
  *
  * Commands, in the rehearsal's order (docs/cutover/rehearsal.md):
  *   seed               the seven rows below (refuses if any is already there)
- *   resolve-collision  delete the collision pair (the copy then stops on the NULL timestamp)
+ *   resolve-collision  delete the collision pair (the copy then stops on the non-bcrypt hash)
+ *   resolve-hash       delete the non-bcrypt row (the copy then stops on the NULL timestamp)
  *   resolve-null       set the NULL updated_at to its created_at (the copy then passes)
  *   remove             delete every rehearsal row (threads etc. go with the cascade)
  *
@@ -43,10 +44,14 @@ export const ROWS = {
   plain2b: { id: rid(5), email: 'rehearsal.2b@example.com' },
   legacyAdmin: { id: rid(6), email: 'rehearsal.admin@example.com' },
   guest: { id: rid(7), email: 'guest_rhrsl00001@askansari.ai' },
+  notBcrypt: { id: rid(8), email: 'rehearsal.scrypt@example.com' },
 } as const;
 
-export type Command = 'seed' | 'resolve-collision' | 'resolve-null' | 'remove';
-const COMMANDS: readonly Command[] = ['seed', 'resolve-collision', 'resolve-null', 'remove'];
+/** An scrypt-shaped hash (salt:key, hex), as no legacy row should hold: the copy refuses it. */
+export const NOT_BCRYPT_HASH = `${'ab'.repeat(16)}:${'cd'.repeat(64)}`;
+
+export type Command = 'seed' | 'resolve-collision' | 'resolve-hash' | 'resolve-null' | 'remove';
+const COMMANDS: readonly Command[] = ['seed', 'resolve-collision', 'resolve-hash', 'resolve-null', 'remove'];
 
 export const MIN_PASSWORD_LENGTH = 12;
 
@@ -101,11 +106,14 @@ INSERT INTO public.users (id, email, password_hash, first_name, last_name, creat
   (${quote(r.mixedCase2a.id)}, ${quote(r.mixedCase2a.email)}, ${quote(h2a)}, 'Rehearsal', 'Mixed', now() - interval '1 day', now(), false),
   (${quote(r.plain2b.id)}, ${quote(r.plain2b.email)}, ${quote(h2b)}, NULL, NULL, now() - interval '1 day', now(), false),
   (${quote(r.legacyAdmin.id)}, ${quote(r.legacyAdmin.email)}, ${quote(h2b)}, 'Rehearsal', 'Admin', now() - interval '1 day', now(), true),
-  (${quote(r.guest.id)}, ${quote(r.guest.email)}, ${quote(h2b)}, 'Welcome', 'Guest', now() - interval '1 day', now(), false);
+  (${quote(r.guest.id)}, ${quote(r.guest.email)}, ${quote(h2b)}, 'Welcome', 'Guest', now() - interval '1 day', now(), false),
+  (${quote(r.notBcrypt.id)}, ${quote(r.notBcrypt.email)}, ${quote(NOT_BCRYPT_HASH)}, 'Rehearsal', 'Scrypt', now() - interval '1 day', now(), false);
 `;
     }
     case 'resolve-collision':
       return `DELETE FROM public.users WHERE id IN (${quote(ROWS.collisionA.id)}, ${quote(ROWS.collisionB.id)});\n`;
+    case 'resolve-hash':
+      return `DELETE FROM public.users WHERE id = ${quote(ROWS.notBcrypt.id)};\n`;
     case 'resolve-null':
       return `UPDATE public.users SET updated_at = created_at WHERE id = ${quote(ROWS.nullUpdatedAt.id)} AND updated_at IS NULL;\n`;
     case 'remove':

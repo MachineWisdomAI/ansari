@@ -73,13 +73,14 @@ after it, so the rollback has at least one user to remove, and must leave none b
 
 **The seeded anomaly users** (`apps/auth/scripts/cutover/rehearsal-anomalies.ts`; staging only).
 They are seeded in the operator environment after step 6 and before step 7. Every seeded
-`created_at` is in the past, so the rollback never removes them. Step 8 then runs three times:
+`created_at` is in the past, so the rollback never removes them. Step 8 then runs four times:
 
 | Run | State | `copy.sh` must | Then |
 |---|---|---|---|
 | 1 | as seeded | **abort** on the collision (`1 normalized email(s) are held by more than one row`); `auth.users` and `auth.account` hold 0 rows; no `import_users` table | `rehearsal-anomalies.ts resolve-collision \| psql …` |
-| 2 | collision removed | **abort** on the NULL timestamp (`1 row(s) have a NULL created_at or updated_at`); auth still empty | `rehearsal-anomalies.ts resolve-null \| psql …` |
-| 3 | both resolved | **pass**: `copy.sh: audit OK`, the six lines identical | continue at step 9 |
+| 2 | collision removed | **abort** on the non-bcrypt hash (`1 row(s) have a hash that is not bcrypt $2a$/$2b$ of length 60`); auth still empty; no `import_users` table | `rehearsal-anomalies.ts resolve-hash \| psql …` |
+| 3 | that row removed | **abort** on the NULL timestamp (`1 row(s) have a NULL created_at or updated_at`); auth still empty; no `import_users` table | `rehearsal-anomalies.ts resolve-null \| psql …` |
+| 4 | all resolved | **pass**: `copy.sh: audit OK`, the six lines identical | continue at step 9 |
 
 After the pass:
 - the mixed-case row signs in with its address in upper case
@@ -315,11 +316,12 @@ through `/v2/users/login` (the compatibility layer) and loads its threads.
 
 On `api.askansari.ai` and `api-35.ansari.chat`, over IPv4 and IPv6 where reachable, both
 properties of [`edge-check.md`](edge-check.md). Probe **both paths**: through Cloudflare where
-the domain is proxied (`api.askansari.ai`), and direct to Railway's edge with `--resolve`, as in
-the method:
+the domain is proxied (`api.askansari.ai`), and direct to Railway's edge with `--resolve`. Run
+the method's whole command block, with `curl -4` and `curl -6` on each path, recording an
+unreachable family as such. The via-Cloudflare IPv4 probe, for example:
 
 ```bash
-curl -s -H 'X-Real-IP: 192.0.2.66' -H 'X-Forwarded-For: 192.0.2.66' -H 'CF-Connecting-IP: 192.0.2.66' https://api.askansari.ai/api/v2/_diag/client-ip
+curl -4 -s -H 'X-Real-IP: 192.0.2.66' -H 'X-Forwarded-For: 192.0.2.66' -H 'CF-Connecting-IP: 192.0.2.66' https://api.askansari.ai/api/v2/_diag/client-ip
 ```
 
 **Check:** **overwrite:** on every path, `x_real_ip` is your real address, never `192.0.2.66`;

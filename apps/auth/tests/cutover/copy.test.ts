@@ -488,21 +488,26 @@ describe('the staging anomaly seed (rehearsal-anomalies.ts), through the rehears
     expect((await app.query(preflightQuery('== Collisions'))).rows).toHaveLength(1);
     expect(await n('== Case audit', 'not_normalized')).toBe(2);
     expect(await n('== Rows with a NULL timestamp', 'null_updated_at')).toBe(1);
-    expect(await n('== Rows whose hash is not bcrypt', 'not_bcrypt')).toBe(0);
+    expect(await n('== Rows whose hash is not bcrypt', 'not_bcrypt')).toBe(1);
     expect(await n('== Guests', 'guests')).toBe(1);
     expect((await app.query(preflightQuery('== Legacy admin'))).rows).toHaveLength(1);
     const formats = await app.query<{ prefix: string; rows: string }>(preflightQuery('== Hash formats'));
-    expect(formats.rows.map((r) => [r.prefix, Number(r.rows)])).toEqual([['$2b$', 7], ['$2a$', 1]]);
+    expect(formats.rows.map((r) => [r.prefix, Number(r.rows)])).toEqual([['$2b$', 7], ['$2a$', 1], ['abab', 1]]);
 
     // 1. The collision aborts: auth empty, no TEMP table left.
     await expect(copy(app, auth)).rejects.toThrow(/held by more than one row/);
     expect(await count(auth, 'auth.users')).toBe(0);
     expect(await count(auth, "pg_class WHERE relname = 'import_users'")).toBe(0);
-    // 2. The pair removed, the NULL timestamp aborts.
+    // 2. The pair removed, the non-bcrypt hash aborts.
     await app.exec(anomalySql('resolve-collision'));
+    await expect(copy(app, auth)).rejects.toThrow(/1 row\(s\) have a hash that is not bcrypt/);
+    expect(await count(auth, 'auth.users')).toBe(0);
+    expect(await count(auth, "pg_class WHERE relname = 'import_users'")).toBe(0);
+    // 3. That row removed, the NULL timestamp aborts.
+    await app.exec(anomalySql('resolve-hash'));
     await expect(copy(app, auth)).rejects.toThrow(/NULL created_at or updated_at/);
     expect(await count(auth, 'auth.users')).toBe(0);
-    // 3. Fixed, the copy passes and the audits match.
+    // 4. Fixed, the copy passes and the audits match.
     await app.exec(anomalySql('resolve-null'));
     await copy(app, auth);
     const { app: a, auth: b } = await audits(app, auth);

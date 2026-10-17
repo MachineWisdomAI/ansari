@@ -69,8 +69,9 @@ $SEED seed | psql "$APP_DATABASE_URL" -X -q -v ON_ERROR_STOP=1 --single-transact
 Expected: no output and exit 0. Run it a second time and it must fail with
 `rehearsal rows already exist; run remove first`.
 
-The seed is seven rows:
+The seed is eight rows:
 - a collision pair: two emails that normalize to one
+- a non-bcrypt (scrypt-shaped) hash, which no legacy row should hold
 - a NULL `updated_at`
 - a mixed-case email with a `$2a$` hash
 - a `$2b$` hash
@@ -84,7 +85,7 @@ The seed is seven rows:
    - `not_normalized` up by 2
    - `null_updated_at` = 1
    - `$2a$`/60 ≥ 1
-   - `not_bcrypt` = 0
+   - `not_bcrypt` = 1, and one `abab`/161 row in the hash formats
    - guests up by 1
    - one more legacy admin
 
@@ -96,16 +97,21 @@ The seed is seven rows:
    - `psql "$AUTH_DATABASE_URL" -X -At -c "select count(*) from pg_class where relname = 'import_users'"` prints `0`
 3. `$SEED resolve-collision | psql "$APP_DATABASE_URL" -X -q -v ON_ERROR_STOP=1 --single-transaction`,
    then `copy.sh` again. **It must exit non-zero** with
+   `cutover copy: 1 row(s) have a hash that is not bcrypt $2a$/$2b$ of length 60`, and both checks
+   above print `0`.
+4. `$SEED resolve-hash | psql "$APP_DATABASE_URL" -X -q -v ON_ERROR_STOP=1 --single-transaction`,
+   then `copy.sh` again. **It must exit non-zero** with
    `cutover copy: 1 row(s) have a NULL created_at or updated_at`, and both checks above print `0`.
-4. `$SEED resolve-null | psql "$APP_DATABASE_URL" -X -q -v ON_ERROR_STOP=1 --single-transaction`,
-   then `copy.sh` a third time. It must print `copy.sh: audit OK`. The runbook continues at
+5. `$SEED resolve-null | psql "$APP_DATABASE_URL" -X -q -v ON_ERROR_STOP=1 --single-transaction`,
+   then `copy.sh` a fourth time. It must print `copy.sh: audit OK`. The runbook continues at
    step 9 (Part B).
 
 | Step | Expected | Exit code | Auth rows after | TEMP table left | Result |
 |---|---|---|---|---|---|
 | A1 preflight | every class counted | | n/a | n/a | |
 | A2 copy with the collision | aborts naming a count | | | | |
-| A3 copy with the NULL timestamp | aborts naming a count | | | | |
+| A3 copy with the non-bcrypt hash | aborts naming a count | | | | |
+| A4 copy with the NULL timestamp | aborts naming a count | | | | |
 
 ## Part B: the pass run, timed
 

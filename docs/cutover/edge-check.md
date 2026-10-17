@@ -31,15 +31,28 @@ headers forged (`<probe>` is the route above for that service):
 
 ```bash
 FORGED=(-H 'X-Real-IP: 192.0.2.66' -H 'X-Forwarded-For: 192.0.2.66' -H 'CF-Connecting-IP: 192.0.2.66')
+URL=https://<domain>/<probe>
 
-# Via Cloudflare (the orange-clouded hostname resolves to Cloudflare):
-curl -s "${FORGED[@]}" https://<domain>/<probe>
+# Via Cloudflare (the orange-clouded hostname resolves to Cloudflare), each family forced:
+curl -4 -s "${FORGED[@]}" "$URL"
+curl -6 -s "${FORGED[@]}" "$URL"     # Cloudflare publishes AAAA
 
-# Direct to Railway's edge, with the same Host and SNI: the edge address is the
-# service's *.up.railway.app A record.
-EDGE_IP=$(dig +short A <service>.up.railway.app | tail -1)
-curl -s "${FORGED[@]}" --resolve "<domain>:443:${EDGE_IP}" https://<domain>/<probe>
+# Direct to Railway's edge, with the same Host and SNI. The edge addresses are the
+# service's *.up.railway.app records:
+EDGE_V4=$(dig +short A <service>.up.railway.app | tail -1)
+curl -4 -s "${FORGED[@]}" --resolve "<domain>:443:${EDGE_V4}" "$URL"
+EDGE_V6=$(dig +short AAAA <service>.up.railway.app | tail -1)
+if [ -n "$EDGE_V6" ]; then
+  curl -6 -s "${FORGED[@]}" --resolve "<domain>:443:[${EDGE_V6}]" "$URL"
+else
+  echo "direct IPv6: not reachable (no AAAA for <service>.up.railway.app)"
+fi
 ```
+
+Record every cell, including an unreachable one, as "not reachable" with the reason. Never
+leave it blank. On 2026-10-17, neither `oqn57cug.up.railway.app` (api-staging) nor
+`vyex12qb.up.railway.app` (api-35) had an AAAA record, so the direct path is IPv4 only unless
+that changes.
 
 Each path passes on two properties:
 1. **Overwrite.** `x_real_ip` is your real address, never `192.0.2.66`. A `cf_connecting_ip` of

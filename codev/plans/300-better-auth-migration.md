@@ -1320,7 +1320,8 @@ Before the merge (this phase):
 - [ ] The window runbook run on staging from `develop`'s merge commit (owner operates; the main
   architect's filled-in command sheet), with `auth-staging.askansari.ai`.
 - [ ] **The guards fire** (R-1): the copy aborts on the collision, with the auth database empty and
-  no TEMP table left, then on the NULL timestamp. Then the pass run:
+  no TEMP table left, then on the non-bcrypt hash, then on the NULL timestamp. Then the pass
+  run:
   - the mixed-case row signs in by its uppercase address
   - both hash prefixes sign in
   - the admin gets the role
