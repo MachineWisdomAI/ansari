@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';
+import type { NextResponse } from 'next/server';
+import { createErrorResponse } from '@/lib/error-response';
 import { z } from 'zod';
 import { ACCOUNT_PATH, AuthServiceUnavailableError, authServiceFetch, type AuthServiceRequest } from './client';
 
@@ -29,17 +30,14 @@ export function weakPasswordDetail(suggestions: string[]): string {
   return `Password is too weak. ${suggestions.join(' ')}`;
 }
 
-export function legacyError(detail: string, status: number, headers?: HeadersInit): NextResponse {
-  return NextResponse.json({ detail }, { status, headers });
-}
 
 /** apps/auth could not answer: fail closed, and never as a credentials error. */
 export function unavailableResponse(): NextResponse {
-  return legacyError(LEGACY_DETAIL.unavailable, 503);
+  return createErrorResponse(LEGACY_DETAIL.unavailable, 503);
 }
 
 export function tooManyRequestsResponse(retryAfter: string | null): NextResponse {
-  return legacyError(
+  return createErrorResponse(
     LEGACY_DETAIL.tooManyRequests,
     429,
     retryAfter ? { 'Retry-After': retryAfter } : undefined

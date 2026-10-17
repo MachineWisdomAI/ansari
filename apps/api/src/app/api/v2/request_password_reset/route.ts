@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { AuthServiceUnavailableError } from '@/lib/auth-service/client';
 import {
-  legacyError,
-  requestPasswordReset,
+    requestPasswordReset,
   tooManyRequestsResponse,
   unavailableResponse,
 } from '@/lib/auth-service/legacy';
 import { limitLegacyRoute } from '@/lib/auth-service/limits';
+import { createErrorResponse } from '@/lib/error-response';
 import { safeErrorMeta } from '@/lib/log';
 
 // Legacy reset request over apps/auth (spec 300, plan phase 8). apps/auth
@@ -28,13 +28,13 @@ export async function POST(request: NextRequest) {
   try {
     body = await request.json();
   } catch {
-    return legacyError('Invalid request body', 422);
+    return createErrorResponse('Invalid request body', 422);
   }
 
   const parseResult = requestSchema.safeParse(body);
   if (!parseResult.success) {
     const errors = parseResult.error.issues.map((i) => i.message);
-    return legacyError(errors.join(', '), 422);
+    return createErrorResponse(errors.join(', '), 422);
   }
 
   try {

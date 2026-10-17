@@ -8,13 +8,13 @@ import { CLIENT_HEADER, getClientId } from '@/lib/attribution';
 import { AuthServiceUnavailableError } from '@/lib/auth-service/client';
 import {
   LEGACY_DETAIL,
-  legacyError,
-  mintJwt,
+    mintJwt,
   signUp,
   tooManyRequestsResponse,
   unavailableResponse,
 } from '@/lib/auth-service/legacy';
 import { limitLegacyRoute } from '@/lib/auth-service/limits';
+import { createErrorResponse } from '@/lib/error-response';
 import { safeErrorMeta } from '@/lib/log';
 
 // Legacy register over apps/auth (spec 300, plan phase 8). The order is the
@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
     const parseResult = registerSchema.safeParse(body);
     if (!parseResult.success) {
       const errors = parseResult.error.issues.map((i) => i.message);
-      return legacyError(errors.join(', '), 422);
+      return createErrorResponse(errors.join(', '), 422);
     }
     const { email, password, first_name, last_name, register_to_mail_list } = parseResult.data;
     const normalized = email.trim().toLowerCase();
@@ -55,16 +55,16 @@ export async function POST(request: NextRequest) {
       .from(users)
       .where(eq(users.email, normalized))
       .limit(1);
-    if (holder) return legacyError(LEGACY_DETAIL.emailTaken, 409);
+    if (holder) return createErrorResponse(LEGACY_DETAIL.emailTaken, 409);
 
     const clientHeader = request.headers.get(CLIENT_HEADER);
     const result = await signUp(
       { email, password, first_name, last_name, register_to_mail_list },
       { headers: clientHeader ? { [CLIENT_HEADER]: clientHeader } : undefined }
     );
-    if (result.kind === 'taken') return legacyError(LEGACY_DETAIL.emailTaken, 409);
-    if (result.kind === 'weak') return legacyError(result.detail, 400);
-    if (result.kind === 'invalid') return legacyError(result.detail, 422);
+    if (result.kind === 'taken') return createErrorResponse(LEGACY_DETAIL.emailTaken, 409);
+    if (result.kind === 'weak') return createErrorResponse(result.detail, 400);
+    if (result.kind === 'invalid') return createErrorResponse(result.detail, 422);
     if (result.kind === 'rate_limited') return tooManyRequestsResponse(result.retryAfter);
 
     const accessToken = await mintJwt(result.sessionToken);
@@ -92,6 +92,6 @@ export async function POST(request: NextRequest) {
     }
     // Sanitized metadata only: a driver error can embed the email or a hash.
     console.error('Registration error:', safeErrorMeta(error));
-    return legacyError('Registration failed', 500);
+    return createErrorResponse('Registration failed', 500);
   }
 }

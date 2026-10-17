@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireUser, bearerToken } from '@/lib/auth/require-user';
 import { AuthServiceUnavailableError } from '@/lib/auth-service/client';
-import { legacyError, revokeSessions, unavailableResponse } from '@/lib/auth-service/legacy';
+import { revokeSessions, unavailableResponse } from '@/lib/auth-service/legacy';
+import { createErrorResponse } from '@/lib/error-response';
 import { safeErrorMeta } from '@/lib/log';
 
 // Legacy logout over apps/auth (spec 300, plan phase 8; G-3): the legacy client
@@ -16,7 +17,7 @@ export async function POST(request: NextRequest) {
     if ('error' in authResult) return authResult.error;
 
     const jwt = bearerToken(request.headers.get('Authorization')) as string;
-    if (!(await revokeSessions(jwt))) return legacyError('Token not found or expired', 401);
+    if (!(await revokeSessions(jwt))) return createErrorResponse('Token not found or expired', 401);
     return NextResponse.json({ message: 'Successfully logged out' });
   } catch (error) {
     if (error instanceof AuthServiceUnavailableError) {
@@ -24,6 +25,6 @@ export async function POST(request: NextRequest) {
       return unavailableResponse();
     }
     console.error('Logout error:', safeErrorMeta(error));
-    return legacyError('Logout failed', 500);
+    return createErrorResponse('Logout failed', 500);
   }
 }

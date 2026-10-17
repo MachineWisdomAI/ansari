@@ -4,7 +4,7 @@ import { requireUser, bearerToken } from '@/lib/auth/require-user';
 import { db } from '@/lib/db/index';
 import { deletedUsers, users } from '@/db/schema';
 import { AuthServiceUnavailableError, deleteAuthUser } from '@/lib/auth-service/client';
-import { legacyError } from '@/lib/auth-service/legacy';
+import { createErrorResponse } from '@/lib/error-response';
 import { safeErrorMeta } from '@/lib/log';
 
 export async function GET(request: NextRequest) {
@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     console.error('Get user error:', safeErrorMeta(error));
-    return legacyError('Failed to get user info', 500);
+    return createErrorResponse('Failed to get user info', 500);
   }
 }
 
@@ -45,7 +45,7 @@ export async function DELETE(request: NextRequest) {
     if ('error' in authResult) return authResult.error;
 
     const { user } = authResult;
-    if (user.systemKey) return legacyError('System accounts cannot be deleted', 403);
+    if (user.systemKey) return createErrorResponse('System accounts cannot be deleted', 403);
 
     await db.transaction(async (tx) => {
       await tx.delete(users).where(eq(users.id, user.id));
@@ -70,6 +70,6 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ message: 'Account successfully deleted' });
   } catch (error) {
     console.error('Delete user error:', safeErrorMeta(error));
-    return legacyError('Failed to delete account', 500);
+    return createErrorResponse('Failed to delete account', 500);
   }
 }

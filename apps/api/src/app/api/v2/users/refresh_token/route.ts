@@ -3,10 +3,10 @@ import { z } from 'zod';
 import { AuthServiceUnavailableError } from '@/lib/auth-service/client';
 import {
   LEGACY_DETAIL,
-  legacyError,
-  mintJwt,
+    mintJwt,
   unavailableResponse,
 } from '@/lib/auth-service/legacy';
+import { createErrorResponse } from '@/lib/error-response';
 import { safeErrorMeta } from '@/lib/log';
 
 // Legacy refresh over apps/auth (spec 300, plan phase 8): the refresh_token is
@@ -24,12 +24,12 @@ export async function POST(request: NextRequest) {
     const parseResult = refreshSchema.safeParse(body);
     if (!parseResult.success) {
       const errors = parseResult.error.issues.map((i) => i.message);
-      return legacyError(errors.join(', '), 422);
+      return createErrorResponse(errors.join(', '), 422);
     }
 
     const { refresh_token } = parseResult.data;
     const accessToken = await mintJwt(refresh_token);
-    if (!accessToken) return legacyError(LEGACY_DETAIL.invalidRefreshToken, 401);
+    if (!accessToken) return createErrorResponse(LEGACY_DETAIL.invalidRefreshToken, 401);
 
     return NextResponse.json({
       access_token: accessToken,
@@ -42,6 +42,6 @@ export async function POST(request: NextRequest) {
       return unavailableResponse();
     }
     console.error('Token refresh error:', safeErrorMeta(error));
-    return legacyError('Token refresh failed', 500);
+    return createErrorResponse('Token refresh failed', 500);
   }
 }

@@ -4,13 +4,13 @@ import { resolveUser } from '@/lib/auth/resolve-user';
 import { AuthServiceUnavailableError } from '@/lib/auth-service/client';
 import {
   LEGACY_DETAIL,
-  legacyError,
-  mintJwt,
+    mintJwt,
   signIn,
   tooManyRequestsResponse,
   unavailableResponse,
 } from '@/lib/auth-service/legacy';
 import { limitLegacyRoute } from '@/lib/auth-service/limits';
+import { createErrorResponse } from '@/lib/error-response';
 import { safeErrorMeta } from '@/lib/log';
 
 // Legacy login over apps/auth (spec 300, plan phase 8): sign in, exchange the
@@ -32,11 +32,11 @@ export async function POST(request: NextRequest) {
     const parseResult = loginSchema.safeParse(body);
     if (!parseResult.success) {
       const errors = parseResult.error.issues.map((i) => i.message);
-      return legacyError(errors.join(', '), 422);
+      return createErrorResponse(errors.join(', '), 422);
     }
 
     const result = await signIn(parseResult.data);
-    if (result.kind === 'invalid') return legacyError(LEGACY_DETAIL.invalidCredentials, 401);
+    if (result.kind === 'invalid') return createErrorResponse(LEGACY_DETAIL.invalidCredentials, 401);
     if (result.kind === 'rate_limited') return tooManyRequestsResponse(result.retryAfter);
 
     const accessToken = await mintJwt(result.sessionToken);
@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
     const resolved = await resolveUser(result.userId, accessToken);
     if (resolved.kind === 'unavailable') return unavailableResponse();
     // An account apps/api refuses (a tombstone, an email conflict) cannot log in.
-    if (resolved.kind === 'refused') return legacyError(LEGACY_DETAIL.invalidCredentials, 401);
+    if (resolved.kind === 'refused') return createErrorResponse(LEGACY_DETAIL.invalidCredentials, 401);
 
     return NextResponse.json({
       status: 'success',
@@ -61,6 +61,6 @@ export async function POST(request: NextRequest) {
       return unavailableResponse();
     }
     console.error('Login error:', safeErrorMeta(error));
-    return legacyError('Login failed', 500);
+    return createErrorResponse('Login failed', 500);
   }
 }

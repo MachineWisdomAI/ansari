@@ -3,12 +3,12 @@ import { z } from 'zod';
 import { AuthServiceUnavailableError } from '@/lib/auth-service/client';
 import {
   LEGACY_DETAIL,
-  legacyError,
-  resetPassword,
+    resetPassword,
   tooManyRequestsResponse,
   unavailableResponse,
 } from '@/lib/auth-service/legacy';
 import { limitLegacyRoute } from '@/lib/auth-service/limits';
+import { createErrorResponse } from '@/lib/error-response';
 import { safeErrorMeta } from '@/lib/log';
 
 // Legacy reset over apps/auth (spec 300, plan phase 8). apps/auth checks the
@@ -31,20 +31,20 @@ export async function POST(request: NextRequest) {
   try {
     body = await request.json();
   } catch {
-    return legacyError('Invalid request body', 422);
+    return createErrorResponse('Invalid request body', 422);
   }
 
   try {
     const parseResult = resetSchema.safeParse(body);
     if (!parseResult.success) {
       const errors = parseResult.error.issues.map((i) => i.message);
-      return legacyError(errors.join(', '), 422);
+      return createErrorResponse(errors.join(', '), 422);
     }
 
     const { reset_token, new_password } = parseResult.data;
     const result = await resetPassword(reset_token, new_password);
-    if (result.kind === 'invalid_token') return legacyError(LEGACY_DETAIL.invalidResetToken, 400);
-    if (result.kind === 'weak') return legacyError(result.detail, 400);
+    if (result.kind === 'invalid_token') return createErrorResponse(LEGACY_DETAIL.invalidResetToken, 400);
+    if (result.kind === 'weak') return createErrorResponse(result.detail, 400);
     if (result.kind === 'rate_limited') return tooManyRequestsResponse(result.retryAfter);
 
     return NextResponse.json({ status: 'success' });
@@ -54,6 +54,6 @@ export async function POST(request: NextRequest) {
       return unavailableResponse();
     }
     console.error('Reset password error:', safeErrorMeta(error));
-    return legacyError('Password reset failed', 500);
+    return createErrorResponse('Password reset failed', 500);
   }
 }
