@@ -153,6 +153,20 @@ describe('scenario 9c: first-use app row', () => {
     expect(result.kind === 'user' && result.user.id).toBe(id);
   });
 
+  it('an existing user costs one read, and never the tombstone table (steady state)', async () => {
+    const { id, jwt } = await signUpDirect(nextEmail('one-read'));
+    await resolveUser(id, jwt);
+    const spy = vi.spyOn(app, 'query');
+    try {
+      const result = await resolveUser(id, jwt);
+      expect(result.kind === 'user' && result.user.id).toBe(id);
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(String(spy.mock.calls[0]?.[0])).not.toMatch(/deleted_users/);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it('a sub apps/auth does not know is refused, and gets no row', async () => {
     const sub = randomUUID();
     const { token } = await service.auth.api.signJWT({ body: { payload: { sub, sid: randomUUID() } } });

@@ -359,7 +359,7 @@ The owner removed `AUTH_INTERNAL_SECRET` and the internal hop in this PR ("no ti
     It now carries the layer's per-IP limits, so an attacker rotating through more than 10 000 IPs
     resets every bucket on that instance. **Residual of Option A, until #318.**
   - An admin whose session was revoked gets **403** ("Admin access required"), not 401, from
-    `requireAdminRole`: `GET /api/account/me` answers 401, which reads as "no account", so the
+    `requireAdmin`: `GET /api/account/me` answers 401, which reads as "no account", so the
     route denies. Acceptable, because access is denied either way.
 
 ### Owner amendment H-7: `ADMIN_EMAILS` removed

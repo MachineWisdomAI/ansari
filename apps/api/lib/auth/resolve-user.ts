@@ -15,9 +15,10 @@ import { safeErrorMeta } from '@/lib/log';
  * A verified JWT's `sub` → the user's `public.users` row (spec 300, "Two
  * databases" rules 2, 3 and 5), in this order:
  *
- * 1. A tombstone: the account was deleted. Retry the auth-side delete if it is
- *    still owed, then refuse. A tombstoned id is never re-created.
- * 2. A row: the user.
+ * 1. A row: the user (one indexed read, every request in steady state).
+ * 2. No row and a tombstone: the account was deleted. Retry the auth-side
+ *    delete if it is still owed, then refuse. A tombstoned id is never
+ *    re-created, and never has a row.
  * 3. No row: the user signed up directly at apps/auth (or a layer insert
  *    failed). Fetch the profile from apps/auth's account endpoint, with the
  *    user's own JWT (owner amendment 2026-10-17), and insert the row
@@ -92,6 +93,16 @@ async function refusalForHolder(email: string, sub: string): Promise<ResolveResu
 }
 
 export async function resolveUser(sub: string, jwt: string): Promise<ResolveResult> {
+  // The app row first: it is every request in steady state, one indexed read.
+  // A tombstoned id never has a row (DELETE me removes the row and writes the
+  // tombstone in one transaction; the first-use insert below re-reads the
+  // tombstone in its own transaction and rolls back; the orphan cleanup does
+  // both together), so a row present means not deleted.
+  const existing = await findUserById(sub);
+  if (existing) return { kind: 'user', user: existing };
+
+  // No row: a deleted account (refuse, and finish a pending auth-side delete)
+  // or a first use. The tombstone is read only here.
   const [tombstone] = await db
     .select()
     .from(deletedUsers)
@@ -101,9 +112,6 @@ export async function resolveUser(sub: string, jwt: string): Promise<ResolveResu
     if (!tombstone.authDeletedAt) await completePendingDelete(sub, jwt);
     return REFUSED;
   }
-
-  const existing = await findUserById(sub);
-  if (existing) return { kind: 'user', user: existing };
 
   let profile;
   try {

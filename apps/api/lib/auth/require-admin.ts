@@ -7,14 +7,15 @@ import { bearerToken, requireUser } from './require-user';
 const ADMIN_ROLE = 'admin';
 
 /**
- * The successor to `requireAdmin` (spec 300, "Two databases" rule 6). The role
- * lives only in the auth database, so every admin request asks apps/auth for
- * it, with the admin's own JWT (owner amendment 2026-10-17), and a demotion, a
- * ban or a revoked session takes effect on the very next request, while the
- * JWT is still valid. When apps/auth cannot answer, the route fails closed
- * with 503 and never grants access.
+ * The admin routes' guard (spec 300, "Two databases" rule 6), paired with
+ * `requireUser`. The legacy guard of the same name read `is_admin` and is gone.
+ * The role lives only in the auth database, so every admin request asks
+ * apps/auth for it, with the admin's own JWT (owner amendment 2026-10-17): a
+ * demotion, a ban or a revoked session takes effect on the very next request,
+ * while the JWT is still valid. When apps/auth cannot answer, the route fails
+ * closed with 503 and never grants access.
  */
-export async function requireAdminRole(
+export async function requireAdmin(
   request: NextRequest
 ): Promise<{ user: User } | { error: NextResponse }> {
   const authResult = await requireUser(request);

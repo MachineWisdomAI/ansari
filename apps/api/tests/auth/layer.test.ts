@@ -623,7 +623,7 @@ describe('against apps/auth in production mode, behind an edge (its client-IP ru
 
 describe('every switched route requires a verified JWT', () => {
   // The route set comes from the source, not from a list: every route file
-  // that calls requireUser or requireAdminRole, and every HTTP method it
+  // that calls requireUser or requireAdmin, and every HTTP method it
   // exports. A handler that skipped its check would answer something else.
   const SRC = path.resolve(__dirname, '../../src/app/api');
   const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
@@ -640,7 +640,7 @@ describe('every switched route requires a verified JWT', () => {
   }
 
   const guarded = routeFiles(SRC).filter((f) =>
-    /\b(requireUser|requireAdminRole)\(request\)/.test(readFileSync(f, 'utf8'))
+    /\b(requireUser|requireAdmin)\(request\)/.test(readFileSync(f, 'utf8'))
   );
 
   it('finds the switched routes', () => {

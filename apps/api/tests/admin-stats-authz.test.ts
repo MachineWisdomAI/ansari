@@ -2,8 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest, NextResponse } from 'next/server';
 
 // Spec 300: route-level authorization chain for /api/v2/admin/stats. Unlike
-// admin-stats-endpoint.test.ts (which mocks requireAdminRole), this exercises
-// the REAL requireAdminRole → apps/auth role path, mocking only requireUser
+// admin-stats-endpoint.test.ts (which mocks requireAdmin), this exercises
+// the REAL requireAdmin → apps/auth role path, mocking only requireUser
 // below it, the role call to apps/auth, and the stats queries. The legacy
 // `is_admin` column no longer grants anything: the role comes from apps/auth.
 
@@ -40,7 +40,7 @@ vi.mock('@/lib/db/stats', () => ({
   getFeedbackSummary: vi.fn().mockResolvedValue({ thumbs_up: 0, thumbs_down: 0, report: 0 }),
 }));
 
-// Real requireAdminRole (NOT mocked) — that is the point of this test.
+// Real requireAdmin (NOT mocked) — that is the point of this test.
 import { AuthServiceUnavailableError } from '@/lib/auth-service/client';
 import { GET } from '../src/app/api/v2/admin/stats/route';
 
@@ -71,7 +71,7 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe('GET /api/v2/admin/stats — authorization chain (real requireAdminRole)', () => {
+describe('GET /api/v2/admin/stats — authorization chain (real requireAdmin)', () => {
   it('returns 403 for role user, even with the legacy is_admin=true', async () => {
     mockAuthenticate.mockResolvedValue({ user: makeUser(true) });
     mockGetAuthRole.mockResolvedValue({ role: 'user', banned: false });

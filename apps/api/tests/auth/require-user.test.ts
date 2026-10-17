@@ -4,7 +4,7 @@ import { NextRequest } from 'next/server';
 import type { PGlite } from '@electric-sql/pglite';
 
 /**
- * `requireUser` and `requireAdminRole` end to end: JWTs minted by the real
+ * `requireUser` and `requireAdmin` end to end: JWTs minted by the real
  * apps/auth, verified against its public JWKS (no credential), users resolved
  * in the app database built from the real journal, the role read with the
  * admin's own JWT (owner amendment 2026-10-17).
@@ -22,7 +22,7 @@ vi.mock('@/lib/db/index', () => ({
 vi.mock('@sentry/nextjs', () => ({ captureMessage: () => {}, setUser: () => {} }));
 
 import { requireUser } from '@/lib/auth/require-user';
-import { requireAdminRole } from '@/lib/auth/require-admin-role';
+import { requireAdmin } from '@/lib/auth/require-admin';
 import { resetEnvCache } from '@/lib/config';
 import {
   appDrizzle,
@@ -141,7 +141,7 @@ describe('requireUser', () => {
   });
 });
 
-describe('requireAdminRole', () => {
+describe('requireAdmin', () => {
   async function adminUser(tag: string) {
     const email = nextEmail(tag);
     const tokens = await signUpTokens(service, email);
@@ -151,27 +151,27 @@ describe('requireAdminRole', () => {
 
   it('an admin passes', async () => {
     const { id, jwt } = await adminUser('admin');
-    const result = await requireAdminRole(request(jwt));
+    const result = await requireAdmin(request(jwt));
     expect('user' in result && result.user.id).toBe(id);
   });
 
   it('a non-admin gets 403', async () => {
     const { jwt } = await signUpTokens(service, nextEmail('plain'));
-    expect(await errorOf(await requireAdminRole(request(jwt)))).toEqual({
+    expect(await errorOf(await requireAdmin(request(jwt)))).toEqual({
       status: 403,
       body: { detail: 'Admin access required' },
     });
   });
 
   it('an unauthenticated request gets 401', async () => {
-    expect((await errorOf(await requireAdminRole(request()))).status).toBe(401);
+    expect((await errorOf(await requireAdmin(request()))).status).toBe(401);
   });
 
   it('a banned admin gets 403 while the JWT is still valid', async () => {
     const { id, jwt } = await adminUser('banned');
-    expect('user' in (await requireAdminRole(request(jwt)))).toBe(true);
+    expect('user' in (await requireAdmin(request(jwt)))).toBe(true);
     await service.client.query('update auth.users set banned = true where id = $1', [id]);
-    expect((await errorOf(await requireAdminRole(request(jwt)))).status).toBe(403);
+    expect((await errorOf(await requireAdmin(request(jwt)))).status).toBe(403);
   });
 
   it('an expired ban no longer blocks', async () => {
@@ -180,34 +180,34 @@ describe('requireAdminRole', () => {
       "update auth.users set banned = true, ban_expires = now() - interval '1 minute' where id = $1",
       [id]
     );
-    expect('user' in (await requireAdminRole(request(jwt)))).toBe(true);
+    expect('user' in (await requireAdmin(request(jwt)))).toBe(true);
   });
 
   it('a demotion takes effect on the very next request', async () => {
     const { id, jwt } = await adminUser('demoted');
-    expect('user' in (await requireAdminRole(request(jwt)))).toBe(true);
+    expect('user' in (await requireAdmin(request(jwt)))).toBe(true);
     await setRole(id, 'user');
-    expect((await errorOf(await requireAdminRole(request(jwt)))).status).toBe(403);
+    expect((await errorOf(await requireAdmin(request(jwt)))).status).toBe(403);
   });
 
   it("a revoked session loses admin on the very next request, though the JWT has not expired", async () => {
     const { jwt, sessionToken } = await adminUser('revoked');
-    expect('user' in (await requireAdminRole(request(jwt)))).toBe(true);
+    expect('user' in (await requireAdmin(request(jwt)))).toBe(true);
     await service.client.query('delete from auth.session where token = $1', [sessionToken]);
-    expect((await errorOf(await requireAdminRole(request(jwt)))).status).toBe(403);
+    expect((await errorOf(await requireAdmin(request(jwt)))).status).toBe(403);
   });
 
   it('an app user apps/auth no longer knows gets 403', async () => {
     const { id, jwt } = await adminUser('gone');
-    expect('user' in (await requireAdminRole(request(jwt)))).toBe(true);
+    expect('user' in (await requireAdmin(request(jwt)))).toBe(true);
     await service.client.query('delete from auth.users where id = $1', [id]);
-    expect((await errorOf(await requireAdminRole(request(jwt)))).status).toBe(403);
+    expect((await errorOf(await requireAdmin(request(jwt)))).status).toBe(403);
   });
 
   it('a role that only contains "admin" is not admin', async () => {
     const { id, jwt } = await signUpTokens(service, nextEmail('lookalike'));
     await setRole(id, 'superadmin');
-    expect((await errorOf(await requireAdminRole(request(jwt)))).status).toBe(403);
+    expect((await errorOf(await requireAdmin(request(jwt)))).status).toBe(403);
   });
 
   it('apps/auth unreachable: 503, never access', async () => {
@@ -217,12 +217,12 @@ describe('requireAdminRole', () => {
     const admin = await signUpTokens(outage, nextEmail('outage-admin'));
     await outage.client.query("update auth.users set role = 'admin' where id = $1", [admin.id]);
     const fresh = await mintJwt(outage, admin.sessionToken);
-    expect('user' in (await requireAdminRole(request(fresh)))).toBe(true);
+    expect('user' in (await requireAdmin(request(fresh)))).toBe(true);
     await outage.close();
 
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      expect(await errorOf(await requireAdminRole(request(fresh)))).toEqual({
+      expect(await errorOf(await requireAdmin(request(fresh)))).toEqual({
         status: 503,
         body: { detail: 'Authentication service unavailable' },
       });
