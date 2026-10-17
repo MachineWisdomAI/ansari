@@ -72,14 +72,14 @@ describe('createAuth() options', () => {
     ]);
   });
 
-  it('disables every admin endpoint, change-email and update-user on the router', () => {
+  it('disables every admin endpoint, change-email, update-user and change-password on the router', () => {
     const adminPaths = Object.values(admin().endpoints).map((e) => e.path);
     expect(adminPaths).toContain('/admin/impersonate-user');
     expect(adminPaths).toContain('/admin/set-role');
     expect(auth.options.disabledPaths).toEqual(
-      expect.arrayContaining([...adminPaths, '/change-email', '/update-user'])
+      expect.arrayContaining([...adminPaths, '/change-email', '/update-user', '/change-password'])
     );
-    expect(BLOCKED_AUTH_PATHS).toEqual([...adminPaths, '/change-email', '/update-user']);
+    expect(BLOCKED_AUTH_PATHS).toEqual([...adminPaths, '/change-email', '/update-user', '/change-password']);
   });
 
   it('runs the origin check under NODE_ENV=test too (#266)', () => {

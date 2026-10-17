@@ -129,10 +129,13 @@ export type AuthExtensions = {
 };
 
 /**
- * Router paths that never answer: the whole admin plugin surface, and the two
- * profile-changing routes (spec 300). The plugin stays only for its `role` and
- * ban columns. better-auth matches `disabledPaths` exactly, so apps/auth also
- * blocks every variant of these paths before its handler.
+ * Router paths that never answer: the whole admin plugin surface, the two
+ * profile-changing routes, and change-password (spec 300). The plugin stays
+ * only for its `role` and ban columns. No client changes a password while
+ * signed in, and Better Auth's route would skip the strength guard and keep
+ * the other sessions alive; a future feature must add both. better-auth
+ * matches `disabledPaths` exactly, so apps/auth also blocks every variant of
+ * these paths before its handler.
  */
 export const ADMIN_PATHS: readonly string[] = Object.values(admin().endpoints).map(
   (endpoint) => endpoint.path
@@ -141,6 +144,7 @@ export const BLOCKED_AUTH_PATHS: readonly string[] = [
   ...ADMIN_PATHS,
   '/change-email',
   '/update-user',
+  '/change-password',
 ];
 
 /**

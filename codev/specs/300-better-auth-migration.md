@@ -584,6 +584,11 @@ issue's dedicated-schema decision): `auth.users`, `auth.session`, `auth.account`
    Better Auth's `change-email` and `update-user` endpoints are **blocked** on `apps/auth`, in the
    same way as the admin surface. Nothing uses them today, and the legacy API has no such route.
    Enabling them later needs a sync design, which is a follow-up.
+   Better Auth's `change-password` is **blocked** the same way (amended 2026-10-17, security review
+   of the cutover PR). No client changes a password while signed in, and the route enforces only
+   the 8-character length and keeps the other sessions alive by default (`revokeOtherSessions:
+   false`). A future change-password feature must add the strength guard that sign-up and reset
+   run, and must revoke the user's other sessions.
 5. **Deletion** (`DELETE /v2/users/me`) runs in this order:
    1. `apps/api` verifies the JWT, and refuses a **system account** before touching anything.
    2. In one app-database transaction, it deletes the `public.users` row (cascading threads,
@@ -926,8 +931,8 @@ rollback deadline passing, and the contract PR's release.
   completed by the next request carrying that `sub`, by a retry, or by the operator script.
 - [ ] System accounts are created lazily in the app database as today, and never appear in the
   auth database.
-- [ ] `change-email` and `update-user` are blocked on `apps/auth`, with the same variant tests as
-  the admin surface.
+- [ ] `change-email`, `update-user` and `change-password` are blocked on `apps/auth`, with the same
+  variant tests as the admin surface (`change-password` amended 2026-10-17).
 
 **Credentials and sessions (`apps/auth`)**
 

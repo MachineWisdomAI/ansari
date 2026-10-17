@@ -1,8 +1,10 @@
-// The admin plugin's HTTP surface, change-email and update-user never answer
+// The admin plugin's HTTP surface, change-email, update-user and change-password never answer
 // on either listener (spec 300; scenario 28). The admin endpoints are
 // enumerated from the installed package, so a better-auth upgrade that adds one
 // is covered without editing this file. Every request carries a VALID admin
 // session, so a pass cannot come from a missing or non-admin session.
+import { request } from 'node:http';
+
 import { BLOCKED_AUTH_PATHS } from '@ansari/auth';
 import { admin } from 'better-auth/plugins';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -116,8 +118,8 @@ describe('the admin surface, from the installed package', () => {
   });
 });
 
-describe('change-email and update-user', () => {
-  it.each(['/change-email', '/update-user'])('%s and its variants get the block response', async (path) => {
+describe('change-email, update-user and change-password', () => {
+  it.each(['/change-email', '/update-user', '/change-password'])('%s and its variants get the block response', async (path) => {
     for (const variant of variants(path)) {
       await expectBlocked(service.publicUrl, variant, 'POST');
       await expectBlocked(service.internalUrl, variant, 'POST', internalHeaders());
@@ -135,6 +137,19 @@ describe('change-email and update-user', () => {
     );
     expect(rows[0]?.name).toBe('Test User');
   });
+
+  // Better Auth's change-password checks only the length and, by default,
+  // keeps the other sessions alive; it must not answer at all.
+  it('the password is unchanged, and the other sessions live on', async () => {
+    const res = await send(service.publicUrl, '/api/auth/change-password', {
+      bearer: adminToken,
+      body: { currentPassword: STRONG_PASSWORD, newPassword: 'aaaaaaaa', revokeOtherSessions: false },
+    });
+    expect(res.status).not.toBe(200);
+    expect((await signIn(service, ADMIN_USER, 'aaaaaaaa')).status).toBe(401);
+    expect((await signIn(service, ADMIN_USER, STRONG_PASSWORD)).status).toBe(200);
+    expect((await send(service.publicUrl, '/api/auth/get-session', { bearer: adminToken })).status).toBe(200);
+  });
 });
 
 describe('near misses still reach Better Auth', () => {
@@ -146,6 +161,7 @@ describe('near misses still reach Better Auth', () => {
   it('a path that only starts with "admin" is not blocked', () => {
     expect(isBlockedPath('/api/auth/administrator')).toBe(false);
     expect(isBlockedPath('/api/auth/update-user-x')).toBe(false);
+    expect(isBlockedPath('/api/auth/change-password-x')).toBe(false);
     expect(isBlockedPath('/api/auth/sign-in/email')).toBe(false);
   });
 });
@@ -159,9 +175,46 @@ describe('canonicalPath', () => {
     ['/api/auth/x/../admin/./set-role', '/api/auth/admin/set-role'],
     ['/api/auth\\admin\\set-role', '/api/auth/admin/set-role'],
     ['/api/auth/admin%2Fset-role?y=1#z', '/api/auth/admin/set-role'],
+    ['http://auth.example/api/auth/admin/set-role', '/api/auth/admin/set-role'],
+    ['HTTPS://auth.example:3100/api/auth/Change-Password/', '/api/auth/change-password'],
     ['/', '/'],
   ])('%s → %s', (raw, expected) => {
     expect(canonicalPath(raw)).toBe(expected);
+  });
+
+  // A request line may carry an absolute-form target (RFC 9112 3.2.2), which
+  // Node passes through as req.url. Sent raw, on the wire, to both listeners.
+  it('an absolute-form request target gets the block response', async () => {
+    for (const base of [service.publicUrl, service.internalUrl]) {
+      const { port } = new URL(base);
+      for (const target of [
+        `http://localhost:${port}/api/auth/admin/list-users`,
+        `http://localhost:${port}/api/auth/change-password`,
+      ]) {
+        const status = await new Promise<number>((resolve, reject) => {
+          const req = request(
+            {
+              host: '127.0.0.1',
+              port: Number(port),
+              method: 'POST',
+              path: target,
+              headers: {
+                'content-type': 'application/json',
+                authorization: `Bearer ${adminToken}`,
+                ...(base === service.internalUrl ? internalHeaders() : {}),
+              },
+            },
+            (res) => {
+              res.resume();
+              resolve(res.statusCode ?? 0);
+            }
+          );
+          req.on('error', reject);
+          req.end('{}');
+        });
+        expect({ base, target, status }).toEqual({ base, target, status: 404 });
+      }
+    }
   });
 
   it('malformed percent-encoding is refused', () => {
