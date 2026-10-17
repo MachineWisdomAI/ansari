@@ -6,6 +6,17 @@
 -- behind. The inserts run in one transaction; a failed guard changes nothing.
 \set ON_ERROR_STOP on
 
+-- copy.sh passes `-v expected_rows=<n>`, the app's count of the rows 01
+-- exports, taken just before the pipe. A pipe that drops mid-stream ends the
+-- \copy at an EOF that looks like end-of-data; this count is what refuses the
+-- subset.
+\if :{?expected_rows}
+\else
+DO $$ BEGIN RAISE EXCEPTION 'cutover copy: expected_rows is not set; run the copy through copy.sh'; END $$;
+\endif
+CREATE TEMP TABLE import_expected (n bigint NOT NULL) ON COMMIT PRESERVE ROWS;
+INSERT INTO import_expected VALUES (:'expected_rows'::bigint);
+
 CREATE TEMP TABLE import_users (
   id uuid NOT NULL,
   email text NOT NULL,
@@ -35,6 +46,9 @@ BEGIN
   SELECT count(*) INTO n FROM import_users;
   IF n = 0 THEN
     RAISE EXCEPTION 'cutover copy: the import is empty (did the export run?)';
+  END IF;
+  IF n <> (SELECT e.n FROM import_expected e) THEN
+    RAISE EXCEPTION 'cutover copy: the import holds % row(s), but the app counted % to copy (a dropped pipe?)', n, (SELECT e.n FROM import_expected e);
   END IF;
   SELECT count(*) INTO n FROM (
     SELECT email FROM import_users GROUP BY email HAVING count(*) > 1
@@ -114,4 +128,5 @@ ON CONFLICT (user_id, provider_id) DO NOTHING;
 COMMIT;
 
 DROP TABLE import_users;
+DROP TABLE import_expected;
 \echo 'cutover copy: committed'

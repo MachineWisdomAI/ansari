@@ -88,10 +88,20 @@ async function seed(app: PGlite, rows: LegacyRow[]): Promise<void> {
   }
 }
 
+/** The count copy.sh passes to 02 as expected_rows. */
+async function expectedRows(app: PGlite): Promise<string> {
+  const [n] = (await runPsqlFile(app, script('01-count-app.sql'))).stdout;
+  return n as string;
+}
+
 /** 01 | 02, as copy.sh runs them. */
 async function copy(app: PGlite, auth: PGlite) {
+  const expected_rows = await expectedRows(app);
   const exported = await runPsqlFile(app, script('01-export-app.sql'));
-  return runPsqlFile(auth, script('02-import-auth.sql'), { stdin: exported.stdout.join('') });
+  return runPsqlFile(auth, script('02-import-auth.sql'), {
+    stdin: exported.stdout.join(''),
+    vars: { expected_rows },
+  });
 }
 
 async function audits(app: PGlite, auth: PGlite) {
@@ -299,7 +309,47 @@ describe('the copy and the audits', () => {
   });
 
   it('an empty import aborts', async () => {
-    await expect(runPsqlFile(auth, script('02-import-auth.sql'), { stdin: '' })).rejects.toThrow(/the import is empty/);
+    await expect(
+      runPsqlFile(auth, script('02-import-auth.sql'), { stdin: '', vars: { expected_rows: '0' } })
+    ).rejects.toThrow(/the import is empty/);
+  });
+
+  // Security review S4: a pipe that drops mid-stream ends \copy at an EOF that
+  // looks like end-of-data, and every guard then passes on the subset.
+  it('a stream cut short aborts on the count, and nothing is written', async () => {
+    await seed(app, [
+      { id: id(1), email: 'a@example.com' },
+      { id: id(2), email: 'b@example.com' },
+      { id: id(3), email: 'c@example.com' },
+    ]);
+    const expected_rows = await expectedRows(app);
+    expect(expected_rows).toBe('3');
+    const exported = (await runPsqlFile(app, script('01-export-app.sql'))).stdout.join('');
+    const cut = exported.split('\n').slice(0, 2).join('\n') + '\n';
+    await expect(
+      runPsqlFile(auth, script('02-import-auth.sql'), { stdin: cut, vars: { expected_rows } })
+    ).rejects.toThrow(/the import holds 2 row\(s\), but the app counted 3 to copy/);
+    expect(await count(auth, 'auth.users')).toBe(0);
+    expect(await count(auth, 'auth.account')).toBe(0);
+    expect(await count(auth, `pg_class WHERE relname IN ('import_users', 'import_expected')`)).toBe(0);
+  });
+
+  it('without expected_rows, 02 refuses to run', async () => {
+    await seed(app, [{ id: id(1), email: 'a@example.com' }]);
+    const exported = (await runPsqlFile(app, script('01-export-app.sql'))).stdout.join('');
+    await expect(runPsqlFile(auth, script('02-import-auth.sql'), { stdin: exported })).rejects.toThrow(
+      /expected_rows is not set/
+    );
+    expect(await count(auth, 'auth.users')).toBe(0);
+  });
+
+  it("the count uses 01's filter, and copy.sh passes it to 02", () => {
+    const where = (file: string) => /FROM public\.users (WHERE [^)\n]*?)(?: ORDER BY|;|\))/.exec(readFileSync(script(file), 'utf8'))?.[1];
+    expect(where('01-count-app.sql')).toBe('WHERE system_key IS NULL');
+    expect(where('01-export-app.sql')).toBe(where('01-count-app.sql'));
+    const sh = readFileSync(script('copy.sh'), 'utf8');
+    expect(sh).toMatch(/expected="\$\(psql_app -At -f "\$here\/01-count-app\.sql"\)"/);
+    expect(sh).toMatch(/psql_auth -v expected_rows="\$expected" -f "\$here\/02-import-auth\.sql"/);
   });
 
   it('scenario 9h: one hash altered in transit fails the hash audit', async () => {
@@ -310,7 +360,10 @@ describe('the copy and the audits', () => {
     const exported = (await runPsqlFile(app, script('01-export-app.sql'))).stdout.join('');
     const tampered = exported.replace(bcryptHash, `${bcryptHash.slice(0, -1)}X`);
     expect(tampered).not.toBe(exported);
-    await runPsqlFile(auth, script('02-import-auth.sql'), { stdin: tampered });
+    await runPsqlFile(auth, script('02-import-auth.sql'), {
+      stdin: tampered,
+      vars: { expected_rows: await expectedRows(app) },
+    });
     const { app: a, auth: b } = await audits(app, auth);
     expect(b).not.toEqual(a);
     const differing = a.filter((line, i) => line !== b[i]).map((line) => line.split('|')[0]);

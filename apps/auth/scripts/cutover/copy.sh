@@ -31,8 +31,10 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 psql_app() { psql "$APP_DATABASE_URL" -X -q -v ON_ERROR_STOP=1 "$@"; }
 psql_auth() { psql "$AUTH_DATABASE_URL" -X -q -v ON_ERROR_STOP=1 "$@"; }
 
-echo "copy.sh: copying non-system users (app → auth)"
-psql_app -f "$here/01-export-app.sql" | psql_auth -f "$here/02-import-auth.sql"
+expected="$(psql_app -At -f "$here/01-count-app.sql")"
+[[ "$expected" =~ ^[0-9]+$ ]] || die "could not count the rows to copy"
+echo "copy.sh: copying $expected non-system user(s) (app → auth)"
+psql_app -f "$here/01-export-app.sql" | psql_auth -v expected_rows="$expected" -f "$here/02-import-auth.sql"
 
 echo "copy.sh: auditing"
 app_audit="$(psql_app -f "$here/03-audit-app.sql")"
