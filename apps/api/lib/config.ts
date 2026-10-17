@@ -130,7 +130,7 @@ const envSchema = z.object({
     for (const name of AUTH_SERVICE_VARS) {
       if (!env[name]) {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: 'custom',
           path: [name],
           message: `${name} is required in production`,
         });
@@ -142,7 +142,7 @@ const envSchema = z.object({
   // completion fails.
   if (env.PRIMARY_BACKEND === 'inkling' && !env.INKLING_API_KEY && !env.TINKER_API_KEY) {
     ctx.addIssue({
-      code: z.ZodIssueCode.custom,
+      code: 'custom',
       path: ['PRIMARY_BACKEND'],
       message:
         'PRIMARY_BACKEND=inkling requires INKLING_API_KEY (or TINKER_API_KEY as fallback)',
