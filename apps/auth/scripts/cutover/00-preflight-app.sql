@@ -25,6 +25,21 @@ SELECT count(*) AS no_password_hash
 FROM public.users
 WHERE system_key IS NULL AND password_hash IS NULL;
 
+\echo '== Hash formats: prefix and length per non-system row, counts only, never a hash (apps/auth verifies bcrypt only as $2a$/$2b$; the copy ABORTS on any row that is not $2a$/$2b$ of length 60)'
+SELECT substr(password_hash, 1, 4) AS prefix,
+       length(password_hash) AS length,
+       count(*) AS rows
+FROM public.users
+WHERE system_key IS NULL
+GROUP BY 1, 2
+ORDER BY 3 DESC, 1, 2;
+
+\echo '== Rows whose hash is not bcrypt $2a$/$2b$ of length 60: must be zero (they could not sign in after the window)'
+SELECT count(*) AS not_bcrypt
+FROM public.users
+WHERE system_key IS NULL
+  AND (password_hash IS NULL OR password_hash !~ '^\$2[ab]\$' OR length(password_hash) <> 60);
+
 \echo '== Rows with a NULL timestamp: must be zero (the copy aborts on any; it copies timestamps exactly)'
 SELECT count(*) FILTER (WHERE created_at IS NULL) AS null_created_at,
        count(*) FILTER (WHERE updated_at IS NULL) AS null_updated_at

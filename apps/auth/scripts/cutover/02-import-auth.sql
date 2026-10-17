@@ -50,6 +50,14 @@ BEGIN
   IF n > 0 THEN
     RAISE EXCEPTION 'cutover copy: % row(s) have no password hash', n;
   END IF;
+  -- apps/auth reads a hash as bcrypt only by its $2a$/$2b$ prefix
+  -- (packages/auth/src/password.ts); anything else would go to scrypt and
+  -- that user could never sign in. The legacy service wrote bcrypt only.
+  SELECT count(*) INTO n FROM import_users
+  WHERE password_hash !~ '^\$2[ab]\$' OR length(password_hash) <> 60;
+  IF n > 0 THEN
+    RAISE EXCEPTION 'cutover copy: % row(s) have a hash that is not bcrypt $2a$/$2b$ of length 60; they could not sign in (00-preflight-app.sql shows the formats)', n;
+  END IF;
   SELECT count(*) INTO n FROM import_users WHERE created_at IS NULL OR updated_at IS NULL;
   IF n > 0 THEN
     RAISE EXCEPTION 'cutover copy: % row(s) have a NULL created_at or updated_at; timestamps are copied exactly, so decide each before the window (00-preflight-app.sql counts them)', n;

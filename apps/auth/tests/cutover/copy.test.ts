@@ -98,6 +98,14 @@ const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')
 const count = async (db: PGlite, sql: string) =>
   Number((await db.query<{ n: number }>(`SELECT count(*)::int AS n FROM ${sql}`)).rows[0]?.n);
 
+/** A query from the preflight, by the heading of its section. */
+function preflightQuery(heading: string): string {
+  const sql = readFileSync(script('00-preflight-app.sql'), 'utf8');
+  const section = sql.slice(sql.indexOf(heading));
+  const start = section.indexOf('SELECT');
+  return section.slice(start, section.indexOf(';', start) + 1);
+}
+
 let app: PGlite;
 let auth: PGlite;
 
@@ -347,14 +355,6 @@ describe('the preflight', () => {
 });
 
 describe('the preflight sees every collision 0011 would abort on', () => {
-  /** A query from the preflight, by the heading of its section. */
-  function preflightQuery(heading: string): string {
-    const sql = readFileSync(script('00-preflight-app.sql'), 'utf8');
-    const section = sql.slice(sql.indexOf(heading));
-    const start = section.indexOf('SELECT');
-    return section.slice(start, section.indexOf(';', start) + 1);
-  }
-
   it('a system row and a user row sharing a normalized email are reported, as 0011 aborts on them', async () => {
     await seed(app, [
       { id: id(1), email: 'Leaderboard@Example.com' },
@@ -379,6 +379,72 @@ describe('the preflight sees every collision 0011 would abort on', () => {
     );
     expect(Number(audit.rows[0]?.not_normalized)).toBe(1);
     expect(Number(audit.rows[0]?.of_which_system)).toBe(1);
+  });
+});
+
+describe('hash formats: only bcrypt $2a$/$2b$ of length 60 is copied', () => {
+  // apps/auth reads a hash as bcrypt only by its prefix (packages/auth/src/password.ts);
+  // any other hash would go to scrypt and its user could never sign in.
+  it('a $2a$ and a $2b$ hash both copy, and both sign in through createAuth', async () => {
+    const hash2a = await bcrypt.hash(PASSWORD, await bcrypt.genSalt(4, 'a'));
+    expect(hash2a.startsWith('$2a$')).toBe(true);
+    expect(bcryptHash.startsWith('$2b$')).toBe(true);
+    await seed(app, [
+      { id: id(1), email: 'a@example.com', hash: hash2a },
+      { id: id(2), email: 'b@example.com' },
+    ]);
+    await copy(app, auth);
+    setAuthEnv('http://localhost:3100');
+    const service = createAuth(drizzleFor(auth));
+    for (const [email, userId] of [['a@example.com', id(1)], ['b@example.com', id(2)]] as const) {
+      const result = await service.api.signInEmail({ body: { email, password: PASSWORD } });
+      expect(result.user.id).toBe(userId);
+    }
+  });
+
+  it.each([
+    ['an scrypt-shaped hash', 'abcdef0123456789abcdef0123456789:' + 'ab'.repeat(64)],
+    ['a $2y$ hash', () => `$2y$${bcryptHash.slice(4)}`],
+    ['a truncated $2b$ hash', () => bcryptHash.slice(0, 59)],
+    ['a $2b$ hash with trailing data', () => `${bcryptHash}x`],
+  ])('%s aborts the copy with no changes, naming a count', async (_label, value) => {
+    const hash = typeof value === 'function' ? value() : value;
+    await seed(app, [
+      { id: id(1), email: 'a@example.com' },
+      { id: id(2), email: 'b@example.com', hash },
+    ]);
+    const error = await copy(app, auth).catch((e: unknown) => e);
+    expect(String(error)).toMatch(/1 row\(s\) have a hash that is not bcrypt \$2a\$\/\$2b\$ of length 60/);
+    expect(String(error)).not.toContain(hash);
+    expect(String(error)).not.toMatch(/b@example\.com/);
+    expect(await count(auth, 'auth.users')).toBe(0);
+    expect(await count(auth, 'auth.account')).toBe(0);
+  });
+
+  it('the preflight prints prefix, length and count per format, never a hash, and counts the rows the copy refuses', async () => {
+    const hash2a = await bcrypt.hash(PASSWORD, await bcrypt.genSalt(4, 'a'));
+    await seed(app, [
+      { id: id(1), email: 'a@example.com', hash: hash2a },
+      { id: id(2), email: 'b@example.com' },
+      { id: id(3), email: 'c@example.com' },
+      { id: id(4), email: 'd@example.com', hash: 'abcdef:0123' },
+      { id: id(5), email: 'ai-skill@system.ansari.chat', hash: 'nologin', systemKey: 'ai-skill' },
+    ]);
+    const run = await runPsqlFile(app, script('00-preflight-app.sql'));
+    const printed = JSON.stringify(run);
+    for (const secret of [hash2a, bcryptHash, 'abcdef:0123']) expect(printed).not.toContain(secret);
+    const formats = await app.query<{ prefix: string; length: number; rows: number }>(
+      preflightQuery('== Hash formats').replace('count(*) AS rows', 'count(*)::int AS rows')
+    );
+    expect(formats.rows).toEqual([
+      { prefix: '$2b$', length: 60, rows: 2 },
+      { prefix: '$2a$', length: 60, rows: 1 },
+      { prefix: 'abcd', length: 11, rows: 1 },
+    ]);
+    const refused = await app.query<{ not_bcrypt: number }>(
+      preflightQuery('== Rows whose hash is not bcrypt').replace('count(*)', 'count(*)::int')
+    );
+    expect(refused.rows[0]?.not_bcrypt).toBe(1);
   });
 });
 
