@@ -1,7 +1,7 @@
 id: '300'
 title: better-auth-migration
 protocol: spir
-phase: implement
+phase: review
 plan_phases:
   - id: phase_1
     title: Legacy contract tests pinned against today's implementation
@@ -41,8 +41,8 @@ plan_phases:
     status: complete
   - id: phase_13
     title: 'Staging verification: edge check, unmodified clients, full rehearsal'
-    status: in_progress
-current_plan_phase: phase_13
+    status: complete
+current_plan_phase: null
 gates:
   spec-approval:
     status: approved
@@ -56,8 +56,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 3
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1
@@ -240,7 +240,7 @@ history:
         file: >-
           /Users/amrmohamed/repos/iaser/ansari/.builders/spir-300/codev/projects/300-better-auth-migration/300-phase_13-iter2-gemini.txt
 started_at: '2026-10-14T03:31:15.359Z'
-updated_at: '2026-10-17T01:15:01.580Z'
+updated_at: '2026-10-17T01:16:53.958Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-10-16T00:28:28.599Z'
@@ -281,6 +281,8 @@ context_refreshes:
   - boundary: plan-phase:phase_13
     at: '2026-10-16T21:19:03.487Z'
     acknowledged_at: '2026-10-16T21:19:17.820Z'
+  - boundary: enter:review
+    at: '2026-10-17T01:16:53.958Z'
 force_advanced:
   phase: phase_12
   iteration: 3
