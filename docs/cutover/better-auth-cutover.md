@@ -49,8 +49,13 @@ migration merges to `develop`, in either journal.
 - Baselines B-1 to B-4 are recorded in [`baselines.md`](baselines.md). `AUTH_RATE_LIMIT_MODE` for
   production is the staging edge check's verdict ([`edge-check.md`](edge-check.md)).
 - The owner has approved the **admin list** (by address), from `00-preflight-app.sql`'s
-  inventory, and confirmed the production Postgres **server major version**; the auth image's
-  `PG_CLIENT_MAJOR` is at least that.
+  inventory.
+- **Postgres 18 on both servers, so the cutover runs 18 to 18.** The production app database
+  has been upgraded from 17 to 18 (Railway's native upgrade, **before** this window, never inside
+  it), and the auth database was provisioned on 18. From the operator
+  environment, `psql "$APP_DATABASE_URL" -X -At -c "select version()"` and
+  `psql "$AUTH_DATABASE_URL" -X -At -c "select version()"` both report `PostgreSQL 18`, and
+  `psql --version` beside them reports 18 (the auth image's `PG_CLIENT_MAJOR`).
 - Every **collision** the preflight lists is decided and resolved (the copy and `0011` abort on
   any), the preflight shows no NULL `created_at`/`updated_at` (the copy aborts on any: it
   copies timestamps exactly), and `not_bcrypt = 0` (the copy aborts on any hash that is not
@@ -135,8 +140,8 @@ It is taken **here**, with `apps/api` offline and before any new code can create
 `cutover_at`" catches every one of them.
 
 **Check:** the deployment is healthy; in the ssh session, `test -f /etc/ansari-auth-image && echo image`
-prints `image`; `psql --version` shows a major at least the server's
-(`psql "$AUTH_DATABASE_URL" -X -At -c "select version()"`); `cutover_at` is in the record.
+prints `image`; `psql --version` shows 18, and `select version()` reports `PostgreSQL 18` on both
+`$APP_DATABASE_URL` and `$AUTH_DATABASE_URL`; `cutover_at` is in the record.
 **Abort:** remove the deployment, bring `apps/api` back online.
 
 ## 7. The auth baseline

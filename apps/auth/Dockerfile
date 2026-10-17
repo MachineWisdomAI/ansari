@@ -26,12 +26,13 @@ RUN corepack enable
 # machine. That needs psql, the repo's SQL and the scripts in a runtime image.
 # Do not slim them out while the cutover tooling exists.
 #
-# psql's major must be >= the Railway Postgres server's major (Debian
-# bookworm's own postgresql-client is 15), so the client comes from the PGDG
+# psql's major must be >= the Railway Postgres server's major. Both servers
+# (app and auth) run Postgres 18 (owner decision, 2026-10-17); Debian
+# bookworm's own postgresql-client is 15, so the client comes from the PGDG
 # repository, pinned by PG_CLIENT_MAJOR. The runbook checks `psql --version`
-# against `select version()` before the window. Client package only; the apt
-# lists and the download tool go in the same layer.
-ARG PG_CLIENT_MAJOR=17
+# against `select version()` on both servers before the window. Client package
+# only; the apt lists and the download tool go in the same layer.
+ARG PG_CLIENT_MAJOR=18
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl \
  && install -d /usr/share/postgresql-common/pgdg \

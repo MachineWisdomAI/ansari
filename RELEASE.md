@@ -144,12 +144,12 @@ verifies JWTs from `apps/auth`, so both services run, each on its own database.
    (cd ../.. && pnpm install) && pnpm build && (cd ../auth && pnpm build)
    ```
 
-2. **Migrate two fresh databases.** Start a disposable Postgres 16, create the app and auth
+2. **Migrate two fresh databases.** Start a disposable Postgres 18 (the production major), create the app and auth
    databases, and apply both full journals to them — this proves a from-scratch install
    works, not just the incremental step:
 
    ```bash
-   docker run --rm -d --name ansari-smoke -e POSTGRES_PASSWORD=postgres -p 5433:5432 postgres:16
+   docker run --rm -d --name ansari-smoke -e POSTGRES_PASSWORD=postgres -p 5433:5432 postgres:18
    psql postgresql://postgres:postgres@localhost:5433/postgres -X -c 'create database ansari_auth'
    export DATABASE_URL=postgresql://postgres:postgres@localhost:5433/postgres
    pnpm db:migrate
