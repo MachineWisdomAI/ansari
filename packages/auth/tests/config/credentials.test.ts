@@ -9,7 +9,7 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { createAuth, INVALID_RESET_TOKEN_MESSAGE, schema, type Auth, type Db } from '../../src/index';
-import { isBcryptHash } from '../../src/password';
+import { isBcryptHash, verifyPassword } from '../../src/password';
 import { drizzleFor, migrate, setAuthEnv } from '../helpers/auth-db';
 import {
   BASE,
@@ -107,6 +107,17 @@ describe('dual verify: legacy bcrypt hashes', () => {
     expect(
       (await signIn(auth, 'legacy-long@example.com', `B${original.slice(1)}`)).res.status
     ).toBe(401);
+  });
+});
+
+describe('a stored hash in neither format', () => {
+  it.each(['nologin', '', 'not-a-hash-at-all'])('%j verifies false, without throwing', async (hash) => {
+    await expect(verifyPassword({ hash, password: STRONG })).resolves.toBe(false);
+  });
+
+  it('a sign-in against one answers 401, like a wrong password, not 500', async () => {
+    await insertLegacyUser(db, { id: randomUUID(), email: 'no-format@example.com', passwordHash: 'nologin' });
+    expect((await signIn(auth, 'no-format@example.com', STRONG)).res.status).toBe(401);
   });
 });
 

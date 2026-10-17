@@ -37,6 +37,11 @@ export async function verifyPassword({
   password: string;
 }): Promise<boolean> {
   if (isBcryptHash(hash)) return bcrypt.compare(password, hash);
+  // better-auth's scrypt hash is `salt:key`, and its verifier throws on a hash
+  // without the separator, which would make sign-in answer 500 rather than the
+  // same 401 as a wrong password. The copy refuses such rows; this is the
+  // second line.
+  if (!hash.includes(':')) return false;
   return scryptVerify({ hash, password });
 }
 
