@@ -823,8 +823,14 @@ After the fixes, 3 of 3 runs were green.
   keep-alive socket just as the in-process `apps/auth` test server closed it at Node's 5 s default.
   The test service (`apps/auth/tests/helpers/service.ts`) now keeps idle sockets for 30 s.
 
-No test was skipped. (Phase 2 briefly skipped `thread-get-contract.test.ts`; the skip was withdrawn
-once develop's fix was merged.)
+This project skipped no test as flaky. (Phase 2 briefly skipped `thread-get-contract.test.ts`; the
+skip was withdrawn once develop's fix was merged.) The suite's four skips predate it or are
+conditional by design:
+- `apps/api/tests/mcp-complete.test.ts`, three `it.skip` marked FLAKY since 2026-08-20 (issue #29
+  era: the route returns non-JSON in the test harness). These are pre-existing and untouched here.
+- `packages/auth/tests/migration/auth-journal-parity.test.ts`, the deployed-state case is
+  `it.skipIf(deployed === null)`. It runs once `AUTH_DEPLOYED_THROUGH` is set at the window; until
+  then there is no deployed auth journal to check.
 
 ## Follow-up Items
 
