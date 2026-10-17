@@ -72,6 +72,8 @@ passes); scan 3 (a `better-auth` re-export in apps/api lib, an `@ansari/auth` de
   from shipping as evidence
 - the runbook's Staging rehearsal section
 - `rehearsal.md` (the procedure)
+- B-1 to B-4 in `docs/cutover/baselines.md`, before the merge (G-4), with any `limits.ts`
+  amendment in the cutover PR: _pending, owner_
 
 **Filled in by the docs-only evidence PR after the staging rehearsal** (R-2: the branch is never
 deployed; staging runs the window from the cutover PR's `develop` merge commit). Counts, checksums
@@ -88,7 +90,6 @@ and timings only:
 | Rollback rehearsal (scenario 9k) | `rehearsal.md` Part E | _pending_ |
 | Edge check, both paths, two networks; staging verdict | `docs/cutover/edge-check.md`; `rehearsal.md` Verdicts | _pending_ |
 | Measured shapes replace the provisional fixture | `docs/cutover/edge-header-shapes.json` | _pending_ |
-| B-1 to B-4; any `limits.ts` amendment | `docs/cutover/baselines.md` | _pending_ |
 
 ## Flaky Tests
 

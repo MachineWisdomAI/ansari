@@ -54,8 +54,10 @@ This spec defines WHAT and WHY. The plan defines HOW and WHEN.
 >   **The branch is never deployed to staging.** Staging deploys only from `develop`, and
 >   production from `main`. **The staging rehearsal is the window, run on staging after the
 >   merge:**
->   1. Before the merge, the owner turns staging `backend` auto-deploy **off**, and sets the
->      staging `auth` service to deploy from `develop` with auto-deploy off.
+>   1. Before the merge, the owner turns auto-deploy **off** on staging `backend` and the staging
+>      web service, and sets the staging `auth` service to deploy from `develop` with auto-deploy
+>      off. The new frontend is deployed by hand at the staging step 12, so the web change at
+>      step 16 is rehearsed in order.
 >   2. The cutover PR merges to `develop` on the owner's word, after the security architect's
 >      review. `develop` is **frozen** from that merge until the production window.
 >   3. The window runbook runs on staging from step 1, with `develop`'s merge commit standing in
@@ -65,8 +67,11 @@ This spec defines WHAT and WHY. The plan defines HOW and WHEN.
 >      - the builder runs the client-side checks: the edge probes on both paths, the released
 >        mobile build against staging, the admin analytics login, the stored-guest sign-in
 >   4. The rollback is rehearsed on staging.
->   5. The evidence (the staging edge verdict, the scaled timings, the baselines) lands as a small
->      docs-only PR to `develop`.
+>   5. The evidence (the staging edge verdict, the measured edge shapes, the scaled timings) lands
+>      as a small docs-only PR to `develop`. The **baselines are not in it**: B-1 to B-4 are
+>      recorded **before the merge** (G-4), because the preflight is read-only and runs on
+>      production at any time. So any `limits.ts` amendment lands in the cutover PR, and the
+>      evidence PR stays docs-only under the freeze.
 >   6. The production window then promotes `develop` to `main`.
 >
 >   **Until the staging check passes, `develop` is not promoted.**

@@ -45,6 +45,14 @@ A clone would have shown two things that staging cannot:
   `railway ssh --service auth --environment staging`, then `cd /repo`, with `AUTH_DATABASE_URL`
   set to the service's `DATABASE_URL` and `APP_DATABASE_URL` typed in the session only.
 
+## Un-rehearsed residuals
+
+- **The production web swap (window step 16).** Staging web already serves `apps/frontend`
+  (title Ansari, built against `api-staging`). So on staging, step 16 rehearses only the rebuild
+  with `EXPO_PUBLIC_AUTH_URL` and the domain checks. Production's change of the web service's
+  Dockerfile path, from legacy web to `apps/frontend`, is not rehearsed. Its rollback,
+  [`rollback.md`](rollback.md) step 4 (restore the previous legacy web deployment), is unchanged.
+
 ## Part A: the guards fire (runbook steps 6 to 8)
 
 In the operator environment, after runbook step 6 and before step 7, seed the staging app

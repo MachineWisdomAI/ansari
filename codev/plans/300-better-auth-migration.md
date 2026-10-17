@@ -1312,6 +1312,9 @@ Before the merge (this phase):
   apps/api (`getRealIp`, the probe).
 - [ ] The counts-only wording in `rehearsal.md` and `baselines.md`.
 - [ ] The review's evidence section, with placeholders.
+- [ ] **B-1 to B-4 recorded in `docs/cutover/baselines.md`** (owner), with any `limits.ts`
+  amendment in the cutover PR. `baselines.md` complete is a precondition of the merge word (G-4;
+  security's ruling under R-2), so the evidence PR stays docs-only.
 
 **Deferred to the docs PR after the merge (owner amendment R-2).** They need a deployment:
 - [ ] The window runbook run on staging from `develop`'s merge commit (owner operates; the main
@@ -1342,7 +1345,6 @@ Before the merge (this phase):
   - the previous image redeployed
   - a migrated user signs in with the legacy password through the legacy code
   - no post-cutover user remains
-- [ ] B-1 to B-4, from the owner.
 
 #### Acceptance Criteria
 

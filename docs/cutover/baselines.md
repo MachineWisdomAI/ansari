@@ -1,8 +1,10 @@
 # Production baselines B-1 to B-4 (spec 300, plan P-2)
 
 The rate-limit numbers in `packages/auth/src/limits.ts` were approved pending these production
-measurements. The operator runs them before the merge; the results, and any amendment to a
-number, are recorded here. An amended number changes `limits.ts` in the cutover PR.
+measurements. **This file complete is a precondition of the cutover PR's merge word** (G-4,
+upheld under owner amendment R-2). The owner runs the baselines before the merge; the results,
+and any amendment to a number, are recorded here. An amended number changes `limits.ts` in the
+cutover PR, never in the docs-only evidence PR, so the freeze on `develop` holds.
 
 **Counts only.** The owner runs `00-preflight-app.sql` against production. This file carries its
 counts and rates, never an id, an address or a row. The preflight's legacy admin inventory (ids
