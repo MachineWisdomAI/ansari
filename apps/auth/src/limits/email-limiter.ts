@@ -123,10 +123,10 @@ export function createPerimeterHooks(options: PerimeterOptions): AuthExtensions 
     if (!email) return;
     const rule = limits.FALLBACK_SIGN_IN_PER_EMAIL;
     const state = await peekWindow(db, emailKey(email, SIGN_IN), rule, now());
-    if (state.count >= rule.max) {
-      await recordLimitHit(email);
-      throw tooManyRequests(state.retryAfter);
-    }
+    // No limit hit is recorded here: countFailedSignIn recorded it when the
+    // lock engaged, and the lock (one window) is shorter than the list-walk
+    // window, so a refusal adds nothing but a rate_limit write per request.
+    if (state.count >= rule.max) throw tooManyRequests(state.retryAfter);
   }
 
   async function countFailedSignIn(ctx: AuthHookContext): Promise<void> {

@@ -157,11 +157,16 @@ describe('the email-mode fallback (scenario 32)', () => {
     for (let i = 0; i < rule.max; i++) {
       expect((await signIn(service, victim, wrong)).status).toBe(401);
     }
+    const walkKey = `walk:${emailHash(victim)}`;
+    const walkAtLock = (await rateLimitRow(service, walkKey))?.last_request;
+    expect(walkAtLock).toBeDefined();
     expect((await signIn(service, victim, STRONG_PASSWORD)).status).toBe(429);
     advance(30);
-    // A refused attempt is not counted, so it cannot extend the lock.
+    // A refused attempt is not counted, so it cannot extend the lock, and it
+    // writes no list-walk row: the lock's engaging failure already did.
     expect((await signIn(service, victim, wrong)).status).toBe(429);
     expect((await rateLimitRow(service, emailKey(victim, '/sign-in/email')))?.count).toBe(rule.max);
+    expect((await rateLimitRow(service, walkKey))?.last_request).toBe(walkAtLock);
     advance(rule.window - 30);
     expect((await signIn(service, victim, STRONG_PASSWORD)).status).toBe(200);
   });
