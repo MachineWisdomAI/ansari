@@ -1037,8 +1037,8 @@ conditional by design:
 - Staging auto-deploy off for backend, auth and web; staging auth deploys from `develop`.
 - Staging DNS for `auth-staging`; orange-cloud the staging hostnames for the probe.
 - A soaked pre-300 `develop` release.
-- The `DEPLOYED_THROUGH` assertion bump to `0011_better_auth_window`. Until it lands, the
-  deployed-state test in `migration-schema-parity.test.ts` is red by design (F4).
+- ~~The `DEPLOYED_THROUGH` assertion bump~~: done in e37fa0c on the owner's word (applied on
+  staging, then production, before each apps/api deploy).
 
 **Integration review:** a deliberate look at `apps/api/lib/auth/resolve-user.ts` (583b045) and
 `apps/auth/scripts/cutover/02-import-auth.sql` (68aef71).
