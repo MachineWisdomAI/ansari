@@ -245,17 +245,21 @@ through `/v2/users/login` (the compatibility layer) and loads its threads.
 ## 14. Edge probe on the `apps/api` production domains (P-4)
 
 On `api.askansari.ai` and `api-35.ansari.chat`, over IPv4 and IPv6 where reachable, both
-properties of [`edge-check.md`](edge-check.md):
+properties of [`edge-check.md`](edge-check.md). Probe **both paths**: through Cloudflare where
+the domain is proxied (`api.askansari.ai`), and direct to Railway's edge with `--resolve`, as in
+the method:
 
 ```bash
-curl -s -H 'X-Real-IP: 203.0.113.9' -H 'X-Forwarded-For: 203.0.113.9' https://api.askansari.ai/api/v2/_diag/client-ip
+curl -s -H 'X-Real-IP: 192.0.2.66' -H 'X-Forwarded-For: 192.0.2.66' -H 'CF-Connecting-IP: 192.0.2.66' https://api.askansari.ai/api/v2/_diag/client-ip
 ```
 
-**Check:** **overwrite:** `x_real_ip` is your real address, never `203.0.113.9`; **distinctness:**
-the same probe from a second network (a phone hotspot) shows a different `x_real_ip`. Record
-both, per domain, in `edge-check.md`.
-**Abort (no rollback):** if either property fails, set `AUTH_RATE_LIMIT_MODE=email` on `auth` and
-redeploy it. It can only move to `email` here, never to `ip`.
+**Check:** **overwrite:** on every path, `x_real_ip` is your real address, never `192.0.2.66`;
+**distinctness:** the same probe from a second network (a phone hotspot) shows a different
+`x_real_ip`. Record both, per domain and path, in `edge-check.md`.
+**Abort (no rollback):** if either property fails, set `AUTH_RATE_LIMIT_MODE=email` on `auth`,
+redeploy it, and tell the security architect at once. Email mode switches off only the per-IP
+sign-in and sign-up rules, and the other IP-keyed limits stay on a bad key (the finding in
+`edge-check.md`). The mode can only move to `email` here, never to `ip`.
 
 ## 15. Attach `auth.askansari.ai`
 
@@ -266,8 +270,9 @@ before the web swap: the new web app signs in, and provisions guests, only throu
 `curl -s -o /dev/null -w '%{http_code}' https://auth.askansari.ai/internal/users/00000000-0000-0000-0000-000000000000/profile`
 prints `404` (the internal routes are not on the public listener); and the edge properties, as
 in step 14, on its probe:
-`curl -s -H 'X-Real-IP: 203.0.113.9' -H 'X-Forwarded-For: 203.0.113.9' https://auth.askansari.ai/__diag/client-ip`
-shows your real address, and a second network shows a different one. Record them.
+`curl -s -H 'X-Real-IP: 192.0.2.66' -H 'X-Forwarded-For: 192.0.2.66' -H 'CF-Connecting-IP: 192.0.2.66' https://auth.askansari.ai/__diag/client-ip`
+shows your real address on every path the domain has (via Cloudflare if proxied, and direct with
+`--resolve`), and a second network shows a different one. Record them.
 **Abort:** detach the domain; follow [`rollback.md`](rollback.md). An edge failure alone is step
 14's abort: `AUTH_RATE_LIMIT_MODE=email`, redeploy `auth`.
 

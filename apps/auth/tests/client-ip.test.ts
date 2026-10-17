@@ -2,6 +2,10 @@
 // amendments A and B; scenarios 21 and 22). Rate-limit buckets are read back
 // from auth.rate_limit, so each test shows WHICH key a request landed in, not
 // only whether it was limited.
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { limits } from '@ansari/auth';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -23,6 +27,12 @@ import {
 } from './helpers/service';
 
 const SIGN_IN = '/api/auth/sign-in/email';
+
+type EdgeShape = { name: string; headers: Record<string, string>; client?: string; never?: string[] };
+/** Header shapes behind Railway's edge, per path (docs/cutover/edge-check.md). */
+const EDGE = JSON.parse(
+  readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../../docs/cutover/edge-header-shapes.json'), 'utf8')
+) as { shapes: EdgeShape[]; withoutTheEdge: EdgeShape[] };
 const wrongPassword = { email: 'nobody@example.com', password: 'Wrong-Passw0rd!' };
 
 let service: Service;
@@ -288,6 +298,43 @@ describe('ipBucket groups exactly like better-auth', () => {
     async (ip) => {
       await failedSignIn(service.publicUrl, ip);
       expect(await rateLimitKeys(service)).toContain(`${ipBucket(ip)}|/sign-in/email`);
+    }
+  );
+});
+
+describe('edge header shapes (docs/cutover/edge-header-shapes.json): only X-Real-IP is the client', () => {
+  it('the fixture has both paths and both no-edge shapes', () => {
+    expect(EDGE.shapes).toHaveLength(2);
+    expect(EDGE.withoutTheEdge).toHaveLength(2);
+  });
+
+  it.each(EDGE.shapes.map((s) => [s.name, s] as const))(
+    '%s: the bucket is the X-Real-IP client; cf-connecting-ip and x-forwarded-for are never a key',
+    async (_name, shape) => {
+      const prod = await startService({ production: true });
+      try {
+        const res = await failedSignIn(prod.publicUrl, null, shape.headers);
+        expect(res.status).toBe(401);
+        const keys = await rateLimitKeys(prod);
+        expect(keys).toEqual([`${shape.client}|/sign-in/email`]);
+        for (const other of shape.never ?? []) expect(keys.some((k) => k.includes(other))).toBe(false);
+      } finally {
+        await prod.close();
+      }
+    }
+  );
+
+  it.each(EDGE.withoutTheEdge.map((s) => [s.name, s] as const))(
+    '%s: the production 400, and no bucket',
+    async (_name, shape) => {
+      const prod = await startService({ production: true });
+      try {
+        const res = await failedSignIn(prod.publicUrl, null, shape.headers);
+        expect(res.status).toBe(400);
+        expect(await rateLimitKeys(prod)).toEqual([]);
+      } finally {
+        await prod.close();
+      }
     }
   );
 });

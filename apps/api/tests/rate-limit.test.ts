@@ -1,6 +1,15 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { checkRateLimit, resetRateLimitStore, getClientIp, getRealIp } from '../lib/rate-limit';
 import { NextRequest } from 'next/server';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+type EdgeShape = { name: string; headers: Record<string, string>; client?: string };
+/** Header shapes behind Railway's edge, per path (docs/cutover/edge-check.md); shared with apps/auth's tests. */
+const EDGE = JSON.parse(
+  readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../../docs/cutover/edge-header-shapes.json'), 'utf8')
+) as { shapes: EdgeShape[]; withoutTheEdge: EdgeShape[] };
 
 describe('Rate limiter', () => {
   beforeEach(() => {
@@ -125,5 +134,21 @@ describe('Rate limiter', () => {
       expect(getRealIp(req({ 'x-forwarded-for': '1.2.3.4' }))).toBeNull();
       expect(getRealIp(req({ 'x-real-ip': '1.2.3.4' }))).toBe('1.2.3.4');
     });
+
+    it.each(EDGE.shapes.map((s) => [s.name, s] as const))(
+      'edge shape %s: the X-Real-IP client, never cf-connecting-ip or x-forwarded-for',
+      (_name, shape) => {
+        expect(shape.client).toBeTruthy();
+        expect(getRealIp(req(shape.headers))).toBe(shape.client);
+        expect(getClientIp(req(shape.headers))).toBe(shape.client);
+      }
+    );
+
+    it.each(EDGE.withoutTheEdge.map((s) => [s.name, s] as const))(
+      'no edge, %s: no client IP (the layer forwards none)',
+      (_name, shape) => {
+        expect(getRealIp(req(shape.headers))).toBeNull();
+      }
+    );
   });
 });

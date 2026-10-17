@@ -120,11 +120,14 @@ describe('the window runbook', () => {
   });
 
   it.each([/Edge probe on the `apps\/api` production domains/, /Attach `auth\.askansari\.ai`/])(
-    '%s checks both edge properties: forged headers are overwritten, and two networks differ',
+    '%s checks both edge properties on both paths: all three client-IP headers forged, and two networks differ',
     (title) => {
       const step = steps[stepOf(title) - 1] as string;
-      expect(step).toMatch(/-H 'X-Real-IP: 203\.0\.113\.9' -H 'X-Forwarded-For: 203\.0\.113\.9'/);
+      expect(step).toMatch(
+        /-H 'X-Real-IP: 192\.0\.2\.66' -H 'X-Forwarded-For: 192\.0\.2\.66' -H 'CF-Connecting-IP: 192\.0\.2\.66'/
+      );
       expect(step).toMatch(/second network/);
+      expect(step).toMatch(/--resolve/);
     }
   );
 

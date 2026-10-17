@@ -1,5 +1,9 @@
 // The rest of the public face: CORS (scenario 28), the edge-check diag route
 // (plan P-4) and the health probe.
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { TEST_LAYER_ORIGIN } from '../../../packages/auth/tests/helpers/auth-db';
@@ -148,6 +152,29 @@ describe('CORS (scenario 28)', () => {
   });
 });
 
+/** The edge shapes (docs/cutover/edge-header-shapes.json) as the probe must report them. */
+const EDGE_SHAPES = (
+  JSON.parse(
+    readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../../docs/cutover/edge-header-shapes.json'), 'utf8')
+  ) as { shapes: { name: string; headers: Record<string, string> }[] }
+).shapes;
+const DIAG_SHAPES = [
+  ['via-Cloudflare', EDGE_SHAPES[0]!, {
+    x_real_ip: '203.0.113.10',
+    x_forwarded_for_entries: 2,
+    x_forwarded_for_first_is_x_real_ip: false,
+    cf_connecting_ip: '203.0.113.10',
+    via_cloudflare: true,
+  }],
+  ['direct', EDGE_SHAPES[1]!, {
+    x_real_ip: '203.0.113.20',
+    x_forwarded_for_entries: 2,
+    x_forwarded_for_first_is_x_real_ip: true,
+    cf_connecting_ip: '192.0.2.66',
+    via_cloudflare: false,
+  }],
+] as const;
+
 describe('the diag route (P-4)', () => {
   it("returns only the caller's own X-Real-IP and the X-Forwarded-For entry count, no-store", async () => {
     const res = await send(service.publicUrl, '/__diag/client-ip', {
@@ -157,13 +184,34 @@ describe('the diag route (P-4)', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toBe('no-store');
     const text = await res.text();
-    expect(JSON.parse(text)).toEqual({ x_real_ip: '203.0.113.150', x_forwarded_for_entries: 2 });
+    expect(JSON.parse(text)).toEqual({
+      x_real_ip: '203.0.113.150',
+      x_forwarded_for_entries: 2,
+      x_forwarded_for_first_is_x_real_ip: false,
+      cf_connecting_ip: null,
+      via_cloudflare: false,
+    });
     expect(text).not.toContain('198.51.100');
   });
 
   it('reports no IP as null', async () => {
     const res = await send(service.publicUrl, '/__diag/client-ip', { ip: null });
-    expect(await res.json()).toEqual({ x_real_ip: null, x_forwarded_for_entries: 0 });
+    expect(await res.json()).toEqual({
+      x_real_ip: null,
+      x_forwarded_for_entries: 0,
+      x_forwarded_for_first_is_x_real_ip: false,
+      cf_connecting_ip: null,
+      via_cloudflare: false,
+    });
+  });
+
+  it.each(DIAG_SHAPES)('records the %s shape, with no X-Forwarded-For value but the caller\'s', async (_name, shape, expected) => {
+    const res = await send(service.publicUrl, '/__diag/client-ip', { ip: null, headers: shape.headers });
+    const text = await res.text();
+    expect(JSON.parse(text)).toEqual(expected);
+    for (const entry of (shape.headers['x-forwarded-for'] ?? '').split(',').map((e) => e.trim())) {
+      if (entry && entry !== shape.headers['x-real-ip']) expect(text).not.toContain(entry);
+    }
   });
 
   it('is not on the internal listener', async () => {
