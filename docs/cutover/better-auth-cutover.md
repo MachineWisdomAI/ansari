@@ -132,7 +132,14 @@ forward run, `rehearsal-anomalies.ts remove | psql …` deletes the seeded rows.
   bcrypt `$2a$`/`$2b$` of length 60: apps/auth would send it to scrypt and the user could not
   sign in).
 - Phases 10b (#304) and 10c (#306) are merged into `builder/spir-300`, so the cutover PR carries
-  the reset and delete-account pages (legacy web retires in step 16).
+  the reset and delete-account pages (legacy web retires in step 16). #307 (the public
+  shared-thread page, so links already in the wild still open) is merged.
+- **#317 is merged before the window** (parent #305; the app's builder, with main reviewing the
+  `Dockerfile.web` hunk). It is the web image's build guard: `Dockerfile.web` requires both
+  `EXPO_PUBLIC_API_URL` and `EXPO_PUBLIC_AUTH_URL` build args unconditionally, with no production
+  flag, and refuses a pair that names different hosts. It is negative-tested with the args unset,
+  set, and mixed. Without it, a web image built without the args falls back to the staging
+  defaults and signs production users in against staging.
 - The cutover PR is approved and merged to `develop`; record its merge commit.
 - Railway (main architect's runbook section): the `auth` service exists (in production it is
   created for this window, or found; in staging it already exists) with its variables set
