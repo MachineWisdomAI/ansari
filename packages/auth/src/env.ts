@@ -12,7 +12,8 @@
 // `createAuth()`/`createDb()`.
 import { z } from 'zod';
 
-const envSchema = z.object({
+/** Exported for the env-template test (apps/auth/tests/env-templates.test.ts). */
+export const envSchema = z.object({
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
   BETTER_AUTH_SECRET: z
     .string()

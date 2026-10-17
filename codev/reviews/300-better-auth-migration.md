@@ -433,6 +433,18 @@ reviews, in two batches. The app architect re-reviewed the F3 frontend change an
 - **Residuals**: the admin startup check and the JWKS rotation → **Accepted**; recorded under
   "Accepted residuals" above.
 
+**Batch 3 (from security's 3-way consult on #315, plus main's rulings):**
+- **@babel/traverse** (main): react-native-worklets' Babel plugin requires `@babel/traverse` and
+  `@babel/generator` without declaring them, and resolved them only through hoisting.
+  `pnpm-workspace.yaml` gains `packageExtensions` for both (8713c25). Proven with an incremental
+  install from the pre-10c59ff `node_modules`. Main approved.
+- **B3-1**: `apps/auth`'s env templates lacked the variables the schema requires, and the dev
+  `CORS_ORIGIN` excluded Metro web → **Addressed**: both files carry every schema key (the
+  optional URLs are commented out), and `tests/env-templates.test.ts` checks names and schema.
+- **B3-2**: the PR body still described the templates as held → **Addressed**.
+- **Runbook** (main): step 1 now requires #307 and #317 (the web image's build guard) to be
+  merged before the window (ca1d555).
+
 ### Specify Phase (Round 1)
 
 #### Gemini — APPROVE
@@ -615,7 +627,7 @@ reviews, in two batches. The app architect re-reviewed the F3 frontend change an
 - Lane failed (agy exit 3) — not counted as a review.
 
 #### Codex — REQUEST_CHANGES
-- **Concern**: `apps/auth`'s env example and CI env file omit required variables, and `CORS_ORIGIN` excludes `:8081` → **Rebutted** (deferred): correct, but the security architect held them pending the owner's decision on env-file access. Drafts exist, and the startup error names the missing variables.
+- **Concern**: `apps/auth`'s env example and CI env file omit required variables, and `CORS_ORIGIN` excludes `:8081` → **Deferred**, then **Addressed** in the review phase (B3-1): the security architect held them through phase 11; the review-phase commit fills both files from the schema, with a test.
 - **Concern**: `CONTRIBUTING.md` implies `pnpm dev` starts auth → **Addressed**: it now documents `pnpm auth dev`.
 
 ### Phase 11 (Round 2)
@@ -688,12 +700,22 @@ reviews, in two batches. The app architect re-reviewed the F3 frontend change an
 - **Concern**: the deployed-state parity test is red at `0008` → **Rebutted**: by design (F4).
   The `DEPLOYED_THROUGH` bump is the owner's assertion commit in this PR; main and security
   confirmed this.
-- **Concern**: `apps/auth`'s env example and CI env files are incomplete → **Rebutted**: held for
-  the owner's decision on env-file access (as in phase 11); listed in the PR body.
+- **Concern**: `apps/auth`'s env example and CI env files are incomplete → **Rebutted** at the
+  time (held, as in phase 11), then **Addressed** when security's batch 3 (B3-1) asked for them:
+  every schema key, the Metro origin, and `tests/env-templates.test.ts`.
 - **Concern**: B-1 to B-4 are empty → **Rebutted**: they gate the owner's merge word, not the
   open PR (R-2; phase 13 ruling).
 - **Concern**: the review said no tests were skipped → **Addressed** (016f866): the four skips
   are named under Flaky Tests.
+
+### Review Phase — PR #315 (Round 2)
+
+#### Gemini — APPROVE
+- No concerns raised.
+
+#### Codex — APPROVE
+- No concerns raised. It accepted the three owner-controlled items as merge gates, and confirmed
+  the skipped-test correction.
 
 ## Lessons Learned
 
@@ -742,8 +764,10 @@ reviews, in two batches. The app architect re-reviewed the F3 frontend change an
   security spot-checks, and flagged for the integration review.
 - **Phase 13 started blocked** on external preconditions: no DNS, no baselines, no soaked release.
   Owner amendments R-1 and R-2 reshaped it so the pre-merge work needed no deployment.
-- **The env template files could not be edited** in phases 3–11, because the builder's permissions
-  deny reading them. They remain with the owner.
+- **The env template files were held** from phase 3 to the review phase, on the belief that the
+  builder's permissions denied reading them. In the review phase a direct read of the two tracked
+  templates was allowed; only shell commands naming them are refused. They were filled in then
+  (B3-1). The belief had been carried forward untested since phase 3.
 
 ### What Would Be Done Differently
 
@@ -855,8 +879,6 @@ conditional by design:
 - Staging auto-deploy off for backend, auth and web; staging auth deploys from `develop`.
 - Staging DNS for `auth-staging`; orange-cloud the staging hostnames for the probe.
 - A soaked pre-300 `develop` release.
-- `apps/auth`'s env example and CI env file. Drafts exist; they wait on the owner's file-access
-  decision.
 - The `DEPLOYED_THROUGH` assertion bump to `0011_better_auth_window`. Until it lands, the
   deployed-state test in `migration-schema-parity.test.ts` is red by design (F4).
 
