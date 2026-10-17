@@ -311,6 +311,14 @@ it. Its checklist also removes `backend`'s legacy variables (`JWT_SECRET`,
 `ACCESS_TOKEN_EXPIRY_HOURS`, `REFRESH_TOKEN_EXPIRY_HOURS`, `ADMIN_EMAILS`), which stay set until
 then so the rollback can boot the previous `apps/api`.
 
+**No app migration is generated between the cutover merge and the contract PR.** The latest
+`apps/api` drizzle snapshot (`0010_snapshot.json`) still records `tokens` and the three legacy
+`users` columns, and the hand-written `0011` has no snapshot. Any `drizzle-kit generate` for
+`apps/api` in that interval therefore emits their drops as a surprise diff, inside an unrelated
+migration that would run before the rollback deadline. The contract PR is the first generate; its
+SQL is checked in review to contain **only** those drops (the three columns and `tokens`), and
+nothing else.
+
 ## Rollback
 
 - **Code:** Railway dashboard → `backend` service → Deployments → select the

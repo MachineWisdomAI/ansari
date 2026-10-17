@@ -1370,7 +1370,10 @@ or emails.
   filed (the layer's removal with I-3's metric, the profile sync design, guest cleanup), and #16
   and #49 are closed with the post-cutover behaviour.
 - **The contract PR** (the first release after the deadline passes; a new branch from
-  `origin/develop`):
+  `origin/develop`). Until it merges, **no `apps/api` migration is generated**: the latest
+  snapshot (`0010_snapshot.json`) still records `tokens` and the three legacy columns and `0011`
+  has no snapshot, so any generate emits their drops (security review, 2026-10-17). The contract
+  PR's generated SQL is checked to contain only those drops.
   - `apps/api/drizzle/00NN_better_auth_contract.sql`: drop `password_hash`, `is_admin` and
     `session_version`, and drop `tokens`. It is numbered by the rule and has **its own
     `DEPLOYED_THROUGH` bump**.
