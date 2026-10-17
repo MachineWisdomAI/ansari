@@ -53,7 +53,7 @@ createdb ansari_auth
 cd apps/auth
 cp .env.example .env    # DATABASE_URL = the ansari_auth owner URL; the service's
                         # startup error names any variable still missing
-psql -v ON_ERROR_STOP=1 --single-transaction -d ansari_auth \
+psql -X -v ON_ERROR_STOP=1 --single-transaction -d ansari_auth \
   -f ../../packages/auth/drizzle/0000_auth_schema.sql
 cd ../..
 

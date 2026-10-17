@@ -105,7 +105,7 @@ it('thread /documents vs thread GET: latency on a staging-sized 50-message threa
   const client = new PGlite();
   h.db = drizzle(client, { schema });
   await client.exec(`
-    CREATE TABLE users (id uuid PRIMARY KEY, email text UNIQUE NOT NULL, password_hash text NOT NULL,
+    CREATE TABLE users (id uuid PRIMARY KEY, email text UNIQUE NOT NULL, password_hash text,
       created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now());
     CREATE TABLE threads (id uuid PRIMARY KEY, user_id uuid NOT NULL REFERENCES users(id), name text,
       source text DEFAULT 'web', client text, created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now());
@@ -115,7 +115,7 @@ it('thread /documents vs thread GET: latency on a staging-sized 50-message threa
       raw_payload jsonb, tool_calls jsonb, model_provider text, model_id text, created_at timestamptz DEFAULT now());
     CREATE INDEX idx_messages_thread ON messages (thread_id, created_at);
   `);
-  await client.query(`INSERT INTO users (id, email, password_hash) VALUES ($1, 'b@example.com', 'x')`, [USER_ID]);
+  await client.query(`INSERT INTO users (id, email) VALUES ($1, 'b@example.com')`, [USER_ID]);
   await client.query(`INSERT INTO threads (id, user_id, name) VALUES ($1, $2, 'bench')`, [THREAD_ID, USER_ID]);
 
   for (let i = 0; i < 25; i++) {
