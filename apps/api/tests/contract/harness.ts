@@ -8,9 +8,9 @@ import * as schema from '@/db/schema';
 import bcrypt from 'bcrypt';
 import { resetEnvCache } from '@/lib/config';
 import { resetJwksCache } from '@/lib/auth/verify-jwt';
+import { resetRateLimitStore } from '@/lib/rate-limit';
 import {
   freshIp,
-  INTERNAL_SECRET,
   startService,
   TEST_ADMIN_EMAIL,
   type Service,
@@ -39,8 +39,9 @@ import { GET as adminStats } from '../../src/app/api/v2/admin/stats/route';
  * mocked: real route handlers, real `lib/db` helpers, real bcrypt, real JWTs.
  *
  * Phase 8 (`better-auth`): the routes are the compatibility layer, so the
- * backend is the real apps/auth (both listeners over its own pglite, the
- * second database), reached over HTTP on localhost. Its reset mailer records
+ * backend is the real apps/auth (its one listener over its own pglite, the
+ * second database), reached over HTTP on localhost, anonymously, as the layer
+ * reaches it in production. Its reset mailer records
  * into the same `sentEmails` the legacy backend's Resend mock did. The legacy
  * backend is gone with the legacy routes; its setup is in git history (phase 1).
  */
@@ -161,11 +162,11 @@ function setApiEnv(service: Service): void {
   process.env.DATABASE_URL = 'postgresql://placeholder:placeholder@localhost:5432/placeholder';
   process.env.KALEMAT_API_KEY = 'placeholder';
   process.env.USUL_API_TOKEN = 'placeholder';
-  process.env.AUTH_INTERNAL_URL = service.internalUrl;
-  process.env.AUTH_INTERNAL_SECRET = INTERNAL_SECRET;
+  process.env.AUTH_URL = service.publicUrl;
   process.env.AUTH_LAYER_ORIGIN = LAYER_ORIGIN;
   resetEnvCache();
   resetJwksCache();
+  resetRateLimitStore();
 }
 
 function toRequest(route: RouteName, init: CallInit): NextRequest {

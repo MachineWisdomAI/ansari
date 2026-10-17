@@ -45,7 +45,7 @@ describe('apps/auth/.env.example', () => {
   const documented = new Set([...set.keys(), ...commentedKeys(text)]);
 
   it('names every variable the schema declares, and nothing else', () => {
-    expect(SCHEMA_KEYS.length).toBeGreaterThanOrEqual(17);
+    expect(SCHEMA_KEYS.length).toBeGreaterThanOrEqual(14);
     expect(SCHEMA_KEYS.filter((key) => !documented.has(key))).toEqual([]);
     expect([...documented].filter((key) => !SCHEMA_KEYS.includes(key))).toEqual([]);
   });
@@ -63,7 +63,7 @@ describe('apps/auth/.env.ci', () => {
   const set = assignments(read('.env.ci'));
 
   it('sets every variable the schema requires', () => {
-    expect(REQUIRED_KEYS.length).toBeGreaterThanOrEqual(10);
+    expect(REQUIRED_KEYS.length).toBeGreaterThanOrEqual(9);
     expect(REQUIRED_KEYS.filter((key) => !set.has(key))).toEqual([]);
   });
 

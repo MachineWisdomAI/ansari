@@ -9,8 +9,9 @@
  *
  * A ban sets `banned`, `ban_reason` and `ban_expires` (none: permanent) and
  * deletes every session of the user in the same transaction. Sign-in is then
- * refused by the admin plugin, and the internal role endpoint reports
- * `banned`, so apps/api's admin routes refuse at once. JWTs already issued
+ * refused by the admin plugin, and the account endpoint stops answering for
+ * the user's tokens (their sessions are gone), so apps/api's admin routes
+ * refuse at once. JWTs already issued
  * stay valid until their `exp` (15 minutes) elsewhere: the accepted window.
  */
 import 'dotenv/config';

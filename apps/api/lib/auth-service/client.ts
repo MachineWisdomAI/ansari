@@ -1,19 +1,17 @@
+import { decodeJwt } from 'jose';
 import { z } from 'zod';
 import { config } from '@/lib/config';
 
 /**
- * The one HTTP client for apps/auth (spec 300, "Two databases" rule 8; plan
- * P-1). Every call goes to the internal listener (`AUTH_INTERNAL_URL`, the
- * private network) with the internal credential, and times out after 3 s.
+ * The one HTTP client for apps/auth (spec 300, "Two databases" rule 8; owner
+ * amendment 2026-10-17). apps/api reaches apps/auth like any other client: at
+ * its public origin (`AUTH_URL`), with no shared credential. Calls about a
+ * user carry that user's own JWT; the layer's calls are anonymous. Every call
+ * times out after 3 s.
  *
- * Nothing here logs: a body can carry an email, and the headers carry the
- * credential and a bearer. Callers log ids and statuses only.
+ * Nothing here logs: a body can carry an email, and the headers carry a
+ * bearer. Callers log ids and statuses only.
  */
-
-/** The credential only apps/api and apps/auth hold (apps/auth `middleware/client-ip.ts`). */
-export const INTERNAL_AUTH_HEADER = 'x-ansari-internal-auth';
-/** The end user's `X-Real-IP`, honoured by apps/auth only with the credential. */
-export const FORWARDED_IP_HEADER = 'x-ansari-forwarded-client-ip';
 
 export const AUTH_SERVICE_TIMEOUT_MS = 3_000;
 
@@ -39,14 +37,12 @@ export interface AuthServiceRequest {
   body?: unknown;
   /** Sent as `Authorization: Bearer <token>`. */
   bearer?: string;
-  /** The end user's IP, forwarded so apps/auth rate-limits them, not apps/api. */
-  clientIp?: string | null;
-  /** Extra headers (X-Ansari-Client). The credential and Origin are always set here. */
+  /** Extra headers (X-Ansari-Client). The Origin is always set here. */
   headers?: Record<string, string>;
 }
 
 /**
- * One request to apps/auth's internal listener. Resolves with the response for
+ * One request to apps/auth at its public origin. Resolves with the response for
  * any status apps/auth chose to send; rejects with AuthServiceUnavailableError
  * only when no response arrived.
  */
@@ -54,20 +50,15 @@ export async function authServiceFetch(
   path: string,
   request: AuthServiceRequest = {}
 ): Promise<Response> {
-  const { internalUrl, internalSecret, layerOrigin } = config.authService;
+  const { url, layerOrigin } = config.authService;
   // Node's fetch sends Sec-Fetch-Mode, so better-auth's CSRF check wants a
   // trusted Origin; apps/auth trusts this one for that and nothing else.
-  const headers: Record<string, string> = {
-    ...request.headers,
-    [INTERNAL_AUTH_HEADER]: internalSecret,
-    origin: layerOrigin,
-  };
-  if (request.clientIp) headers[FORWARDED_IP_HEADER] = request.clientIp;
+  const headers: Record<string, string> = { ...request.headers, origin: layerOrigin };
   if (request.bearer) headers.authorization = `Bearer ${request.bearer}`;
   if (request.body !== undefined) headers['content-type'] = 'application/json';
 
   try {
-    return await fetch(new URL(path, internalUrl), {
+    return await fetch(new URL(path, url), {
       method: request.method ?? (request.body === undefined ? 'GET' : 'POST'),
       headers,
       body: request.body === undefined ? undefined : JSON.stringify(request.body),
@@ -79,54 +70,62 @@ export async function authServiceFetch(
   }
 }
 
-const userPath = (id: string, suffix = '') => `/internal/users/${encodeURIComponent(id)}${suffix}`;
+/** apps/auth's account endpoints (apps/auth `routes/account.ts`), bound to the bearer's own sub. */
+export const ACCOUNT_PATH = '/api/account';
 
-const profileSchema = z.object({
+const accountSchema = z.object({
   id: z.string(),
   email: z.string(),
   first_name: z.string().nullable(),
   last_name: z.string().nullable(),
   registered_via: z.string().nullable(),
-});
-
-export type AuthProfile = z.infer<typeof profileSchema>;
-
-const roleSchema = z.object({
   role: z.string().nullable(),
   banned: z.boolean(),
 });
 
-export type AuthRole = z.infer<typeof roleSchema>;
+export type AuthAccount = z.infer<typeof accountSchema>;
 
-/** A 200 body parsed against `schema`; anything else from apps/auth is unavailability. */
-async function parseOk<T>(response: Response, schema: z.ZodType<T>): Promise<T> {
+/**
+ * The bearer's own account: profile, role and ban state, read live. Null when
+ * apps/auth refuses the token (401: its session has ended) or does not know
+ * the user (404). apps/api has already verified `jwt` and passes its `sub`, so
+ * an answer for anyone else is a fault, never a user.
+ */
+export async function getAuthAccount(sub: string, jwt: string): Promise<AuthAccount | null> {
+  const response = await authServiceFetch(`${ACCOUNT_PATH}/me`, { bearer: jwt });
+  if (response.status === 401 || response.status === 404) return null;
   if (response.status !== 200) throw new AuthServiceUnavailableError(response.status);
-  const parsed = schema.safeParse(await response.json().catch(() => undefined));
-  if (!parsed.success) throw new AuthServiceUnavailableError(response.status);
+  const parsed = accountSchema.safeParse(await response.json().catch(() => undefined));
+  if (!parsed.success || parsed.data.id !== sub) {
+    throw new AuthServiceUnavailableError(response.status);
+  }
   return parsed.data;
 }
 
-/** The user's profile, or null when apps/auth does not know the id (404). */
-export async function getAuthProfile(id: string): Promise<AuthProfile | null> {
-  const response = await authServiceFetch(userPath(id, '/profile'));
-  if (response.status === 404) return null;
-  const profile = await parseOk(response, profileSchema);
-  if (profile.id !== id) throw new AuthServiceUnavailableError(response.status);
-  return profile;
-}
-
-/** The user's role and ban state, or null when apps/auth does not know the id (404). */
-export async function getAuthRole(id: string): Promise<AuthRole | null> {
-  const response = await authServiceFetch(userPath(id, '/role'));
-  if (response.status === 404) return null;
-  return parseOk(response, roleSchema);
+/** Thrown before any call when a token is not the subject's own. */
+export class NotTheSubjectError extends Error {
+  constructor() {
+    super('the token is not the subject\'s own');
+    this.name = 'NotTheSubjectError';
+  }
 }
 
 /**
- * Delete the auth user and its sessions. apps/auth requires the subject's own
- * JWT and answers 204 for an id that is already gone, so a retry is safe.
+ * Delete the auth user `sub` and its sessions, asked with `jwt`. apps/auth
+ * deletes the TOKEN's subject, so a token for anyone else is refused here,
+ * before any call (callers pass a token they have verified; this is the
+ * backstop). apps/auth answers 204 for a user already gone (even with the
+ * token's session ended by the delete), so a retry is safe; any other answer
+ * leaves the tombstone pending.
  */
-export async function deleteAuthUser(id: string, jwt: string): Promise<void> {
-  const response = await authServiceFetch(userPath(id), { method: 'DELETE', bearer: jwt });
+export async function deleteAuthUser(sub: string, jwt: string): Promise<void> {
+  let tokenSub: unknown;
+  try {
+    tokenSub = decodeJwt(jwt).sub;
+  } catch {
+    tokenSub = undefined;
+  }
+  if (tokenSub !== sub) throw new NotTheSubjectError();
+  const response = await authServiceFetch(ACCOUNT_PATH, { method: 'DELETE', bearer: jwt });
   if (response.status !== 204) throw new AuthServiceUnavailableError(response.status);
 }

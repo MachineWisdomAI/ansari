@@ -34,8 +34,8 @@ export async function GET(request: NextRequest) {
  * 2. ONE app-database transaction deletes the row (threads, preferences and
  *    feedback cascade) and writes the tombstone. Both in one transaction is
  *    what keeps resolve-user's first-use path from resurrecting the account.
- * 3. apps/auth deletes the auth user and its sessions (the user's own JWT is
- *    required), and the tombstone is marked done. If that fails, the next
+ * 3. apps/auth deletes the auth user and its sessions, asked with the user's
+ *    own JWT (its account endpoint), and the tombstone is marked done. If that fails, the next
  *    request carrying this `sub`, a retry, or the operator script finishes it;
  *    the account is refused in the meantime, so the answer is still success.
  */

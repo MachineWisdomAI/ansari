@@ -5,9 +5,10 @@ import { legacyError, revokeSessions, unavailableResponse } from '@/lib/auth-ser
 import { safeErrorMeta } from '@/lib/log';
 
 // Legacy logout over apps/auth (spec 300, plan phase 8; G-3): the legacy client
-// sends only its JWT, and logout ends EVERY session of the user, as today.
-// apps/auth requires that JWT, so the credential alone logs nobody out. A JWT
-// already issued stays valid until its exp (15 minutes, the accepted window).
+// sends only its JWT, and logout ends EVERY session of the user, as today, at
+// apps/auth's account endpoint, asked with that JWT. A token whose session has
+// already ended is refused there, and here with the legacy 401. A JWT already
+// issued stays valid until its exp (15 minutes, the accepted window).
 
 export async function POST(request: NextRequest) {
   try {
@@ -15,7 +16,7 @@ export async function POST(request: NextRequest) {
     if ('error' in authResult) return authResult.error;
 
     const jwt = bearerToken(request.headers.get('Authorization')) as string;
-    await revokeSessions(authResult.user.id, jwt);
+    if (!(await revokeSessions(jwt))) return legacyError('Token not found or expired', 401);
     return NextResponse.json({ message: 'Successfully logged out' });
   } catch (error) {
     if (error instanceof AuthServiceUnavailableError) {

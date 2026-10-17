@@ -8,7 +8,8 @@ import { NextRequest, NextResponse } from 'next/server';
 // `is_admin` column no longer grants anything: the role comes from apps/auth.
 
 const mockAuthenticate = vi.fn();
-vi.mock('@/lib/auth/require-user', () => ({
+vi.mock('@/lib/auth/require-user', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/auth/require-user')>()),
   requireUser: (...args: unknown[]) => mockAuthenticate(...args),
 }));
 vi.mock('@/lib/error-response', () => ({
@@ -19,7 +20,7 @@ vi.mock('@/lib/error-response', () => ({
 const mockGetAuthRole = vi.fn();
 vi.mock('@/lib/auth-service/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/auth-service/client')>()),
-  getAuthRole: (...args: unknown[]) => mockGetAuthRole(...args),
+  getAuthAccount: (...args: unknown[]) => mockGetAuthRole(...args),
 }));
 
 vi.mock('@/lib/db/stats', () => ({
@@ -78,7 +79,8 @@ describe('GET /api/v2/admin/stats — authorization chain (real requireAdminRole
     expect(res.status).toBe(403);
     const body = await res.json();
     expect(body.detail).toBe('Admin access required');
-    expect(mockGetAuthRole).toHaveBeenCalledWith('1');
+    // Asked with the admin's own JWT (owner amendment 2026-10-17).
+    expect(mockGetAuthRole).toHaveBeenCalledWith('1', 'test-token');
   });
 
   it('returns 200 for role admin, even with the legacy is_admin=false', async () => {

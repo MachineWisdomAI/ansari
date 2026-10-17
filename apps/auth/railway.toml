@@ -9,18 +9,14 @@
 # setting, update this file in the same PR. See the "Railway service
 # configuration" block in RELEASE.md.
 #
-# Two listeners (plan P-1), and Railway routes a domain to ONE port:
-#   PORT           3100  public: /api/auth/*, /health. The public domain
-#                        (auth.askansari.ai; auth-staging.askansari.ai) targets
-#                        THIS port and only this port.
-#   INTERNAL_PORT  3101  internal: /internal/*, the JWKS for apps/api. Reached by
-#                        `backend` over Railway's private network
-#                        (http://<auth service>.railway.internal:3101 =
-#                        apps/api's AUTH_INTERNAL_URL). NO domain, public or
-#                        custom, may ever target it. A phase 13 check proves it is
-#                        unreachable from the internet and reachable from backend.
-# Set both as service variables (PORT=3100, INTERNAL_PORT=3101) so Railway does
-# not assign PORT itself.
+# One listener (owner amendment 2026-10-17: no internal listener, no private
+# network hop):
+#   PORT  3100  /api/auth/*, /api/account/*, /health. The public domain
+#               (auth.askansari.ai; auth-staging.askansari.ai) targets this port.
+#               apps/api reaches the service there too (its AUTH_URL), like any
+#               other client.
+# Set it as a service variable (PORT=3100) so Railway does not assign PORT
+# itself.
 #
 # Database: its OWN Railway Postgres (the auth database), never the app
 # database. Snapshots or PITR are enabled before its first real row (C-4).

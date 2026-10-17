@@ -45,8 +45,8 @@ const eslintConfig = [
           property: 'DATABASE_URL',
           message: 'Read the database URL via config.database.url (lib/config.ts), not process.env.',
         },
-        // apps/auth's coordinates and the internal credential (spec 300).
-        ...['AUTH_INTERNAL_SECRET', 'AUTH_INTERNAL_URL', 'AUTH_JWT_ISSUER', 'AUTH_JWT_AUDIENCE', 'AUTH_LAYER_ORIGIN'].map(
+        // apps/auth's coordinates (spec 300).
+        ...['AUTH_URL', 'AUTH_JWT_ISSUER', 'AUTH_JWT_AUDIENCE', 'AUTH_LAYER_ORIGIN'].map(
           (property) => ({
             property,
             message: `Read ${property} via config.authService (lib/config.ts), not process.env.`,

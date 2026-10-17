@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { getRealIp } from '@/lib/rate-limit';
 import { AuthServiceUnavailableError } from '@/lib/auth-service/client';
 import {
   LEGACY_DETAIL,
@@ -8,6 +7,7 @@ import {
   mintJwt,
   unavailableResponse,
 } from '@/lib/auth-service/legacy';
+import { limitLegacyRoute } from '@/lib/auth-service/limits';
 import { safeErrorMeta } from '@/lib/log';
 
 // Legacy refresh over apps/auth (spec 300, plan phase 8): the refresh_token is
@@ -20,6 +20,9 @@ const refreshSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
+  const limited = limitLegacyRoute(request, 'refresh_token');
+  if (limited) return limited;
+
   try {
     const body = await request.json();
     const parseResult = refreshSchema.safeParse(body);
@@ -29,7 +32,7 @@ export async function POST(request: NextRequest) {
     }
 
     const { refresh_token } = parseResult.data;
-    const accessToken = await mintJwt(refresh_token, { clientIp: getRealIp(request) });
+    const accessToken = await mintJwt(refresh_token);
     if (!accessToken) return legacyError(LEGACY_DETAIL.invalidRefreshToken, 401);
 
     return NextResponse.json({

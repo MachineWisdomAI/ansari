@@ -39,7 +39,7 @@ import {
   startAuth,
   type AuthService,
 } from './helpers';
-import { signUpTokens, send, STRONG_PASSWORD } from '../../../auth/tests/helpers/service';
+import { mintJwt, signUpTokens, send, STRONG_PASSWORD } from '../../../auth/tests/helpers/service';
 
 let service: AuthService;
 let app: PGlite;
@@ -58,7 +58,7 @@ beforeEach(async () => {
   app = await migrateAppDb();
   h.db = appDrizzle(app);
   h.sentry.length = 0;
-  process.env.AUTH_INTERNAL_URL = service.internalUrl;
+  process.env.AUTH_URL = service.publicUrl;
   resetEnvCache();
 });
 
@@ -83,15 +83,15 @@ async function authUserCount(id: string) {
   return rows[0].n;
 }
 
-/** A user who signs up directly at apps/auth, as apps/frontend does. */
+/** A user who signs up directly at apps/auth, as apps/frontend does, with their JWT. */
 async function signUpDirect(email: string) {
   const res = await send(service.publicUrl, '/api/auth/sign-up/email', {
     body: { email, password: STRONG_PASSWORD, name: 'Amina Yusuf', first_name: 'Amina', last_name: 'Yusuf' },
     headers: { 'x-ansari-client': 'web' },
   });
   expect(res.status).toBe(200);
-  const { user } = (await res.json()) as { user: { id: string } };
-  return user.id;
+  const { user, token } = (await res.json()) as { user: { id: string }; token: string };
+  return { id: user.id, sessionToken: token, jwt: await mintJwt(service, token) };
 }
 
 async function writeTombstone(id: string, authDeleted: boolean) {
@@ -122,8 +122,8 @@ function captureWarnings() {
 describe('scenario 9c: first-use app row', () => {
   it('creates the row from the profile, with the same id, email and names', async () => {
     const email = nextEmail('direct');
-    const id = await signUpDirect(email);
-    const result = await resolveUser(id, 'x');
+    const { id, jwt } = await signUpDirect(email);
+    const result = await resolveUser(id, jwt);
     expect(result.kind).toBe('user');
     expect(await appUser(id)).toEqual({
       id,
@@ -137,33 +137,35 @@ describe('scenario 9c: first-use app row', () => {
   });
 
   it('two concurrent first requests create one row', async () => {
-    const id = await signUpDirect(nextEmail('race'));
-    const results = await Promise.all([resolveUser(id, 'x'), resolveUser(id, 'x')]);
+    const { id, jwt } = await signUpDirect(nextEmail('race'));
+    const results = await Promise.all([resolveUser(id, jwt), resolveUser(id, jwt)]);
     expect(results.map((r) => r.kind)).toEqual(['user', 'user']);
     expect(await appUserCount()).toBe(1);
   });
 
   it('an existing row is read without asking apps/auth', async () => {
-    const id = await signUpDirect(nextEmail('steady'));
-    await resolveUser(id, 'x');
+    const { id, jwt } = await signUpDirect(nextEmail('steady'));
+    await resolveUser(id, jwt);
 
-    process.env.AUTH_INTERNAL_URL = await deadUrl();
+    process.env.AUTH_URL = await deadUrl();
     resetEnvCache();
-    const result = await resolveUser(id, 'x');
+    const result = await resolveUser(id, jwt);
     expect(result.kind === 'user' && result.user.id).toBe(id);
   });
 
   it('a sub apps/auth does not know is refused, and gets no row', async () => {
-    const result = await resolveUser(randomUUID(), 'x');
+    const sub = randomUUID();
+    const { token } = await service.auth.api.signJWT({ body: { payload: { sub, sid: randomUUID() } } });
+    const result = await resolveUser(sub, token);
     expect(result.kind).toBe('refused');
     expect(await appUserCount()).toBe(0);
   });
 
   it('apps/auth unreachable on first use is unavailable, not refused, and writes nothing', async () => {
-    const id = await signUpDirect(nextEmail('outage'));
-    process.env.AUTH_INTERNAL_URL = await deadUrl();
+    const { id, jwt } = await signUpDirect(nextEmail('outage'));
+    process.env.AUTH_URL = await deadUrl();
     resetEnvCache();
-    expect((await resolveUser(id, 'x')).kind).toBe('unavailable');
+    expect((await resolveUser(id, jwt)).kind).toBe('unavailable');
     expect(await appUserCount()).toBe(0);
   });
 });
@@ -172,11 +174,11 @@ describe('scenario 9f: an email the app database already holds', () => {
   it('a legacy row under another id: refused, no row, ids-only log, alert', async () => {
     const email = nextEmail('legacy');
     const legacy = await insertLegacyUserRow(app, email);
-    const id = await signUpDirect(email);
+    const { id, jwt } = await signUpDirect(email);
     const warnings = captureWarnings();
 
     try {
-      expect((await resolveUser(id, 'x')).kind).toBe('refused');
+      expect((await resolveUser(id, jwt)).kind).toBe('refused');
       expect(await appUser(id)).toBeUndefined();
       expect(warnings.text()).toContain(id);
       expect(warnings.text()).toContain(legacy.id);
@@ -194,11 +196,11 @@ describe('scenario 9f: an email the app database already holds', () => {
     const system = await getOrCreateSystemUser('ai-skill');
     const email = nextEmail('sys-held');
     await app.query('update users set email = $1 where id = $2', [email, system.id]);
-    const id = await signUpDirect(email);
+    const { id, jwt } = await signUpDirect(email);
     const warnings = captureWarnings();
 
     try {
-      expect((await resolveUser(id, 'x')).kind).toBe('refused');
+      expect((await resolveUser(id, jwt)).kind).toBe('refused');
       expect(await appUser(id)).toBeUndefined();
       expect(h.sentry).toEqual([
         { message: 'auth user has no app row: system-email', extra: { sub: id, holderId: system.id } },
@@ -210,13 +212,13 @@ describe('scenario 9f: an email the app database already holds', () => {
 
   it('an @system.ansari.chat address: refused as reserved-domain', async () => {
     // apps/auth's sign-up hook refuses this domain, so plant it behind it.
-    const id = await signUpDirect(nextEmail('planted'));
+    const { id, jwt } = await signUpDirect(nextEmail('planted'));
     const email = 'planted@system.ansari.chat';
     await service.client.query('update auth.users set email = $1 where id = $2', [email, id]);
     const warnings = captureWarnings();
 
     try {
-      expect((await resolveUser(id, 'x')).kind).toBe('refused');
+      expect((await resolveUser(id, jwt)).kind).toBe('refused');
       expect(await appUserCount()).toBe(0);
       expect(warnings.text()).not.toContain(email);
       expect(h.sentry).toEqual([
@@ -230,14 +232,14 @@ describe('scenario 9f: an email the app database already holds', () => {
   it('the email is compared normalized', async () => {
     const email = nextEmail('case');
     const legacy = await insertLegacyUserRow(app, email);
-    const id = await signUpDirect(email);
+    const { id, jwt } = await signUpDirect(email);
     await service.client.query('update auth.users set email = $1 where id = $2', [
       `  ${email.toUpperCase()} `,
       id,
     ]);
     const warnings = captureWarnings();
     try {
-      expect((await resolveUser(id, 'x')).kind).toBe('refused');
+      expect((await resolveUser(id, jwt)).kind).toBe('refused');
       expect(h.sentry[0]?.extra).toEqual({ sub: id, holderId: legacy.id });
     } finally {
       warnings.restore();
@@ -262,7 +264,7 @@ describe('scenario 9a: tombstones', () => {
     const { id, jwt } = await signUpTokens(service, nextEmail('auth-down'));
     await resolveUser(id, jwt);
     await writeTombstone(id, false);
-    process.env.AUTH_INTERNAL_URL = await deadUrl();
+    process.env.AUTH_URL = await deadUrl();
     resetEnvCache();
     const warnings = captureWarnings();
 
@@ -275,14 +277,16 @@ describe('scenario 9a: tombstones', () => {
     }
 
     // apps/auth is back: the next request finishes the job.
-    process.env.AUTH_INTERNAL_URL = service.internalUrl;
+    process.env.AUTH_URL = service.publicUrl;
     resetEnvCache();
     expect((await resolveUser(id, jwt)).kind).toBe('refused');
     expect(await authUserCount(id)).toBe(0);
     expect((await tombstone(id)).auth_deleted_at).toBeInstanceOf(Date);
   });
 
-  it('a delete apps/auth refuses (another user\'s JWT) stays pending', async () => {
+  it("another user's JWT never completes a pending delete, and that user is untouched", async () => {
+    // apps/auth deletes the TOKEN's subject, so the client refuses a token that
+    // is not the tombstoned user's before any call (NotTheSubjectError).
     const target = await signUpTokens(service, nextEmail('target'));
     const other = await signUpTokens(service, nextEmail('other'));
     await resolveUser(target.id, target.jwt);
@@ -292,7 +296,9 @@ describe('scenario 9a: tombstones', () => {
     try {
       expect((await resolveUser(target.id, other.jwt)).kind).toBe('refused');
       expect(await authUserCount(target.id)).toBe(1);
+      expect(await authUserCount(other.id)).toBe(1);
       expect((await tombstone(target.id)).auth_deleted_at).toBeNull();
+      expect(warnings.text()).toContain('NotTheSubjectError');
     } finally {
       warnings.restore();
     }
@@ -309,9 +315,9 @@ describe('scenario 9a: tombstones', () => {
       CREATE TRIGGER plant_tombstone AFTER INSERT ON users
         FOR EACH ROW EXECUTE FUNCTION plant_tombstone();
     `);
-    const id = await signUpDirect(nextEmail('race-delete'));
+    const { id, jwt } = await signUpDirect(nextEmail('race-delete'));
 
-    expect((await resolveUser(id, 'x')).kind).toBe('refused');
+    expect((await resolveUser(id, jwt)).kind).toBe('refused');
     expect(await appUser(id)).toBeUndefined();
   });
 
@@ -324,5 +330,46 @@ describe('scenario 9a: tombstones', () => {
     expect((await resolveUser(id, jwt)).kind).toBe('refused');
     expect(await appUser(id)).toBeUndefined();
     expect(await authUserCount(id)).toBe(1);
+  });
+});
+
+describe('owner-accepted residual R3: a delete made directly at apps/auth', () => {
+  // DELETE /api/account with the user's own token, bypassing apps/api, removes
+  // the auth user but leaves the app row and writes no tombstone. A later
+  // sign-up with the same email gets a NEW auth id, and first use refuses it as
+  // an email conflict whose holder is the orphan row. The Sentry alert names
+  // the holder id; the operator response is the orphan audit and cleanup in
+  // docs/cutover/better-auth-cutover.md ("Orphan app rows").
+  it('re-sign-up with the same email is refused as email-conflict, naming the orphan holder', async () => {
+    const email = nextEmail('direct-delete');
+    const first = await signUpDirect(email);
+    expect((await resolveUser(first.id, first.jwt)).kind).toBe('user');
+    const del = await send(service.publicUrl, '/api/account', { method: 'DELETE', bearer: first.jwt });
+    expect(del.status).toBe(204);
+    expect(await appUser(first.id)).toBeDefined();
+    expect(await tombstone(first.id)).toBeUndefined();
+
+    const second = await signUpDirect(email);
+    expect(second.id).not.toBe(first.id);
+    const warnings = captureWarnings();
+    try {
+      expect((await resolveUser(second.id, second.jwt)).kind).toBe('refused');
+      expect(h.sentry).toEqual([
+        { message: 'auth user has no app row: email-conflict', extra: { sub: second.id, holderId: first.id } },
+      ]);
+    } finally {
+      warnings.restore();
+    }
+
+    // The documented cleanup: delete the orphan row and tombstone its id, in
+    // one transaction. Then the new account's first use succeeds.
+    // The runbook's statement, with its psql variable bound as a parameter.
+    const cleanup = await app.query(
+      `WITH gone AS (DELETE FROM users WHERE id = $1 AND system_key IS NULL RETURNING id)
+       INSERT INTO deleted_users (id, auth_deleted_at) SELECT id, now() FROM gone`,
+      [first.id]
+    );
+    expect(cleanup.affectedRows).toBe(1);
+    expect((await resolveUser(second.id, second.jwt)).kind).toBe('user');
   });
 });

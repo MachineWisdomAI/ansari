@@ -90,8 +90,8 @@ function using(transport: FetchLike): void {
 let service: Service;
 
 beforeAll(async () => {
-  // `email` mode: sign-in failures count per email (5/60 s), the production default.
-  service = await startService({ mode: 'email' });
+  // Sign-in failures count per email (5/60 s), as in production.
+  service = await startService();
 });
 
 afterAll(async () => {

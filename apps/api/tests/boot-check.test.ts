@@ -18,10 +18,9 @@ const BASE_ENV = {
   USUL_API_TOKEN: 'placeholder',
 };
 const AUTH_ENV = {
-  AUTH_INTERNAL_URL: 'http://auth.railway.internal:3101',
+  AUTH_URL: 'https://auth.askansari.ai',
   AUTH_JWT_ISSUER: 'https://auth.askansari.ai',
-  AUTH_JWT_AUDIENCE: 'ansari-api',
-  AUTH_INTERNAL_SECRET: 's'.repeat(32),
+  AUTH_JWT_AUDIENCE: 'ansari-api-boot-check-value',
   AUTH_LAYER_ORIGIN: 'https://api.askansari.ai',
 };
 const SERVER = { NODE_ENV: 'production', NEXT_RUNTIME: 'nodejs' } as const;
@@ -53,12 +52,12 @@ describe('shouldValidateEnvAtBoot', () => {
 describe('validateEnvAtBoot', () => {
   it('a production boot missing an apps/auth setting throws, naming it and no value', () => {
     process.env = { ...process.env, ...BASE_ENV, ...AUTH_ENV, ...SERVER };
-    delete process.env.AUTH_INTERNAL_URL;
-    expect(() => validateEnvAtBoot()).toThrow(/AUTH_INTERNAL_URL is required in production/);
+    delete process.env.AUTH_URL;
+    expect(() => validateEnvAtBoot()).toThrow(/AUTH_URL is required in production/);
     try {
       validateEnvAtBoot();
     } catch (err) {
-      expect(String(err)).not.toContain(AUTH_ENV.AUTH_INTERNAL_SECRET);
+      expect(String(err)).not.toContain(AUTH_ENV.AUTH_JWT_AUDIENCE);
     }
   });
 

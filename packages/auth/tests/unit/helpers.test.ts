@@ -17,12 +17,11 @@ afterEach(() => {
 
 describe('env', () => {
   it.each([
-    ['AUTH_INTERNAL_SECRET', 'x'.repeat(31)],
+    ['BETTER_AUTH_SECRET', 'x'.repeat(31)],
     ['RESEND_API_KEY', 're_'.padEnd(19, 'k')],
     ['AUTH_JWT_ISSUER', 'not-a-url'],
     ['FRONTEND_URL', 'not-a-url'],
     ['AUTH_JWT_AUDIENCE', ''],
-    ['AUTH_RATE_LIMIT_MODE', 'both'],
   ])('rejects a bad %s, naming it without echoing the value', (name, value) => {
     setAuthEnv(BASE);
     process.env[name] = value;
@@ -39,28 +38,34 @@ describe('env', () => {
 
   it('never echoes a secret that is just under its minimum', () => {
     setAuthEnv(BASE);
-    const internal = 'internal-secret-value-31-chars!';
+    const secret = 'better-auth-secret-value-31-chr';
     const resend = 're_secret_value_19c';
-    process.env.AUTH_INTERNAL_SECRET = internal;
+    process.env.BETTER_AUTH_SECRET = secret;
     process.env.RESEND_API_KEY = resend;
     resetEnvCache();
-    expect(() => getEnv()).toThrow(/AUTH_INTERNAL_SECRET, RESEND_API_KEY|RESEND_API_KEY, AUTH_INTERNAL_SECRET/);
+    expect(() => getEnv()).toThrow(/BETTER_AUTH_SECRET, RESEND_API_KEY|RESEND_API_KEY, BETTER_AUTH_SECRET/);
     try {
       getEnv();
     } catch (err) {
-      expect((err as Error).message).not.toContain(internal);
+      expect((err as Error).message).not.toContain(secret);
       expect((err as Error).message).not.toContain(resend);
     }
   });
 
-  it('normalizes ADMIN_EMAILS and defaults the rate-limit mode to email', () => {
+  it('normalizes ADMIN_EMAILS', () => {
     setAuthEnv(BASE);
     process.env.ADMIN_EMAILS = ' Admin@Example.com , ,second@example.com';
-    delete process.env.AUTH_RATE_LIMIT_MODE;
     resetEnvCache();
-    const env = getEnv();
-    expect(env.ADMIN_EMAILS).toEqual(['admin@example.com', 'second@example.com']);
-    expect(env.AUTH_RATE_LIMIT_MODE).toBe('email');
+    expect(getEnv().ADMIN_EMAILS).toEqual(['admin@example.com', 'second@example.com']);
+  });
+
+  it('declares no shared credential, internal port or rate-limit mode (owner amendment 2026-10-17)', () => {
+    setAuthEnv(BASE);
+    resetEnvCache();
+    const keys = Object.keys(getEnv());
+    for (const removed of ['AUTH_INTERNAL_SECRET', 'INTERNAL_PORT', 'AUTH_RATE_LIMIT_MODE']) {
+      expect(keys).not.toContain(removed);
+    }
   });
 });
 

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type { User } from '@/db/schema';
-import { AuthServiceUnavailableError, getAuthRole } from '@/lib/auth-service/client';
-import { requireUser } from './require-user';
+import { AuthServiceUnavailableError, getAuthAccount } from '@/lib/auth-service/client';
+import { bearerToken, requireUser } from './require-user';
 
 /** The role apps/auth's role script grants (packages/auth `ADMIN_ROLE`). */
 const ADMIN_ROLE = 'admin';
@@ -9,7 +9,8 @@ const ADMIN_ROLE = 'admin';
 /**
  * The successor to `requireAdmin` (spec 300, "Two databases" rule 6). The role
  * lives only in the auth database, so every admin request asks apps/auth for
- * it, and a demotion or a ban takes effect on the very next request, while the
+ * it, with the admin's own JWT (owner amendment 2026-10-17), and a demotion, a
+ * ban or a revoked session takes effect on the very next request, while the
  * JWT is still valid. When apps/auth cannot answer, the route fails closed
  * with 503 and never grants access.
  */
@@ -19,9 +20,11 @@ export async function requireAdminRole(
   const authResult = await requireUser(request);
   if ('error' in authResult) return authResult;
 
+  // requireUser has verified this bearer; it is the admin's own JWT.
+  const jwt = bearerToken(request.headers.get('Authorization')) as string;
   let role;
   try {
-    role = await getAuthRole(authResult.user.id);
+    role = await getAuthAccount(authResult.user.id, jwt);
   } catch (err) {
     if (!(err instanceof AuthServiceUnavailableError)) throw err;
     console.warn('admin role check failed', { userId: authResult.user.id, status: err.status });

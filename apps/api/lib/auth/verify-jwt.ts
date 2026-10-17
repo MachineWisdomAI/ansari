@@ -7,12 +7,14 @@ import {
   type JWTVerifyGetKey,
 } from 'jose';
 import { config } from '@/lib/config';
-import { AUTH_SERVICE_TIMEOUT_MS, INTERNAL_AUTH_HEADER } from '@/lib/auth-service/client';
+import { AUTH_SERVICE_TIMEOUT_MS } from '@/lib/auth-service/client';
 
 /**
  * Verification of apps/auth's JWTs (spec 300, "Hosting and token model"; plan
- * phase 7, P-1). The JWKS comes from apps/auth's internal listener, which
- * requires the internal credential on every request, the JWKS included.
+ * phase 7; owner amendment 2026-10-17). The JWKS is apps/auth's public one, at
+ * `AUTH_URL`, fetched like any other client fetches it: no credential. On
+ * apps/auth it falls under the router's per-IP default, which this fetch rate
+ * (at most one per 30 s cooldown) never approaches.
  *
  * - The algorithm is pinned to EdDSA, the one createAuth() signs with, so
  *   `none`, HS256 (a legacy token) and RS256 are refused before any key lookup.
@@ -82,10 +84,9 @@ function isJwksLike(body: unknown): boolean {
  * fails, within the stale grace. An unknown or ambiguous `kid` is never a
  * reason to fall back: those come from the lookup, not from the fetch.
  */
-function keySetWithStaleFallback(internalUrl: string, internalSecret: string): JWTVerifyGetKey {
+function keySetWithStaleFallback(authUrl: string): JWTVerifyGetKey {
   let lastSuccess = Number.NEGATIVE_INFINITY;
-  const remote = createRemoteJWKSet(new URL(JWKS_PATH, internalUrl), {
-    headers: { [INTERNAL_AUTH_HEADER]: internalSecret },
+  const remote = createRemoteJWKSet(new URL(JWKS_PATH, authUrl), {
     cooldownDuration: JWKS_COOLDOWN_MS,
     cacheMaxAge: JWKS_CACHE_MAX_AGE_MS,
     timeoutDuration: AUTH_SERVICE_TIMEOUT_MS,
@@ -110,11 +111,10 @@ function keySetWithStaleFallback(internalUrl: string, internalSecret: string): J
 
 let cached: { key: string; jwks: JWTVerifyGetKey } | null = null;
 
-/** One key set per (URL, credential), so a config change in tests takes effect. */
-function remoteJwks(internalUrl: string, internalSecret: string): JWTVerifyGetKey {
-  const key = `${internalUrl}\n${internalSecret}`;
-  if (cached?.key !== key) {
-    cached = { key, jwks: keySetWithStaleFallback(internalUrl, internalSecret) };
+/** One key set per URL, so a config change in tests takes effect. */
+function remoteJwks(authUrl: string): JWTVerifyGetKey {
+  if (cached?.key !== authUrl) {
+    cached = { key: authUrl, jwks: keySetWithStaleFallback(authUrl) };
   }
   return cached.jwks;
 }
@@ -129,9 +129,9 @@ export function resetJwksCache(): void {
  * access token for this audience. Never throws for a bad token.
  */
 export async function verifyAccessToken(token: string): Promise<VerifiedToken | null> {
-  const { internalUrl, internalSecret, jwtIssuer, jwtAudience } = config.authService;
+  const { url, jwtIssuer, jwtAudience } = config.authService;
   try {
-    const { payload } = await jwtVerify(token, remoteJwks(internalUrl, internalSecret), {
+    const { payload } = await jwtVerify(token, remoteJwks(url), {
       algorithms: JWT_ALGORITHMS,
       issuer: jwtIssuer,
       audience: jwtAudience,

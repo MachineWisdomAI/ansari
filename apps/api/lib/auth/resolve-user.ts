@@ -7,7 +7,7 @@ import { isSystemAddress } from '@/lib/auth/system-accounts';
 import {
   AuthServiceUnavailableError,
   deleteAuthUser,
-  getAuthProfile,
+  getAuthAccount,
 } from '@/lib/auth-service/client';
 import { safeErrorMeta } from '@/lib/log';
 
@@ -19,12 +19,13 @@ import { safeErrorMeta } from '@/lib/log';
  *    still owed, then refuse. A tombstoned id is never re-created.
  * 2. A row: the user.
  * 3. No row: the user signed up directly at apps/auth (or a layer insert
- *    failed). Fetch the profile over the internal endpoint and insert the row
+ *    failed). Fetch the profile from apps/auth's account endpoint, with the
+ *    user's own JWT (owner amendment 2026-10-17), and insert the row
  *    with the same id, `ON CONFLICT (id) DO NOTHING`, so concurrent first
  *    requests create one row. An email on the reserved system domain, or one
  *    another row already holds (a system row included), is refused with no row
  *    written, an ids-only log and a Sentry alert.
- * 4. apps/auth does not know the id: refuse.
+ * 4. apps/auth does not know the id, or the token's session has ended: refuse.
  *
  * `unavailable` means apps/auth could not answer step 3; callers fail closed.
  */
@@ -106,7 +107,7 @@ export async function resolveUser(sub: string, jwt: string): Promise<ResolveResu
 
   let profile;
   try {
-    profile = await getAuthProfile(sub);
+    profile = await getAuthAccount(sub, jwt);
   } catch (err) {
     if (err instanceof AuthServiceUnavailableError) {
       console.warn('profile fetch failed', { sub, status: err.status });

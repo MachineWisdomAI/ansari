@@ -1,20 +1,24 @@
 // apps/auth's own limiters, run as better-auth hooks (createAuth's
 // `extensions`), on `auth.rate_limit` so every instance shares one budget.
 //
-// Both modes:
-//   - `/request-password-reset`: a per-IP burst, a per-IP cap and a per-email
-//     cap, every request counted against all three (the router has no rule for
-//     this path, so nothing refuses a request before it is counted), an unknown
-//     email included, the same 429 for both.
-// `email` mode only (AUTH_RATE_LIMIT_MODE, plan P-3; the router then has no
-// per-IP sign-in or sign-up rule):
+// None is keyed by client IP (owner amendment, 2026-10-17; TEMPORARY until the
+// legacy system is replaced): apps/api's /v2/users layer calls these paths
+// anonymously, so they all arrive with apps/api's IP, and the router has no
+// per-IP rule on them (packages/auth `limits.ts` ROUTER_RULES). apps/api limits
+// the layer's routes per client IP itself.
+//
 //   - `/sign-in/email`: per email, FAILED attempts only. The fifth failure in a
 //     window locks the email until the window ends, even for the right
 //     password. A refused attempt is not counted, so it cannot extend the lock.
 //   - `/sign-up/email`: per email, every request, plus a global ceiling.
+//   - `/request-password-reset`: per email and a global ceiling, every request
+//     counted against both (an unknown email included), the same 429 for both.
+//   - `/reset-password`: a global ceiling.
+//   - `/token`, `/get-session`: per session token (the bearer, stored hashed).
 //   - The list-walk alert, when per-email limits trip for many distinct emails.
 //
-// Keys never hold a raw email: `email:<sha256(normalized)>|<path>`.
+// Keys never hold a raw email or token: `email:<sha256(normalized)>|<path>`,
+// `session:<sha256(token)>|<path>`.
 import { createHash } from 'node:crypto';
 
 import {
@@ -26,18 +30,18 @@ import {
   peekWindow,
   tooManyRequests,
   touchKey,
-  type AuthEnv,
   type AuthExtensions,
   type AuthHookContext,
   type Db,
 } from '@ansari/auth';
 
 import { sendListWalkAlert, type ListWalkAlert } from '../alerts';
-import { ipBucket, singleIp } from '../middleware/client-ip';
 
 const SIGN_IN = '/sign-in/email';
 const SIGN_UP = '/sign-up/email';
 const RESET_REQUEST = '/request-password-reset';
+const RESET_CONSUME = '/reset-password';
+const TOKEN_PATHS: ReadonlySet<string> = new Set(['/token', '/get-session']);
 
 const WALK_PREFIX = 'walk:';
 const WALK_ALERT_KEY = 'alert|list-walk';
@@ -48,13 +52,12 @@ export function emailHash(email: string): string {
 }
 
 export const emailKey = (email: string, path: string) => `email:${emailHash(email)}|${path}`;
-export const ipKey = (ip: string, path: string) => `ip:${ipBucket(ip)}|${path}`;
-export const ipBurstKey = (ip: string, path: string) => `ip-burst:${ipBucket(ip)}|${path}`;
+export const sessionKey = (token: string, path: string) =>
+  `session:${createHash('sha256').update(token, 'utf8').digest('hex')}|${path}`;
 export const globalKey = (path: string) => `global|${path}`;
 
 export type PerimeterOptions = {
   db: Db;
-  mode: AuthEnv['AUTH_RATE_LIMIT_MODE'];
   alert?: (alert: ListWalkAlert) => void;
   now?: () => number;
 };
@@ -64,13 +67,15 @@ function emailOf(ctx: AuthHookContext): string | null {
   return typeof email === 'string' && email.trim().length > 0 ? email : null;
 }
 
-function ipOf(ctx: AuthHookContext): string | null {
+/** The bearer session token, as the bearer() plugin reads it; null without one. */
+function bearerOf(ctx: AuthHookContext): string | null {
   const headers = ctx.request?.headers ?? ctx.headers;
-  return singleIp(headers?.get('x-real-ip'));
+  const match = /^Bearer (\S+)$/i.exec(headers?.get('authorization') ?? '');
+  return match?.[1] ?? null;
 }
 
 export function createPerimeterHooks(options: PerimeterOptions): AuthExtensions {
-  const { db, mode } = options;
+  const { db } = options;
   const alert = options.alert ?? sendListWalkAlert;
   const now = options.now ?? Date.now;
 
@@ -97,31 +102,38 @@ export function createPerimeterHooks(options: PerimeterOptions): AuthExtensions 
 
   async function limitResetRequest(ctx: AuthHookContext): Promise<void> {
     const at = now();
-    const ip = ipOf(ctx);
     const email = emailOf(ctx);
     // Count against both before deciding, so each refusal still costs budget.
-    const [burst, perIp, perEmail] = await Promise.all([
-      ip ? consumeWindow(db, ipBurstKey(ip, RESET_REQUEST), limits.RESET_REQUEST_BURST, at) : null,
-      ip ? consumeWindow(db, ipKey(ip, RESET_REQUEST), limits.RESET_REQUEST_PER_IP, at) : null,
+    const [global, perEmail] = await Promise.all([
+      consumeWindow(db, globalKey(RESET_REQUEST), limits.RESET_REQUEST_GLOBAL, at),
       email
         ? consumeWindow(db, emailKey(email, RESET_REQUEST), limits.RESET_REQUEST_PER_EMAIL, at)
         : null,
     ]);
-    if (burst && burst.count > limits.RESET_REQUEST_BURST.max) {
-      throw tooManyRequests(burst.retryAfter);
-    }
-    if (perIp && perIp.count > limits.RESET_REQUEST_PER_IP.max) {
-      throw tooManyRequests(perIp.retryAfter);
-    }
     if (perEmail && perEmail.count > limits.RESET_REQUEST_PER_EMAIL.max) {
       throw tooManyRequests(perEmail.retryAfter);
     }
+    if (global.count > limits.RESET_REQUEST_GLOBAL.max) throw tooManyRequests(global.retryAfter);
+  }
+
+  async function limitResetConsume(): Promise<void> {
+    const state = await consumeWindow(db, globalKey(RESET_CONSUME), limits.RESET_CONSUME_GLOBAL, now());
+    if (state.count > limits.RESET_CONSUME_GLOBAL.max) throw tooManyRequests(state.retryAfter);
+  }
+
+  async function limitTokenExchange(ctx: AuthHookContext, path: string): Promise<void> {
+    const token = bearerOf(ctx);
+    // No bearer: better-auth answers with no session, from no lookup.
+    if (!token) return;
+    const rule = limits.TOKEN_EXCHANGE_PER_SESSION;
+    const state = await consumeWindow(db, sessionKey(token, path), rule, now());
+    if (state.count > rule.max) throw tooManyRequests(state.retryAfter);
   }
 
   async function refuseLockedSignIn(ctx: AuthHookContext): Promise<void> {
     const email = emailOf(ctx);
     if (!email) return;
-    const rule = limits.FALLBACK_SIGN_IN_PER_EMAIL;
+    const rule = limits.SIGN_IN_PER_EMAIL;
     const state = await peekWindow(db, emailKey(email, SIGN_IN), rule, now());
     // No limit hit is recorded here: countFailedSignIn recorded it when the
     // lock engaged, and the lock (one window) is shorter than the list-walk
@@ -132,7 +144,7 @@ export function createPerimeterHooks(options: PerimeterOptions): AuthExtensions 
   async function countFailedSignIn(ctx: AuthHookContext): Promise<void> {
     const email = emailOf(ctx);
     if (!email) return;
-    const rule = limits.FALLBACK_SIGN_IN_PER_EMAIL;
+    const rule = limits.SIGN_IN_PER_EMAIL;
     const state = await consumeWindow(db, emailKey(email, SIGN_IN), rule, now());
     // The failure that engages the lock is a limit hit: a list walker that
     // stops at the limit for each email never sees a 429.
@@ -143,27 +155,28 @@ export function createPerimeterHooks(options: PerimeterOptions): AuthExtensions 
     const at = now();
     const email = emailOf(ctx);
     const [global, perEmail] = await Promise.all([
-      consumeWindow(db, globalKey(SIGN_UP), limits.FALLBACK_SIGN_UP_GLOBAL, at),
+      consumeWindow(db, globalKey(SIGN_UP), limits.SIGN_UP_GLOBAL, at),
       email
-        ? consumeWindow(db, emailKey(email, SIGN_UP), limits.FALLBACK_SIGN_UP_PER_EMAIL, at)
+        ? consumeWindow(db, emailKey(email, SIGN_UP), limits.SIGN_UP_PER_EMAIL, at)
         : null,
     ]);
-    if (email && perEmail && perEmail.count > limits.FALLBACK_SIGN_UP_PER_EMAIL.max) {
+    if (email && perEmail && perEmail.count > limits.SIGN_UP_PER_EMAIL.max) {
       await recordLimitHit(email);
       throw tooManyRequests(perEmail.retryAfter);
     }
-    if (global.count > limits.FALLBACK_SIGN_UP_GLOBAL.max) throw tooManyRequests(global.retryAfter);
+    if (global.count > limits.SIGN_UP_GLOBAL.max) throw tooManyRequests(global.retryAfter);
   }
 
   return {
     async before(ctx) {
       if (ctx.path === RESET_REQUEST) return limitResetRequest(ctx);
-      if (mode !== 'email') return;
+      if (ctx.path === RESET_CONSUME) return limitResetConsume();
+      if (TOKEN_PATHS.has(ctx.path)) return limitTokenExchange(ctx, ctx.path);
       if (ctx.path === SIGN_IN) return refuseLockedSignIn(ctx);
       if (ctx.path === SIGN_UP) return limitSignUp(ctx);
     },
     async after(ctx) {
-      if (mode !== 'email' || ctx.path !== SIGN_IN) return;
+      if (ctx.path !== SIGN_IN) return;
       if (isAuthError(ctx.context.returned)) await countFailedSignIn(ctx);
     },
   };

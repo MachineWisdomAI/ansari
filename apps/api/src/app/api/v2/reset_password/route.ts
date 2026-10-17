@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { getRealIp } from '@/lib/rate-limit';
 import { AuthServiceUnavailableError } from '@/lib/auth-service/client';
 import {
   LEGACY_DETAIL,
@@ -9,6 +8,7 @@ import {
   tooManyRequestsResponse,
   unavailableResponse,
 } from '@/lib/auth-service/legacy';
+import { limitLegacyRoute } from '@/lib/auth-service/limits';
 import { safeErrorMeta } from '@/lib/log';
 
 // Legacy reset over apps/auth (spec 300, plan phase 8). apps/auth checks the
@@ -24,6 +24,9 @@ const resetSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
+  const limited = limitLegacyRoute(request, 'reset_password');
+  if (limited) return limited;
+
   let body: unknown;
   try {
     body = await request.json();
@@ -39,7 +42,7 @@ export async function POST(request: NextRequest) {
     }
 
     const { reset_token, new_password } = parseResult.data;
-    const result = await resetPassword(reset_token, new_password, { clientIp: getRealIp(request) });
+    const result = await resetPassword(reset_token, new_password);
     if (result.kind === 'invalid_token') return legacyError(LEGACY_DETAIL.invalidResetToken, 400);
     if (result.kind === 'weak') return legacyError(result.detail, 400);
     if (result.kind === 'rate_limited') return tooManyRequestsResponse(result.retryAfter);

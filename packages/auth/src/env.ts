@@ -42,11 +42,6 @@ export const envSchema = z.object({
   // apps/api. Both are set explicitly so they never silently follow baseURL.
   AUTH_JWT_ISSUER: z.string().url('AUTH_JWT_ISSUER must be a valid URL'),
   AUTH_JWT_AUDIENCE: z.string().min(1, 'AUTH_JWT_AUDIENCE is required'),
-  // The credential only apps/api and apps/auth hold, for the internal
-  // endpoints and the forwarded client IP. Never logged.
-  AUTH_INTERNAL_SECRET: z
-    .string()
-    .min(32, 'AUTH_INTERNAL_SECRET must be at least 32 characters'),
   // Reset emails are sent from here after cutover. Never logged.
   RESEND_API_KEY: z.string().min(20, 'RESEND_API_KEY must be at least 20 characters'),
   // Base of the emailed reset link: `${FRONTEND_URL}/reset-password?token=…`.
@@ -63,15 +58,11 @@ export const envSchema = z.object({
         .map((e) => e.trim().toLowerCase())
         .filter((e) => e.length > 0)
     ),
-  // P-3 / owner amendment G-1: how sign-in and sign-up are rate-limited.
-  // Defaults to `email`, the mode that cannot collapse into a global cap.
-  AUTH_RATE_LIMIT_MODE: z.enum(['ip', 'email']).default('email'),
   // Optional newsletter integration; unset disables the opt-in subscribe.
   MARKETMAKER_URL: z.string().url('MARKETMAKER_URL must be a valid URL').optional(),
-  // apps/auth's two listeners (plan P-1): PORT is the public domain's;
-  // INTERNAL_PORT is reachable on Railway's private network only.
+  // apps/auth's one listener, behind the public domain. There is no internal
+  // listener and no shared credential (owner amendment, 2026-10-17).
   PORT: z.coerce.number().int().min(1).max(65535).default(3100),
-  INTERNAL_PORT: z.coerce.number().int().min(1).max(65535).default(3101),
   // apps/auth's Sentry project (the list-walk alert). Unset disables sending.
   SENTRY_DSN: z.string().url('SENTRY_DSN must be a valid URL').optional(),
 });
@@ -97,7 +88,7 @@ export function getEnv(): AuthEnv {
     throw new Error(
       `@ansari/auth env validation failed for: ${vars}. ` +
         `Set these before running the auth service — see apps/auth/.env.example ` +
-        `(BETTER_AUTH_SECRET and AUTH_INTERNAL_SECRET must be >= 32 chars, RESEND_API_KEY >= 20; ` +
+        `(BETTER_AUTH_SECRET must be >= 32 chars, RESEND_API_KEY >= 20; ` +
         `BETTER_AUTH_URL, AUTH_JWT_ISSUER and FRONTEND_URL must be URLs; CORS_ORIGIN a comma list of URLs).`
     );
   }

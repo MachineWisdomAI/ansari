@@ -1,10 +1,10 @@
 // Direct reads and operator writes on `auth.users` that are not better-auth
-// endpoints: apps/auth's internal endpoints, its boot assertion, and the
+// endpoints: apps/auth's account endpoints, its boot assertion, and the
 // operator scripts (grant-admin, ban-user). The admin plugin's HTTP surface is
 // blocked (spec 300), so roles and bans are set here, out of band.
 //
 // Emails are matched normalized, the way better-auth stores them.
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, eq, gt } from 'drizzle-orm';
 
 import type { Db } from './db';
 import { normalizeEmail } from './reserved';
@@ -27,6 +27,25 @@ export async function findUserByEmail(db: Db, email: string): Promise<UserRecord
     .from(users)
     .where(eq(users.email, normalizeEmail(email)));
   return user;
+}
+
+/**
+ * True while session `sessionId` exists, belongs to `userId` and has not
+ * expired: a JWT's `sid` is still a live session (sign-out, revocation, a
+ * password reset and deletion all remove the row).
+ */
+export async function isSessionLive(
+  db: Db,
+  sessionId: string,
+  userId: string,
+  now: Date = new Date()
+): Promise<boolean> {
+  const rows = await db
+    .select({ id: session.id })
+    .from(session)
+    .where(and(eq(session.id, sessionId), eq(session.userId, userId), gt(session.expiresAt, now)))
+    .limit(1);
+  return rows.length === 1;
 }
 
 /** True while a ban is in force: until `ban_expires`, or for good when it is unset. */

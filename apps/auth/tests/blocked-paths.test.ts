@@ -1,5 +1,5 @@
 // The admin plugin's HTTP surface, change-email, update-user and change-password never answer
-// on either listener (spec 300; scenario 28). The admin endpoints are
+// (spec 300; scenario 28). The admin endpoints are
 // enumerated from the installed package, so a better-auth upgrade that adds one
 // is covered without editing this file. Every request carries a VALID admin
 // session, so a pass cannot come from a missing or non-admin session.
@@ -11,7 +11,6 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { canonicalPath, isBlockedPath } from '../src/middleware/blocked-paths';
 import {
-  internalHeaders,
   send,
   signIn,
   signUp,
@@ -103,17 +102,9 @@ describe('the admin surface, from the installed package', () => {
     expect(BLOCKED_AUTH_PATHS).toEqual(expect.arrayContaining(fromApi));
   });
 
-  it('every admin endpoint and each of its variants gets the block response (public)', async () => {
+  it('every admin endpoint and each of its variants gets the block response', async () => {
     for (const { path, method } of adminEndpoints()) {
       for (const variant of variants(path)) await expectBlocked(service.publicUrl, variant, method);
-    }
-  });
-
-  it('the same holds on the internal listener, with the credential', async () => {
-    for (const { path, method } of adminEndpoints()) {
-      for (const variant of variants(path)) {
-        await expectBlocked(service.internalUrl, variant, method, internalHeaders());
-      }
     }
   });
 });
@@ -122,7 +113,6 @@ describe('change-email, update-user and change-password', () => {
   it.each(['/change-email', '/update-user', '/change-password'])('%s and its variants get the block response', async (path) => {
     for (const variant of variants(path)) {
       await expectBlocked(service.publicUrl, variant, 'POST');
-      await expectBlocked(service.internalUrl, variant, 'POST', internalHeaders());
     }
   });
 
@@ -183,9 +173,9 @@ describe('canonicalPath', () => {
   });
 
   // A request line may carry an absolute-form target (RFC 9112 3.2.2), which
-  // Node passes through as req.url. Sent raw, on the wire, to both listeners.
+  // Node passes through as req.url. Sent raw, on the wire.
   it('an absolute-form request target gets the block response', async () => {
-    for (const base of [service.publicUrl, service.internalUrl]) {
+    for (const base of [service.publicUrl]) {
       const { port } = new URL(base);
       for (const target of [
         `http://localhost:${port}/api/auth/admin/list-users`,
@@ -201,7 +191,6 @@ describe('canonicalPath', () => {
               headers: {
                 'content-type': 'application/json',
                 authorization: `Bearer ${adminToken}`,
-                ...(base === service.internalUrl ? internalHeaders() : {}),
               },
             },
             (res) => {

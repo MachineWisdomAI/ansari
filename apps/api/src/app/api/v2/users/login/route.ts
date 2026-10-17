@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { getRealIp } from '@/lib/rate-limit';
 import { resolveUser } from '@/lib/auth/resolve-user';
 import { AuthServiceUnavailableError } from '@/lib/auth-service/client';
 import {
@@ -11,6 +10,7 @@ import {
   tooManyRequestsResponse,
   unavailableResponse,
 } from '@/lib/auth-service/legacy';
+import { limitLegacyRoute } from '@/lib/auth-service/limits';
 import { safeErrorMeta } from '@/lib/log';
 
 // Legacy login over apps/auth (spec 300, plan phase 8): sign in, exchange the
@@ -24,6 +24,9 @@ const loginSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
+  const limited = limitLegacyRoute(request, 'login');
+  if (limited) return limited;
+
   try {
     const body = await request.json();
     const parseResult = loginSchema.safeParse(body);
@@ -32,12 +35,11 @@ export async function POST(request: NextRequest) {
       return legacyError(errors.join(', '), 422);
     }
 
-    const clientIp = getRealIp(request);
-    const result = await signIn(parseResult.data, { clientIp });
+    const result = await signIn(parseResult.data);
     if (result.kind === 'invalid') return legacyError(LEGACY_DETAIL.invalidCredentials, 401);
     if (result.kind === 'rate_limited') return tooManyRequestsResponse(result.retryAfter);
 
-    const accessToken = await mintJwt(result.sessionToken, { clientIp });
+    const accessToken = await mintJwt(result.sessionToken);
     if (!accessToken) throw new AuthServiceUnavailableError(401);
 
     const resolved = await resolveUser(result.userId, accessToken);

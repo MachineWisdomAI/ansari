@@ -5,7 +5,6 @@ import { db } from '@/lib/db/index';
 import { users } from '@/db/schema';
 import { insertAppUserRow } from '@/lib/db/users';
 import { CLIENT_HEADER, getClientId } from '@/lib/attribution';
-import { getRealIp } from '@/lib/rate-limit';
 import { AuthServiceUnavailableError } from '@/lib/auth-service/client';
 import {
   LEGACY_DETAIL,
@@ -15,6 +14,7 @@ import {
   tooManyRequestsResponse,
   unavailableResponse,
 } from '@/lib/auth-service/legacy';
+import { limitLegacyRoute } from '@/lib/auth-service/limits';
 import { safeErrorMeta } from '@/lib/log';
 
 // Legacy register over apps/auth (spec 300, plan phase 8). The order is the
@@ -37,6 +37,9 @@ const registerSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
+  const limited = limitLegacyRoute(request, 'register');
+  if (limited) return limited;
+
   try {
     const body = await request.json();
     const parseResult = registerSchema.safeParse(body);
@@ -54,18 +57,17 @@ export async function POST(request: NextRequest) {
       .limit(1);
     if (holder) return legacyError(LEGACY_DETAIL.emailTaken, 409);
 
-    const clientIp = getRealIp(request);
     const clientHeader = request.headers.get(CLIENT_HEADER);
     const result = await signUp(
       { email, password, first_name, last_name, register_to_mail_list },
-      { clientIp, headers: clientHeader ? { [CLIENT_HEADER]: clientHeader } : undefined }
+      { headers: clientHeader ? { [CLIENT_HEADER]: clientHeader } : undefined }
     );
     if (result.kind === 'taken') return legacyError(LEGACY_DETAIL.emailTaken, 409);
     if (result.kind === 'weak') return legacyError(result.detail, 400);
     if (result.kind === 'invalid') return legacyError(result.detail, 422);
     if (result.kind === 'rate_limited') return tooManyRequestsResponse(result.retryAfter);
 
-    const accessToken = await mintJwt(result.sessionToken, { clientIp });
+    const accessToken = await mintJwt(result.sessionToken);
     if (!accessToken) throw new AuthServiceUnavailableError(401);
 
     // `registered_via` from X-Ansari-Client, as today (spec 56); NULL when absent.

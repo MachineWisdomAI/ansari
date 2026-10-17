@@ -5,9 +5,9 @@ import type { PGlite } from '@electric-sql/pglite';
 
 /**
  * `requireUser` and `requireAdminRole` end to end: JWTs minted by the real
- * apps/auth, verified against its JWKS over its internal listener (with the
- * credential), users resolved in the app database built from the real
- * journal. No route is switched to these yet (phase 8).
+ * apps/auth, verified against its public JWKS (no credential), users resolved
+ * in the app database built from the real journal, the role read with the
+ * admin's own JWT (owner amendment 2026-10-17).
  */
 
 const h = vi.hoisted(() => ({ db: null as unknown }));
@@ -66,7 +66,7 @@ afterAll(async () => {
 beforeEach(async () => {
   app = await migrateAppDb();
   h.db = appDrizzle(app);
-  setApiEnv(service.internalUrl);
+  setApiEnv(service.publicUrl);
 });
 
 describe('requireUser', () => {
@@ -77,19 +77,24 @@ describe('requireUser', () => {
     expect('user' in result && { id: result.user.id, email: result.user.email }).toEqual({ id, email });
   });
 
-  it('the JWKS fetch is refused without the internal credential', async () => {
-    const { jwt } = await signUpTokens(service, nextEmail('cred'));
-    const direct = await fetch(`${service.internalUrl}/api/auth/jwks`);
-    expect(direct.status).toBe(401);
+  it('the JWKS is public: anyone can fetch it, and apps/api needs no credential', async () => {
+    const { jwt } = await signUpTokens(service, nextEmail('public-jwks'));
+    const direct = await fetch(`${service.publicUrl}/api/auth/jwks`, {
+      headers: { 'x-real-ip': '203.0.113.200' },
+    });
+    expect(direct.status).toBe(200);
+    expect('user' in (await requireUser(request(jwt)))).toBe(true);
+  });
 
-    setApiEnv(service.internalUrl, 'a-wrong-internal-secret-of-at-least-32-chars');
+  it("first use: a token whose session has ended gets no app row (apps/auth's live-sid check)", async () => {
+    const { id, jwt, sessionToken } = await signUpTokens(service, nextEmail('dead-first-use'));
+    await service.client.query('delete from auth.session where token = $1', [sessionToken]);
     expect(await errorOf(await requireUser(request(jwt)))).toEqual({
       status: 401,
-      body: { detail: 'Invalid or expired token' },
+      body: { detail: 'Token not found or expired' },
     });
-
-    setApiEnv(service.internalUrl);
-    expect('user' in (await requireUser(request(jwt)))).toBe(true);
+    const { rows } = await app.query('select id from users where id = $1', [id]);
+    expect(rows).toEqual([]);
   });
 
   it('no bearer: 401 Not authenticated', async () => {
@@ -185,6 +190,13 @@ describe('requireAdminRole', () => {
     expect((await errorOf(await requireAdminRole(request(jwt)))).status).toBe(403);
   });
 
+  it("a revoked session loses admin on the very next request, though the JWT has not expired", async () => {
+    const { jwt, sessionToken } = await adminUser('revoked');
+    expect('user' in (await requireAdminRole(request(jwt)))).toBe(true);
+    await service.client.query('delete from auth.session where token = $1', [sessionToken]);
+    expect((await errorOf(await requireAdminRole(request(jwt)))).status).toBe(403);
+  });
+
   it('an app user apps/auth no longer knows gets 403', async () => {
     const { id, jwt } = await adminUser('gone');
     expect('user' in (await requireAdminRole(request(jwt)))).toBe(true);
@@ -216,7 +228,7 @@ describe('requireAdminRole', () => {
       });
     } finally {
       warn.mockRestore();
-      setApiEnv(service.internalUrl);
+      setApiEnv(service.publicUrl);
     }
   });
 
@@ -237,7 +249,7 @@ describe('requireAdminRole', () => {
     } finally {
       warn.mockRestore();
       resetEnvCache();
-      setApiEnv(service.internalUrl);
+      setApiEnv(service.publicUrl);
     }
   });
 });

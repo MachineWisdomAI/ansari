@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { getRealIp } from '@/lib/rate-limit';
 import { AuthServiceUnavailableError } from '@/lib/auth-service/client';
 import {
   legacyError,
@@ -8,6 +7,7 @@ import {
   tooManyRequestsResponse,
   unavailableResponse,
 } from '@/lib/auth-service/legacy';
+import { limitLegacyRoute } from '@/lib/auth-service/limits';
 import { safeErrorMeta } from '@/lib/log';
 
 // Legacy reset request over apps/auth (spec 300, plan phase 8). apps/auth
@@ -21,6 +21,9 @@ const requestSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
+  const limited = limitLegacyRoute(request, 'request_password_reset');
+  if (limited) return limited;
+
   let body: unknown;
   try {
     body = await request.json();
@@ -35,9 +38,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const result = await requestPasswordReset(parseResult.data.email, {
-      clientIp: getRealIp(request),
-    });
+    const result = await requestPasswordReset(parseResult.data.email);
     if (result.kind === 'rate_limited') return tooManyRequestsResponse(result.retryAfter);
   } catch (error) {
     // An outage is the same for every address, so the 503 tells nothing about

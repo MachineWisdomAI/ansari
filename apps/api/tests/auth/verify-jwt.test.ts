@@ -13,6 +13,7 @@ import {
   setApiEnv,
   signToken,
   startJwksServer,
+  TEST_ISSUER,
   type JwksServer,
   type SigningKey,
 } from './helpers';
@@ -55,13 +56,19 @@ describe('a valid token', () => {
     expect(await verifyAccessToken(await signToken({ key, sub, sid }))).toEqual({ sub, sid });
   });
 
-  it('sends the internal credential with the JWKS fetch, and fails without it', async () => {
-    setApiEnv(jwks.url, 'a-different-internal-secret-of-32-characters');
-    expect(await verifyAccessToken(await signToken({ key }))).toBeNull();
-    expect(jwks.requests).toBe(1);
-
-    setApiEnv(jwks.url);
+  it('fetches the public JWKS like any other client: no credential, no forwarded IP', async () => {
     await warmUp();
+    expect(jwks.requests).toBe(1);
+    const names = Object.keys(jwks.lastHeaders ?? {});
+    expect(names.some((n) => n.startsWith('x-ansari-'))).toBe(false);
+    expect(names).not.toContain('authorization');
+  });
+
+  it("an issuer that differs from AUTH_URL is pinned as set, never derived from the URL", async () => {
+    // AUTH_URL is the JWKS server here; the issuer stays TEST_ISSUER.
+    expect(new URL(jwks.url).origin).not.toBe(new URL(TEST_ISSUER).origin);
+    await warmUp();
+    expect(await verifyAccessToken(await signToken({ key, issuer: jwks.url }))).toBeNull();
   });
 });
 

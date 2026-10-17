@@ -1,18 +1,24 @@
-// apps/auth's own limiters (limits/email-limiter.ts): the reset-request caps in
-// both modes, and the `email`-mode fallback (scenario 32) with its list-walk
-// alert. Time moves with a faked Date, which both better-auth's router and
-// these limiters read.
+// apps/auth's own limiters (limits/email-limiter.ts; owner amendment
+// 2026-10-17): none keyed by client IP. Reset requests per email and globally,
+// reset consumes globally, the session -> JWT exchange per session, sign-in and
+// sign-up per email (scenario 32) with the list-walk alert, and the layer's
+// view: every call from ONE IP (apps/api's), never refused for sharing it.
+// Time moves with a faked Date, which both better-auth's router and these
+// limiters read.
 import { limits, touchKey } from '@ansari/auth';
 import * as Sentry from '@sentry/node';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { LIST_WALK_MESSAGE, type ListWalkAlert } from '../src/alerts';
-import { emailHash, emailKey, ipBurstKey, ipKey } from '../src/limits/email-limiter';
+import { emailHash, emailKey, globalKey, sessionKey } from '../src/limits/email-limiter';
 import {
+  clearSignUpCeiling,
+  rateLimitKeys,
   rateLimitRow,
   send,
   signIn,
   signUp,
+  signUpTokens,
   startService,
   STRONG_PASSWORD,
   type Service,
@@ -39,17 +45,21 @@ async function snapshot(res: Response) {
   return { status: res.status, body: await res.text() };
 }
 
-describe.each(['ip', 'email'] as const)('reset requests (%s mode)', (mode) => {
+describe('reset requests', () => {
   let service: Service;
 
   beforeAll(async () => {
-    service = await startService({ mode });
+    service = await startService();
     expect((await signUp(service, 'reset-me@example.com')).status).toBe(200);
     expect((await signUp(service, 'reset-two@example.com')).status).toBe(200);
   });
 
   afterAll(async () => {
     await service?.close();
+  });
+
+  afterEach(() => {
+    advance(3600);
   });
 
   it(`the per-email cap (${limits.RESET_REQUEST_PER_EMAIL.max}/h) holds across two IPs, known and unknown alike`, async () => {
@@ -69,59 +79,39 @@ describe.each(['ip', 'email'] as const)('reset requests (%s mode)', (mode) => {
     const known: unknown[] = [];
     const unknown: unknown[] = [];
     for (let i = 0; i <= limits.RESET_REQUEST_PER_EMAIL.max; i++) {
-      advance(61); // past better-auth's own per-IP burst rule
       known.push(await snapshot(await requestReset(service, 'reset-two@example.com', '203.0.113.120')));
       unknown.push(await snapshot(await requestReset(service, 'ghost@example.com', '203.0.113.121')));
     }
-    advance(3600);
     expect(unknown).toEqual(known);
   });
 
-  it(`the IP cap (${limits.RESET_REQUEST_PER_IP.max}/15 min) holds across many emails`, async () => {
-    const ip = '203.0.113.130';
-    for (let i = 0; i < limits.RESET_REQUEST_PER_IP.max; i++) {
-      advance(61);
-      expect((await requestReset(service, `walker-${i}@example.com`, ip)).status).not.toBe(429);
+  it(`the global ceiling (${limits.RESET_REQUEST_GLOBAL.max}/min) holds across emails and IPs`, async () => {
+    for (let i = 0; i < limits.RESET_REQUEST_GLOBAL.max; i++) {
+      expect((await requestReset(service, `walker-${i}@example.com`, `203.0.113.${i + 1}`)).status).not.toBe(429);
     }
-    advance(61);
-    expect((await requestReset(service, 'walker-last@example.com', ip)).status).toBe(429);
-    expect((await rateLimitRow(service, ipKey(ip, '/request-password-reset')))?.count).toBe(
-      limits.RESET_REQUEST_PER_IP.max + 1
+    expect((await requestReset(service, 'walker-last@example.com', '203.0.114.1')).status).toBe(429);
+    expect((await rateLimitRow(service, globalKey('/request-password-reset')))?.count).toBe(
+      limits.RESET_REQUEST_GLOBAL.max + 1
     );
-    advance(limits.RESET_REQUEST_PER_IP.window);
-    expect((await requestReset(service, 'walker-after@example.com', ip)).status).not.toBe(429);
+    advance(limits.RESET_REQUEST_GLOBAL.window);
+    expect((await requestReset(service, 'walker-after@example.com', '203.0.114.2')).status).not.toBe(429);
   });
 
-  it(`a request refused by the ${limits.RESET_REQUEST_BURST.max}/min burst still counts toward the IP cap`, async () => {
-    advance(3600);
-    const ip = '203.0.113.160';
-    const total = limits.RESET_REQUEST_PER_IP.max;
-    const statuses: number[] = [];
-    for (let i = 0; i < total; i++) {
-      statuses.push((await requestReset(service, `burst-${i}@example.com`, ip)).status);
-    }
-    expect(statuses.filter((s) => s === 429)).toHaveLength(total - limits.RESET_REQUEST_BURST.max);
-    expect((await rateLimitRow(service, ipKey(ip, '/request-password-reset')))?.count).toBe(total);
-    expect((await rateLimitRow(service, ipBurstKey(ip, '/request-password-reset')))?.count).toBe(total);
-    advance(61); // the burst window is over; the 15-minute cap is not
-    expect((await requestReset(service, 'burst-after@example.com', ip)).status).toBe(429);
+  it('a request refused by the global ceiling still counts toward the email cap', async () => {
+    const email = 'ceiling-victim@example.com';
+    await service.client.query(
+      `insert into auth.rate_limit (key, count, last_request) values ($1, $2, $3)
+       on conflict (key) do update set count = excluded.count, last_request = excluded.last_request`,
+      [globalKey('/request-password-reset'), limits.RESET_REQUEST_GLOBAL.max, Date.now()]
+    );
+    expect((await requestReset(service, email, '203.0.113.161')).status).toBe(429);
+    expect((await rateLimitRow(service, emailKey(email, '/request-password-reset')))?.count).toBe(1);
   });
 
-  it('a request refused by the burst still counts toward the email cap', async () => {
-    advance(3600);
-    const email = 'burst-victim@example.com';
-    const ip = '203.0.113.161';
-    for (let i = 0; i < limits.RESET_REQUEST_BURST.max; i++) {
-      await requestReset(service, `filler-${i}@example.com`, ip);
-    }
-    expect((await requestReset(service, email, ip)).status).toBe(429); // burst
-    for (let i = 1; i < limits.RESET_REQUEST_PER_EMAIL.max; i++) {
-      expect((await requestReset(service, email, `203.0.113.${170 + i}`)).status).not.toBe(429);
-    }
-    expect((await requestReset(service, email, '203.0.113.179')).status).toBe(429);
-  });
-
-  it("better-auth's router has no rule of its own for the path", () => {
+  it('no per-IP row is written for the path, by the router or by apps/auth', async () => {
+    await requestReset(service, 'any@example.com', '203.0.113.170');
+    const keys = await rateLimitKeys(service);
+    expect(keys.filter((k) => k.includes('203.0.113.170'))).toEqual([]);
     expect(service.auth.options.rateLimit?.customRules?.['/request-password-reset']).toBe(false);
   });
 
@@ -131,15 +121,130 @@ describe.each(['ip', 'email'] as const)('reset requests (%s mode)', (mode) => {
   });
 });
 
-describe('the email-mode fallback (scenario 32)', () => {
+describe('reset consume', () => {
+  let service: Service;
+
+  beforeAll(async () => {
+    service = await startService();
+  });
+
+  afterAll(async () => {
+    await service?.close();
+  });
+
+  it(`the global ceiling (${limits.RESET_CONSUME_GLOBAL.max}/min) holds across IPs, and passes after the window`, async () => {
+    advance(3600);
+    const consume = (ip: string) =>
+      send(service.publicUrl, '/api/auth/reset-password', {
+        ip,
+        body: { token: 'no-such-token', newPassword: STRONG_PASSWORD },
+      });
+    for (let i = 0; i < limits.RESET_CONSUME_GLOBAL.max; i++) {
+      expect((await consume(`203.0.113.${i + 1}`)).status).not.toBe(429);
+    }
+    expect((await consume('203.0.114.1')).status).toBe(429);
+    advance(limits.RESET_CONSUME_GLOBAL.window);
+    expect((await consume('203.0.114.2')).status).not.toBe(429);
+    expect(service.auth.options.rateLimit?.customRules?.['/reset-password']).toBe(false);
+  });
+});
+
+describe('the session -> JWT exchange, per session token', () => {
+  let service: Service;
+
+  beforeAll(async () => {
+    service = await startService();
+  });
+
+  afterAll(async () => {
+    await service?.close();
+  });
+
+  afterEach(() => {
+    advance(3600);
+  });
+
+  it.each(['/token', '/get-session'])(
+    `%s: ${limits.TOKEN_EXCHANGE_PER_SESSION.max} per session pass as a burst; the next is 429; another session is unaffected`,
+    async (path) => {
+      const a = await signUpTokens(service, `exchange-a${path.replace('/', '-')}@example.com`);
+      const b = await signUpTokens(service, `exchange-b${path.replace('/', '-')}@example.com`);
+      advance(3600); // start a fresh window: signUpTokens itself used /token
+      const exchange = (bearer: string) =>
+        send(service.publicUrl, `/api/auth${path}`, { bearer, ip: '192.0.2.20' });
+      for (let i = 0; i < limits.TOKEN_EXCHANGE_PER_SESSION.max; i++) {
+        expect((await exchange(a.sessionToken)).status).toBe(200);
+      }
+      expect((await exchange(a.sessionToken)).status).toBe(429);
+      expect((await exchange(b.sessionToken)).status).toBe(200);
+      const keys = await rateLimitKeys(service);
+      expect(keys).toContain(sessionKey(a.sessionToken, path));
+      expect(keys.some((k) => k.includes(a.sessionToken) || k.includes('192.0.2.20'))).toBe(false);
+    }
+  );
+});
+
+describe("the layer's view: every call from one IP (R1)", () => {
+  // apps/api's /v2/users layer reaches apps/auth anonymously, so every legacy
+  // call carries apps/api's egress IP. More than the router's per-IP default,
+  // from that one IP, across two users, must draw no 429; the per-email and
+  // per-session rules must still trip.
+  let service: Service;
+  const API_IP = '192.0.2.99';
+  const emails = ['layer-a@example.com', 'layer-b@example.com'];
+
+  beforeAll(async () => {
+    service = await startService();
+    for (const email of emails) expect((await signUp(service, email)).status).toBe(200);
+  });
+
+  afterAll(async () => {
+    await service?.close();
+  });
+
+  it(`${limits.DEFAULT_RULE.max + 1} sign-ins and ${limits.DEFAULT_RULE.max + 1} token exchanges from one IP are never 429`, async () => {
+    advance(3600);
+    const total = limits.DEFAULT_RULE.max + 1;
+    const sessions: string[] = [];
+    for (let i = 0; i < total; i++) {
+      const res = await signIn(service, emails[i % 2] as string, STRONG_PASSWORD, { ip: API_IP });
+      expect(res.status).toBe(200);
+      if (i < 2) sessions.push(((await res.json()) as { token: string }).token);
+    }
+    for (let i = 0; i < total; i++) {
+      const bearer = sessions[i % 2] as string;
+      expect((await send(service.publicUrl, '/api/auth/token', { bearer, ip: API_IP })).status).toBe(200);
+    }
+    expect((await rateLimitKeys(service)).filter((k) => k.includes(API_IP))).toEqual([]);
+  });
+
+  it('from that same IP, the per-email sign-in lock and the per-session budget still trip', async () => {
+    advance(3600);
+    const [victim, other] = emails as [string, string];
+    for (let i = 0; i < limits.SIGN_IN_PER_EMAIL.max; i++) {
+      expect((await signIn(service, victim, 'Wrong-Passw0rd!', { ip: API_IP })).status).toBe(401);
+    }
+    expect((await signIn(service, victim, STRONG_PASSWORD, { ip: API_IP })).status).toBe(429);
+    const ok = await signIn(service, other, STRONG_PASSWORD, { ip: API_IP });
+    expect(ok.status).toBe(200);
+
+    const { token } = (await ok.json()) as { token: string };
+    for (let i = 0; i < limits.TOKEN_EXCHANGE_PER_SESSION.max; i++) {
+      await send(service.publicUrl, '/api/auth/token', { bearer: token, ip: API_IP });
+    }
+    expect((await send(service.publicUrl, '/api/auth/token', { bearer: token, ip: API_IP })).status).toBe(429);
+  });
+});
+
+describe('sign-in and sign-up per email (scenario 32)', () => {
   let service: Service;
   const alerts: ListWalkAlert[] = [];
   const victim = 'victim@example.com';
   const wrong = 'Wrong-Passw0rd!';
-  const rule = limits.FALLBACK_SIGN_IN_PER_EMAIL;
+  const rule = limits.SIGN_IN_PER_EMAIL;
 
   beforeAll(async () => {
-    service = await startService({ mode: 'email', alert: (a) => alerts.push(a) });
+    service = await startService({ alert: (a) => alerts.push(a) });
     expect((await signUp(service, victim)).status).toBe(200);
     expect((await signUp(service, 'steady@example.com')).status).toBe(200);
   });
@@ -178,25 +283,29 @@ describe('the email-mode fallback (scenario 32)', () => {
     expect(await rateLimitRow(service, emailKey('steady@example.com', '/sign-in/email'))).toBeUndefined();
   });
 
-  it('with the per-IP rule off, many failures from one IP for different emails are not a global cap', async () => {
-    for (let i = 0; i < limits.SIGN_IN.max * 2; i++) {
+  it('many failures from one IP for different emails are not a global cap', async () => {
+    for (let i = 0; i < limits.SIGN_IN_PER_EMAIL.max * 2; i++) {
       expect((await signIn(service, `spread-${i}@example.com`, wrong, { ip: '203.0.113.141' })).status).toBe(401);
     }
   });
 
-  it(`sign-up: ${limits.FALLBACK_SIGN_UP_PER_EMAIL.max} per email, every request counted`, async () => {
-    for (let i = 0; i < limits.FALLBACK_SIGN_UP_PER_EMAIL.max; i++) {
+  it(`sign-up: ${limits.SIGN_UP_PER_EMAIL.max} per email, every request counted`, async () => {
+    for (let i = 0; i < limits.SIGN_UP_PER_EMAIL.max; i++) {
       expect((await signUp(service, 'dup@example.com')).status).not.toBe(429);
     }
     expect((await signUp(service, 'dup@example.com')).status).toBe(429);
   });
 
-  it(`sign-up: the global ceiling (${limits.FALLBACK_SIGN_UP_GLOBAL.max}/min) holds across emails and IPs`, async () => {
-    // Too-short passwords fail fast and still count: the ceiling counts every request.
-    for (let i = 0; i < limits.FALLBACK_SIGN_UP_GLOBAL.max; i++) {
-      expect((await signUp(service, `ceiling-${i}@example.com`, 'short')).status).toBe(400);
+  it(`sign-up: the global ceiling (${limits.SIGN_UP_GLOBAL.max}/min) holds across emails and IPs`, async () => {
+    // Too-short passwords fail fast and still count: the ceiling counts every
+    // request. `send`, not the signUp helper, which clears the ceiling.
+    await clearSignUpCeiling(service);
+    const attempt = (email: string, password: string) =>
+      send(service.publicUrl, '/api/auth/sign-up/email', { body: { email, password, name: 'X' } });
+    for (let i = 0; i < limits.SIGN_UP_GLOBAL.max; i++) {
+      expect((await attempt(`ceiling-${i}@example.com`, 'short')).status).toBe(400);
     }
-    expect((await signUp(service, 'ceiling-over@example.com', STRONG_PASSWORD)).status).toBe(429);
+    expect((await attempt('ceiling-over@example.com', STRONG_PASSWORD)).status).toBe(429);
   });
 
   it(`the list-walk alert fires once at ${limits.LIST_WALK_ALERT.distinctEmails} distinct emails, with no raw email`, async () => {
@@ -233,7 +342,7 @@ describe('the list-walk alert through Sentry', () => {
         flush: async () => true,
       }),
     });
-    service = await startService({ mode: 'email' });
+    service = await startService();
   });
 
   afterAll(async () => {
@@ -249,7 +358,7 @@ describe('the list-walk alert through Sentry', () => {
       await touchKey(service.db, `walk:${emailHash(`seeded-${i}@example.com`)}`, now);
     }
     const email = 'Final.Walker@Example.com';
-    for (let n = 0; n < limits.FALLBACK_SIGN_IN_PER_EMAIL.max; n++) {
+    for (let n = 0; n < limits.SIGN_IN_PER_EMAIL.max; n++) {
       await signIn(service, email, 'Wrong-Passw0rd!');
     }
     await Sentry.flush(2000);

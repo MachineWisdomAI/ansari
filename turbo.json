@@ -103,18 +103,15 @@
     "BETTER_AUTH_SECRET",
     "BETTER_AUTH_URL",
     "CORS_ORIGIN",
-    // apps/auth <-> apps/api (spec 300). The issuer, audience, internal secret
-    // and layer origin are in BOTH Zod schemas; AUTH_INTERNAL_URL is apps/api's,
-    // AUTH_RATE_LIMIT_MODE and INTERNAL_PORT are apps/auth's. The legacy
-    // JWT_SECRET / ACCESS_ / REFRESH_TOKEN_EXPIRY_HOURS left with the legacy
-    // auth code (phase 9).
-    "AUTH_INTERNAL_URL",
+    // apps/auth <-> apps/api (spec 300). The issuer, audience and layer origin
+    // are in BOTH Zod schemas; AUTH_URL (apps/auth's public origin) is
+    // apps/api's. There is no shared secret, internal port or rate-limit mode
+    // (owner amendment 2026-10-17). The legacy JWT_SECRET / ACCESS_ /
+    // REFRESH_TOKEN_EXPIRY_HOURS left with the legacy auth code (phase 9).
+    "AUTH_URL",
     "AUTH_JWT_ISSUER",
     "AUTH_JWT_AUDIENCE",
-    "AUTH_INTERNAL_SECRET",
     "AUTH_LAYER_ORIGIN",
-    "AUTH_RATE_LIMIT_MODE",
-    "INTERNAL_PORT",
     "GEMINI_API_KEY",
     "GEMINI_MODEL",
     "GEMINI_FALLBACK_MODEL",

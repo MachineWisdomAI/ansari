@@ -1,12 +1,12 @@
-// Both apps/auth listeners over one createAuth(pglite) instance, each on an
-// ephemeral port, driven with fetch. The database is built from packages/auth's
+// The apps/auth app over one createAuth(pglite) instance, on an ephemeral
+// port, driven with fetch. The database is built from packages/auth's
 // migration journal, through that package's own test helpers.
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 import type { PGlite } from '@electric-sql/pglite';
 
-import type { Auth, AuthEnv, Db, EmailMessage, Mailer } from '@ansari/auth';
+import type { Auth, Db, EmailMessage, Mailer } from '@ansari/auth';
 
 import {
   drizzleFor,
@@ -14,28 +14,24 @@ import {
   setAuthEnv,
 } from '../../../../packages/auth/tests/helpers/auth-db';
 import type { ListWalkAlert } from '../../src/alerts';
-import { createInternalApp, createPublicApp, createServiceAuth } from '../../src/app';
-import { FORWARDED_IP_HEADER, INTERNAL_AUTH_HEADER } from '../../src/middleware/client-ip';
+import { createApp, createServiceAuth } from '../../src/app';
 
 export { TEST_ADMIN_EMAIL } from '../../../../packages/auth/tests/helpers/auth-db';
 
 /** BETTER_AUTH_URL and the one CORS origin in tests. */
 export const BASE = 'http://localhost:3100';
-export const INTERNAL_SECRET = 'test-internal-secret-at-least-32-characters';
 
 export type Service = {
   client: PGlite;
   db: Db;
   auth: Auth;
   publicUrl: string;
-  internalUrl: string;
   /** Every reset email the service handed to its mailer, in order. */
   mail: EmailMessage[];
   close: () => Promise<void>;
 };
 
 export type ServiceOptions = {
-  mode?: AuthEnv['AUTH_RATE_LIMIT_MODE'];
   production?: boolean;
   alert?: (alert: ListWalkAlert) => void;
   /** Replaces the capturing mailer (which records into `mail`). */
@@ -57,7 +53,6 @@ const urlOf = (server: Server) => `http://127.0.0.1:${(server.address() as Addre
 
 export async function startService(options: ServiceOptions = {}): Promise<Service> {
   setAuthEnv(BASE);
-  process.env.AUTH_RATE_LIMIT_MODE = options.mode ?? 'ip';
   const client = await migrate();
   const db = drizzleFor(client);
   const mail: EmailMessage[] = [];
@@ -66,18 +61,15 @@ export async function startService(options: ServiceOptions = {}): Promise<Servic
   };
   const auth = createServiceAuth(db, { alert: options.alert, mailer: options.mailer ?? capture });
   const appOptions = { production: options.production ?? false };
-  const publicServer = await listen(createPublicApp({ auth, db }, appOptions));
-  const internalServer = await listen(createInternalApp({ auth, db }, appOptions));
+  const publicServer = await listen(createApp({ auth, db }, appOptions));
   return {
     client,
     db,
     auth,
     publicUrl: urlOf(publicServer),
-    internalUrl: urlOf(internalServer),
     mail,
     async close() {
       await new Promise((r) => publicServer.close(r));
-      await new Promise((r) => internalServer.close(r));
       await client.close();
     },
   };
@@ -116,13 +108,6 @@ export async function send(baseUrl: string, path: string, opts: RequestOptions =
   });
 }
 
-/** Headers for the credentialed internal hop, with an optional forwarded IP. */
-export function internalHeaders(forwardedIp?: string, secret = INTERNAL_SECRET) {
-  const headers: Record<string, string> = { [INTERNAL_AUTH_HEADER]: secret };
-  if (forwardedIp !== undefined) headers[FORWARDED_IP_HEADER] = forwardedIp;
-  return headers;
-}
-
 export async function rateLimitKeys(service: Service): Promise<string[]> {
   const { rows } = await service.client.query<{ key: string }>('select key from auth.rate_limit');
   return rows.map((r) => r.key);
@@ -138,7 +123,18 @@ export async function rateLimitRow(service: Service, key: string) {
 
 export const STRONG_PASSWORD = 'Correct-Horse-Battery-9';
 
+/**
+ * The global sign-up ceiling (SIGN_UP_GLOBAL) counts every sign-up in the
+ * service, and a suite signs up more users per minute than real traffic does,
+ * so this helper clears that one counter first. Tests about the ceiling call
+ * the route with `send` instead.
+ */
+export async function clearSignUpCeiling(service: Service): Promise<void> {
+  await service.client.query("delete from auth.rate_limit where key = 'global|/sign-up/email'");
+}
+
 export async function signUp(service: Service, email: string, password = STRONG_PASSWORD) {
+  await clearSignUpCeiling(service);
   return send(service.publicUrl, '/api/auth/sign-up/email', {
     body: { email, password, name: 'Test User' },
   });

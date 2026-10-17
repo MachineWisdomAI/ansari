@@ -42,7 +42,19 @@ import { GET as adminStats } from '../../src/app/api/v2/admin/stats/route';
 import { POST as chatCompletions } from '../../src/app/api/v1/chat/completions/route';
 import { resetEnvCache } from '@/lib/config';
 import { banUserByEmail } from '../../../../packages/auth/src/users';
-import { appDrizzle, legacyAccessToken, migrateAppDb, setApiEnv, startAuth, type AuthService } from './helpers';
+import {
+  API_EGRESS_IP,
+  appDrizzle,
+  legacyAccessToken,
+  migrateAppDb,
+  setApiEnv,
+  startAuth,
+  startEdge,
+  type AuthService,
+  type Edge,
+} from './helpers';
+import { resetRateLimitStore } from '@/lib/rate-limit';
+import { LEGACY_IP_LIMITS } from '@/lib/auth-service/limits';
 import { send, signIn, signUp, STRONG_PASSWORD } from '../../../auth/tests/helpers/service';
 
 type Handler = (request: NextRequest, context?: never) => Promise<Response>;
@@ -100,7 +112,8 @@ afterAll(async () => {
 beforeEach(async () => {
   app = await migrateAppDb();
   h.db = appDrizzle(app);
-  setApiEnv(service.internalUrl);
+  setApiEnv(service.publicUrl);
+  resetRateLimitStore();
   await service.client.exec('TRUNCATE auth.rate_limit, auth.verification');
   service.mail.length = 0;
 });
@@ -168,7 +181,7 @@ describe('scenario 3: register through the layer', () => {
   });
 
   it('apps/auth unreachable: 503, never a credentials error', async () => {
-    process.env.AUTH_INTERNAL_URL = 'http://127.0.0.1:9';
+    process.env.AUTH_URL = 'http://127.0.0.1:9';
     resetEnvCache();
     vi.spyOn(console, 'error').mockImplementation(() => {});
     expect((await call(login, { body: { email: nextEmail('down'), password: STRONG_PASSWORD } })).status).toBe(503);
@@ -177,7 +190,7 @@ describe('scenario 3: register through the layer', () => {
 
   it('every layer route answers 503 with the legacy detail when apps/auth is unreachable', async () => {
     const { refresh } = await registerUser(nextEmail('outage-all'));
-    process.env.AUTH_INTERNAL_URL = 'http://127.0.0.1:9';
+    process.env.AUTH_URL = 'http://127.0.0.1:9';
     resetEnvCache();
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -226,13 +239,32 @@ describe('layer edges the contract does not reach', () => {
     });
   });
 
-  it('reset requests over apps/auth\'s limit are a 429, for known and unknown emails alike', async () => {
+  it("reset requests over apps/api's per-IP limit are a 429, for known and unknown emails alike", async () => {
     const clientIp = '198.51.100.41';
+    const { max } = LEGACY_IP_LIMITS.request_password_reset;
     const statuses: number[] = [];
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i <= max; i++) {
       statuses.push((await call(requestReset, { body: { email: nextEmail('nobody') }, ip: clientIp })).status);
     }
+    expect(statuses).toEqual([...Array<number>(max).fill(200), 429]);
+  });
+
+  it("apps/auth's per-email reset cap still holds behind it, across client IPs", async () => {
+    const email = nextEmail('reset-cap');
+    const statuses: number[] = [];
+    for (let i = 0; i < 4; i++) statuses.push((await call(requestReset, { body: { email } })).status);
     expect(statuses).toEqual([200, 200, 200, 429]);
+  });
+
+  it('the layer forwards no client IP and no credential to apps/auth', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    await registerUser(nextEmail('no-forward'));
+    const calls = fetchSpy.mock.calls.filter(([url]) => String(url).startsWith(service.publicUrl));
+    expect(calls.length).toBeGreaterThanOrEqual(2);
+    for (const [, init] of calls) {
+      const names = [...new Headers((init as RequestInit).headers).keys()];
+      expect(names.filter((n) => n === 'x-real-ip' || n.startsWith('x-ansari-internal') || n.startsWith('x-ansari-forwarded'))).toEqual([]);
+    }
   });
 
   it('refresh_token returns the same session token it was given', async () => {
@@ -318,36 +350,54 @@ describe('scenario 20: a system address reset', () => {
 });
 
 describe('scenarios 21 and 22: sign-in limits through the layer', () => {
-  it('six sign-ins from one X-Real-IP: the sixth is 429, sharing the budget with direct sign-in; forged XFF changes nothing', async () => {
+  // The per-IP rule runs in apps/api (lib/auth-service/limits.ts): apps/auth
+  // sees only apps/api's IP on layer calls, and keys none of them by IP.
+  it(`login ${LEGACY_IP_LIMITS.login.max + 1} from one X-Real-IP is 429 at apps/api, before apps/auth; forged XFF changes nothing`, async () => {
     const { email } = await registerUser(nextEmail('limited'));
     const clientIp = '198.51.100.21';
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < LEGACY_IP_LIMITS.login.max; i++) {
       const res = await call(login, {
-        body: { email, password: 'Wrong-Password-1!' },
+        body: { email, password: STRONG_PASSWORD },
         ip: clientIp,
         headers: { 'x-forwarded-for': `10.0.0.${i}, 192.0.2.${i}` },
       });
-      expect(res.status).toBe(401);
+      expect(res.status).toBe(200);
     }
-    for (let i = 0; i < 2; i++) {
-      expect((await signIn(service, email, 'Wrong-Password-1!', { ip: clientIp })).status).toBe(401);
-    }
-    const sixth = await call(login, {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const over = await call(login, {
       body: { email, password: STRONG_PASSWORD },
       ip: clientIp,
       headers: { 'x-forwarded-for': '10.9.9.9' },
     });
-    expect(sixth.status).toBe(429);
-    expect(sixth.body).toEqual({ detail: 'Too many requests. Please try again later.' });
+    expect(over.status).toBe(429);
+    expect(over.body).toEqual({ detail: 'Too many requests. Please try again later.' });
+    expect(fetchSpy.mock.calls.filter(([url]) => String(url).startsWith(service.publicUrl))).toHaveLength(0);
   });
 
   it('two layer clients with different IPs land in different buckets', async () => {
     const { email } = await registerUser(nextEmail('buckets'));
-    for (let i = 0; i < 5; i++) {
-      await call(login, { body: { email, password: 'Wrong-Password-1!' }, ip: '198.51.100.31' });
+    for (let i = 0; i < LEGACY_IP_LIMITS.login.max; i++) {
+      await call(login, { body: { email, password: STRONG_PASSWORD }, ip: '198.51.100.31' });
     }
     expect((await call(login, { body: { email, password: STRONG_PASSWORD }, ip: '198.51.100.31' })).status).toBe(429);
     expect((await call(login, { body: { email, password: STRONG_PASSWORD }, ip: '198.51.100.32' })).status).toBe(200);
+  });
+
+  it("apps/auth's per-email lock still trips behind the layer, from any number of client IPs", async () => {
+    const { email } = await registerUser(nextEmail('email-lock'));
+    for (let i = 0; i < 5; i++) {
+      expect((await call(login, { body: { email, password: 'Wrong-Password-1!' } })).status).toBe(401);
+    }
+    expect((await call(login, { body: { email, password: STRONG_PASSWORD } })).status).toBe(429);
+  });
+
+  it('direct sign-ins at apps/auth do not spend the layer budget (different services, different keys)', async () => {
+    const { email } = await registerUser(nextEmail('direct'));
+    const clientIp = '198.51.100.22';
+    for (let i = 0; i < LEGACY_IP_LIMITS.login.max * 2; i++) {
+      expect((await signIn(service, email, STRONG_PASSWORD, { ip: clientIp })).status).toBe(200);
+    }
+    expect((await call(login, { body: { email, password: STRONG_PASSWORD }, ip: clientIp })).status).toBe(200);
   });
 });
 
@@ -419,7 +469,7 @@ describe('the machine callers, both directions', () => {
       body: { model: 'ansari', messages: [{ role: 'user', content: 'salam' }] },
     });
     expect(res.status).toBe(401);
-    expect(fetchSpy.mock.calls.filter(([url]) => String(url).startsWith(service.internalUrl))).toHaveLength(0);
+    expect(fetchSpy.mock.calls.filter(([url]) => String(url).startsWith(service.publicUrl))).toHaveLength(0);
   });
 
   it('LEADERBOARD_API_KEY on a JWT route gets 401', async () => {
@@ -491,23 +541,27 @@ describe('the revocation window is pinned', () => {
   });
 });
 
-describe('against apps/auth in production mode (its client-IP rule on)', () => {
+describe('against apps/auth in production mode, behind an edge (its client-IP rule on)', () => {
   // Production apps/auth refuses any router request with no usable client IP.
-  // The verifier's JWKS fetch has no end user behind it; a cold cache must
-  // still verify (phase 8 consult, Codex). Every layer call forwards X-Real-IP.
+  // apps/api reaches it over the public domain, so the edge stamps apps/api's
+  // egress IP on every call: the JWKS fetch from a cold cache and every layer
+  // call. One IP for all of them must be enough (R1).
   let prod: AuthService;
+  let edge: Edge;
 
   beforeAll(async () => {
     prod = await startAuth({ production: true });
+    edge = await startEdge(prod.publicUrl);
   });
 
   afterAll(async () => {
+    await edge.stop();
     await prod.close();
-    setApiEnv(service.internalUrl);
+    setApiEnv(service.publicUrl);
   });
 
   it('the whole legacy cycle works, starting from a cold JWKS cache', async () => {
-    setApiEnv(prod.internalUrl);
+    setApiEnv(edge.url);
     const email = nextEmail('prod');
     const registered = await call(register, { body: { email, password: STRONG_PASSWORD } });
     expect(registered.status).toBe(200);
@@ -520,6 +574,11 @@ describe('against apps/auth in production mode (its client-IP rule on)', () => {
     expect((await call(meGet, { token: refreshed.body.access_token })).body.email).toBe(email);
     expect((await call(logout, { token: refreshed.body.access_token })).status).toBe(200);
     expect((await call(meDelete, { token: registered.body.access_token })).status).toBe(200);
+    // Every call apps/auth saw came from apps/api's one IP.
+    expect(edge.stamped.length).toBeGreaterThanOrEqual(8);
+    expect(new Set(edge.stamped)).toEqual(new Set([API_EGRESS_IP]));
+    const { rows } = await prod.client.query<{ key: string }>('select key from auth.rate_limit');
+    expect(rows.filter((r) => r.key.includes(API_EGRESS_IP)).map((r) => r.key)).toEqual([`${API_EGRESS_IP}|/jwks`]);
   });
 });
 

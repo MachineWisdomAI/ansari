@@ -1,10 +1,9 @@
 import { z } from 'zod';
 
 const AUTH_SERVICE_VARS = [
-  'AUTH_INTERNAL_URL',
+  'AUTH_URL',
   'AUTH_JWT_ISSUER',
   'AUTH_JWT_AUDIENCE',
-  'AUTH_INTERNAL_SECRET',
   'AUTH_LAYER_ORIGIN',
 ] as const;
 
@@ -12,19 +11,17 @@ const envSchema = z.object({
   // Database
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
 
-  // apps/auth (spec 300). apps/api verifies apps/auth's JWTs against its JWKS
-  // and calls its internal endpoints, both over the private-network listener
-  // at AUTH_INTERNAL_URL with the shared AUTH_INTERNAL_SECRET. Optional here so
-  // suites that never reach apps/auth run without them; required in production
-  // by the refinement below (checked at boot, lib/boot-check.ts), and checked
-  // again by `config.authService`.
-  AUTH_INTERNAL_URL: z.string().url('AUTH_INTERNAL_URL must be a valid URL').optional(),
+  // apps/auth (spec 300; owner amendment 2026-10-17). apps/api reaches it like
+  // any other client: its public JWKS, its account endpoints with the user's
+  // own JWT, and the layer's anonymous calls, all at AUTH_URL (apps/auth's
+  // public origin). There is no shared credential. The issuer it pins is set
+  // on its own, never derived from the URL. Optional here so suites that never
+  // reach apps/auth run without them; required in production by the
+  // refinement below (checked at boot, lib/boot-check.ts), and checked again
+  // by `config.authService`.
+  AUTH_URL: z.string().url('AUTH_URL must be a valid URL').optional(),
   AUTH_JWT_ISSUER: z.string().url('AUTH_JWT_ISSUER must be a valid URL').optional(),
   AUTH_JWT_AUDIENCE: z.string().min(1, 'AUTH_JWT_AUDIENCE must not be empty').optional(),
-  AUTH_INTERNAL_SECRET: z
-    .string()
-    .min(32, 'AUTH_INTERNAL_SECRET must be at least 32 characters')
-    .optional(),
   // apps/api's own origin, sent as `Origin` on the layer's calls to apps/auth
   // (which trusts it for CSRF only, never for CORS). Same value as apps/auth's.
   AUTH_LAYER_ORIGIN: z.string().url('AUTH_LAYER_ORIGIN must be a valid URL').optional(),
@@ -191,9 +188,8 @@ export const config = {
   },
 
   /**
-   * apps/auth, as apps/api reaches it (spec 300): the internal listener's
-   * origin, the JWT issuer and audience it pins, the internal credential, and
-   * the Origin the layer sends.
+   * apps/auth, as apps/api reaches it (spec 300): its public origin, the JWT
+   * issuer and audience apps/api pins, and the Origin the layer sends.
    * Throws, naming only the missing variables, when any is unset.
    */
   get authService() {
@@ -203,10 +199,9 @@ export const config = {
       throw new Error(`apps/auth is not configured: set ${missing.join(', ')}.`);
     }
     return {
-      internalUrl: env.AUTH_INTERNAL_URL as string,
+      url: env.AUTH_URL as string,
       jwtIssuer: env.AUTH_JWT_ISSUER as string,
       jwtAudience: env.AUTH_JWT_AUDIENCE as string,
-      internalSecret: env.AUTH_INTERNAL_SECRET as string,
       layerOrigin: new URL(env.AUTH_LAYER_ORIGIN as string).origin,
     };
   },

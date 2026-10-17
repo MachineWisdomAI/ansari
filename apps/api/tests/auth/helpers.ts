@@ -9,26 +9,20 @@ import { exportJWK, generateKeyPair, SignJWT, type JWK } from 'jose';
 import * as schema from '@/db/schema';
 import { resetEnvCache } from '@/lib/config';
 import { resetJwksCache } from '@/lib/auth/verify-jwt';
-import {
-  INTERNAL_SECRET,
-  startService,
-  type Service,
-  type ServiceOptions,
-} from '../../../auth/tests/helpers/service';
+import { startService, type Service, type ServiceOptions } from '../../../auth/tests/helpers/service';
 
 /**
  * Shared plumbing for the spec 300 phase 7 suites.
  *
  * - `startJwksServer`: a local JWKS handler with real key pairs, standing in
- *   for apps/auth's internal listener in the rejection matrix. It requires the
- *   internal credential, as apps/auth does, and counts every request.
- * - `startAuth`: the real apps/auth (both listeners over pglite), with apps/api's
- *   env pointed at its internal listener.
+ *   for apps/auth's public JWKS in the rejection matrix. It counts every
+ *   request and keeps the headers of the last one.
+ * - `startAuth`: the real apps/auth (its one listener over pglite), with
+ *   apps/api's env pointed at it.
  * - `migrateAppDb`: the app database from the real journal, as at the window
  *   (through 0011, so `password_hash` is nullable).
  */
 
-export { INTERNAL_SECRET };
 export const TEST_ISSUER = 'https://auth.test.example';
 export const TEST_AUDIENCE = 'ansari-api-test';
 /** apps/api's origin: packages/auth's TEST_LAYER_ORIGIN, which apps/auth trusts. */
@@ -50,14 +44,13 @@ export async function legacyAccessToken(userId: string = randomUUID()): Promise<
 }
 
 /** apps/api's own required env, plus apps/auth's coordinates. */
-export function setApiEnv(internalUrl: string, secret = INTERNAL_SECRET): void {
+export function setApiEnv(authUrl: string): void {
   process.env.DATABASE_URL = 'postgres://test:test@localhost:5432/test';
   process.env.KALEMAT_API_KEY = 'placeholder';
   process.env.USUL_API_TOKEN = 'placeholder';
-  process.env.AUTH_INTERNAL_URL = internalUrl;
+  process.env.AUTH_URL = authUrl;
   process.env.AUTH_JWT_ISSUER = TEST_ISSUER;
   process.env.AUTH_JWT_AUDIENCE = TEST_AUDIENCE;
-  process.env.AUTH_INTERNAL_SECRET = secret;
   process.env.AUTH_LAYER_ORIGIN = TEST_LAYER_ORIGIN;
   resetEnvCache();
   resetJwksCache();
@@ -81,8 +74,10 @@ export async function newKey(alg: 'EdDSA' | 'RS256' = 'EdDSA'): Promise<SigningK
 
 export interface JwksServer {
   url: string;
-  /** Every request that reached the handler, credentialed or not. */
+  /** Every request that reached the handler. */
   requests: number;
+  /** The headers of the last request. */
+  lastHeaders: IncomingMessage['headers'] | null;
   /** The keys served, in order. */
   keys: SigningKey[];
   /** Answer 500 (with the key set as its body). */
@@ -93,13 +88,16 @@ export interface JwksServer {
 }
 
 export async function startJwksServer(initial: SigningKey[]): Promise<JwksServer> {
-  const state = { requests: 0, keys: [...initial], failing: false, malformedBody: null as string | null };
+  const state = {
+    requests: 0,
+    lastHeaders: null as IncomingMessage['headers'] | null,
+    keys: [...initial],
+    failing: false,
+    malformedBody: null as string | null,
+  };
   const handler = (req: IncomingMessage, res: ServerResponse) => {
     state.requests += 1;
-    if (req.headers['x-ansari-internal-auth'] !== INTERNAL_SECRET) {
-      res.writeHead(401).end();
-      return;
-    }
+    state.lastHeaders = req.headers;
     const keySet = JSON.stringify({ keys: state.keys.map((k) => k.publicJwk) });
     if (state.failing) {
       // A valid key set under a 500: only the status says the refresh failed.
@@ -120,6 +118,9 @@ export async function startJwksServer(initial: SigningKey[]): Promise<JwksServer
     url,
     get requests() {
       return state.requests;
+    },
+    get lastHeaders() {
+      return state.lastHeaders;
     },
     get keys() {
       return state.keys;
@@ -179,8 +180,59 @@ export type AuthService = Service;
 
 export async function startAuth(options: ServiceOptions = {}): Promise<Service> {
   const service = await startService(options);
-  setApiEnv(service.internalUrl);
+  setApiEnv(service.publicUrl);
   return service;
+}
+
+/** apps/api's egress IP, as Railway's edge stamps it on every call apps/api makes to apps/auth. */
+export const API_EGRESS_IP = '192.0.2.250';
+
+export interface Edge {
+  url: string;
+  /** Every X-Real-IP the edge stamped, in order. */
+  stamped: string[];
+  stop(): Promise<void>;
+}
+
+/**
+ * A stand-in for Railway's edge in front of apps/auth's public domain: it
+ * overwrites X-Real-IP with the caller's address (here always apps/api's
+ * egress IP) and passes the request through. apps/auth in production mode
+ * refuses router requests without one.
+ */
+export async function startEdge(target: string): Promise<Edge> {
+  const stamped: string[] = [];
+  const server = createServer(async (req, res) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(chunk as Buffer);
+    const headers = new Headers();
+    for (const [name, value] of Object.entries(req.headers)) {
+      if (typeof value === 'string' && name !== 'host' && name !== 'connection') headers.set(name, value);
+    }
+    headers.set('x-real-ip', API_EGRESS_IP);
+    stamped.push(API_EGRESS_IP);
+    const upstream = await fetch(new URL(req.url ?? '/', target), {
+      method: req.method,
+      headers,
+      body: chunks.length ? Buffer.concat(chunks) : undefined,
+      redirect: 'manual',
+    });
+    const out: Record<string, string> = {};
+    upstream.headers.forEach((value, name) => {
+      if (name !== 'content-encoding' && name !== 'content-length' && name !== 'transfer-encoding') out[name] = value;
+    });
+    res.writeHead(upstream.status, out);
+    res.end(Buffer.from(await upstream.arrayBuffer()));
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  return {
+    url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+    stamped,
+    async stop() {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    },
+  };
 }
 
 /** An address with nothing listening, for "apps/auth is unreachable". */

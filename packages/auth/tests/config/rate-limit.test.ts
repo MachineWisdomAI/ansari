@@ -1,14 +1,16 @@
-// Rate limiting as configured in createAuth() (spec 300, phase 3): enabled,
-// database storage, the router rules from limits.ts, and the client IP read
-// from X-Real-IP alone. The `email` fallback, the reset limiters and the
-// forwarded-IP hop are apps/auth's (phase 4).
+// Rate limiting as configured in createAuth() (spec 300, phase 3; owner
+// amendment 2026-10-17): enabled, database storage, NO per-IP router rule on
+// any path apps/api's layer calls (they all arrive with apps/api's IP), the
+// per-IP default on every other path, and the client IP read from X-Real-IP
+// alone. apps/auth's own per-email, per-session and global limiters are tested
+// there (apps/auth tests/limits.test.ts).
 import type { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { createAuth, schema, type Auth, type Db } from '../../src/index';
-import { DEFAULT_RULE, ROUTER_RULES, SIGN_IN, SIGN_UP, TOKEN_EXCHANGE } from '../../src/limits';
+import { DEFAULT_RULE, ROUTER_RULES } from '../../src/limits';
 import { drizzleFor, migrate, setAuthEnv } from '../helpers/auth-db';
-import { BASE, call } from '../helpers/http';
+import { BASE, call, type CallOptions } from '../helpers/http';
 
 let client: PGlite;
 let db: Db;
@@ -25,12 +27,18 @@ afterAll(async () => {
   await client?.close();
 });
 
-const failedSignIn = (ip: string | null, headers?: Record<string, string>) =>
-  call(auth, '/sign-in/email', {
-    ip,
-    headers,
-    body: { email: 'nobody@example.com', password: 'Wrong-Passw0rd!' },
-  });
+/** A cheap request to each path the layer calls: refused or empty, never a real sign-in. */
+const LAYER_CALLS: Record<string, CallOptions> = {
+  '/sign-in/email': { body: { email: 'nobody@example.com', password: 'Wrong-Passw0rd!' } },
+  '/sign-up/email': { body: {} },
+  '/request-password-reset': { body: {} },
+  '/reset-password': { body: {} },
+  '/token': { bearer: 'no-such-session' },
+  '/get-session': { bearer: 'no-such-session' },
+};
+
+/** A path under the router's default rule. */
+const ok = (ip: string, headers?: Record<string, string>) => call(auth, '/ok', { ip, headers });
 
 async function rateLimitKeys(): Promise<string[]> {
   return (await db.select({ key: schema.rateLimit.key }).from(schema.rateLimit)).map((r) => r.key);
@@ -45,8 +53,11 @@ describe('rate-limit configuration', () => {
       max: DEFAULT_RULE.max,
       customRules: ROUTER_RULES,
     });
-    expect(ROUTER_RULES['/sign-in/email']).toEqual({ window: 60, max: 5 });
-    expect(ROUTER_RULES['/sign-up/email']).toEqual({ window: 60, max: 3 });
+  });
+
+  it('switches the router limiter off on exactly the paths the layer calls', () => {
+    expect(Object.keys(ROUTER_RULES).sort()).toEqual(Object.keys(LAYER_CALLS).sort());
+    for (const rule of Object.values(ROUTER_RULES)) expect(rule).toBe(false);
   });
 
   it('reads the client IP from x-real-ip only, with no trusted proxies', () => {
@@ -54,54 +65,41 @@ describe('rate-limit configuration', () => {
   });
 });
 
-describe('sign-in and sign-up limits, per X-Real-IP', () => {
-  it(`sign-in: ${SIGN_IN.max} per ${SIGN_IN.window}s, the next one is 429`, async () => {
-    const ip = '203.0.113.10';
-    for (let i = 0; i < SIGN_IN.max; i++) expect((await failedSignIn(ip)).status).toBe(401);
-    expect((await failedSignIn(ip)).status).toBe(429);
-    // Another client is unaffected.
-    expect((await failedSignIn('203.0.113.11')).status).toBe(401);
-  });
+describe('no per-IP limit on a path the layer calls, the default included', () => {
+  it.each(Object.entries(LAYER_CALLS))(
+    `%s: ${DEFAULT_RULE.max + 1} requests from one X-Real-IP, none refused by the router`,
+    async (path, opts) => {
+      const ip = '203.0.113.10';
+      for (let i = 0; i <= DEFAULT_RULE.max; i++) {
+        expect((await call(auth, path, { ...opts, ip })).status).not.toBe(429);
+      }
+      expect((await rateLimitKeys()).filter((k) => k.endsWith(`|${path}`))).toEqual([]);
+    }
+  );
 
-  it(`sign-up: ${SIGN_UP.max} per ${SIGN_UP.window}s, the next one is 429`, async () => {
+  it(`any other path keeps the per-IP default: request ${DEFAULT_RULE.max + 1} is 429`, async () => {
     const ip = '203.0.113.20';
-    for (let i = 0; i < SIGN_UP.max; i++) {
-      const res = await call(auth, '/sign-up/email', {
-        ip,
-        body: { email: `limit-${i}@example.com`, password: 'Limit-Passw0rd!', name: 'X' },
-      });
-      expect(res.status).toBe(200);
-    }
-    const over = await call(auth, '/sign-up/email', {
-      ip,
-      body: { email: 'limit-over@example.com', password: 'Limit-Passw0rd!', name: 'X' },
-    });
-    expect(over.status).toBe(429);
-  });
-
-  it(`the session → JWT exchange allows a burst of ${TOKEN_EXCHANGE.max}`, async () => {
-    const ip = '203.0.113.30';
-    for (let i = 0; i < TOKEN_EXCHANGE.max; i++) {
-      expect((await call(auth, '/token', { ip, bearer: 'no-such-session' })).status).toBe(401);
-    }
-    expect((await call(auth, '/token', { ip, bearer: 'no-such-session' })).status).toBe(429);
+    for (let i = 0; i < DEFAULT_RULE.max; i++) expect((await ok(ip)).status).toBe(200);
+    expect((await ok(ip)).status).toBe(429);
+    // Another client is unaffected.
+    expect((await ok('203.0.113.21')).status).toBe(200);
   });
 });
 
 describe('the bucket is X-Real-IP, never X-Forwarded-For', () => {
   it('a request with a two-entry X-Forwarded-For is keyed by its X-Real-IP', async () => {
-    await failedSignIn('203.0.113.40', { 'x-forwarded-for': '10.9.9.9, 10.8.8.8' });
+    await ok('203.0.113.40', { 'x-forwarded-for': '10.9.9.9, 10.8.8.8' });
     const keys = await rateLimitKeys();
-    expect(keys).toContain('203.0.113.40|/sign-in/email');
+    expect(keys).toContain('203.0.113.40|/ok');
     expect(keys.some((k) => k.startsWith('10.'))).toBe(false);
     expect(keys.some((k) => k.startsWith('no-trusted-ip'))).toBe(false);
   });
 
   it('forging X-Forwarded-For does not move a client out of its exhausted bucket', async () => {
     const ip = '203.0.113.50';
-    for (let i = 0; i < SIGN_IN.max; i++) await failedSignIn(ip);
+    for (let i = 0; i < DEFAULT_RULE.max; i++) await ok(ip);
     for (const forged of ['198.51.100.1', '198.51.100.2, 198.51.100.3']) {
-      expect((await failedSignIn(ip, { 'x-forwarded-for': forged })).status).toBe(429);
+      expect((await ok(ip, { 'x-forwarded-for': forged })).status).toBe(429);
     }
   });
 });

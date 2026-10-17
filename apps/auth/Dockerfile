@@ -89,8 +89,7 @@ WORKDIR /repo/apps/auth
 # Run as the image's unprivileged `node` user. Nothing is written at runtime.
 USER node
 
-# Two listeners (plan P-1). PORT (3100) is the PUBLIC one, the only port a
-# Railway domain targets. INTERNAL_PORT (3101) is for `backend` over the private
-# network only; no domain may ever target it. See railway.toml.
-EXPOSE 3100 3101
+# One listener, PORT (3100), behind the public domain. There is no internal
+# listener (owner amendment 2026-10-17). See railway.toml.
+EXPOSE 3100
 CMD ["node", "dist/index.mjs"]

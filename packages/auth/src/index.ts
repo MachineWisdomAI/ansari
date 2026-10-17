@@ -148,17 +148,6 @@ export const BLOCKED_AUTH_PATHS: readonly string[] = [
 ];
 
 /**
- * The router rules for a rate-limit mode (plan P-3). In `email` mode the
- * client IP is not trusted, so sign-in and sign-up carry no per-IP rule at all:
- * apps/auth's per-email fallback limits them instead, and a misattributed IP
- * can never become a global login cap.
- */
-export function routerRules(mode: AuthEnv['AUTH_RATE_LIMIT_MODE']) {
-  if (mode === 'ip') return { ...ROUTER_RULES };
-  return { ...ROUTER_RULES, '/sign-in/email': false as const, '/sign-up/email': false as const };
-}
-
-/**
  * better-auth prunes `rate_limit` rows older than the longest window it knows
  * of. apps/auth's own rows live in the same table with longer windows (the
  * per-email reset cap is an hour), so this rule, which matches no path, makes
@@ -237,7 +226,7 @@ export function createAuth(db: Db = createDb(), extensions: AuthExtensions = {})
       // The profile copy in the app database cannot follow an email change
       // until a sync design exists (spec 300 follow-up), so it is off.
       changeEmail: { enabled: false },
-      // Deletion goes through apps/auth's internal endpoint, never this route.
+      // Deletion goes through apps/auth's account endpoint, never this route.
       deleteUser: { enabled: false },
     },
     emailAndPassword: {
@@ -270,7 +259,7 @@ export function createAuth(db: Db = createDb(), extensions: AuthExtensions = {})
       storage: 'database',
       window: DEFAULT_RULE.window,
       max: DEFAULT_RULE.max,
-      customRules: routerRules(env.AUTH_RATE_LIMIT_MODE),
+      customRules: { ...ROUTER_RULES },
     },
     hooks: {
       before: createAuthMiddleware(async (ctx) => {

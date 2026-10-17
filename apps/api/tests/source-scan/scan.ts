@@ -110,3 +110,32 @@ export function authDependencyHits(pkg: Record<string, unknown>): string[] {
     Object.keys((pkg[key] as Record<string, string> | undefined) ?? {}).filter((name) => AUTH_PACKAGE.test(name))
   );
 }
+
+// ── Scan 4: the removed internal hop stays gone (owner amendment 2026-10-17) ──
+
+/**
+ * The names the shared-secret hop used: its env vars, its headers and their
+ * constants, the internal port and rate-limit mode, Railway's private-network
+ * host, and the /internal routes.
+ */
+const REMOVED_HOP: readonly RegExp[] = [
+  /\bAUTH_INTERNAL_(?:SECRET|URL)\b/,
+  /\bINTERNAL_PORT\b/,
+  /\bAUTH_RATE_LIMIT_MODE\b/,
+  /\bINTERNAL_AUTH_HEADER\b/,
+  /\bFORWARDED_IP_HEADER\b/,
+  /x-ansari-internal-auth/i,
+  /x-ansari-forwarded-client-ip/i,
+  /\.railway\.internal\b/i,
+  /['"`]\/internal(?:\/|['"`])/,
+];
+
+/** Hits in code (comments stripped): any name of the removed internal hop. */
+export function removedHopHits(source: string): string[] {
+  return removedHopTextHits(codeWithoutComments(source));
+}
+
+/** The same patterns over plain text, comments included (config files, Dockerfiles). */
+export function removedHopTextHits(text: string): string[] {
+  return text.split('\n').filter((line) => REMOVED_HOP.some((re) => re.test(line)));
+}

@@ -10,7 +10,6 @@ import { TEST_LAYER_ORIGIN } from '../../../packages/auth/tests/helpers/auth-db'
 import {
   BASE,
   freshIp,
-  internalHeaders,
   send,
   signUp,
   startService,
@@ -115,14 +114,14 @@ describe('CORS (scenario 28)', () => {
   // that: it is not a CORS origin, so a browser page on apps/api's domain can
   // read nothing back from apps/auth (security, phase 8).
   describe('the layer origin (AUTH_LAYER_ORIGIN)', () => {
-    it('passes the CSRF check for a server-side call on the internal listener', async () => {
-      const trusted = await send(service.internalUrl, '/api/auth/sign-in/email', {
-        headers: { ...internalHeaders(freshIp()), origin: TEST_LAYER_ORIGIN },
+    it("passes the CSRF check for the layer's anonymous server-side call", async () => {
+      const trusted = await send(service.publicUrl, '/api/auth/sign-in/email', {
+        headers: { origin: TEST_LAYER_ORIGIN },
         body: { email: 'cors@example.com', password: STRONG_PASSWORD },
       });
       expect(trusted.status).toBe(200);
-      const untrusted = await send(service.internalUrl, '/api/auth/sign-in/email', {
-        headers: { ...internalHeaders(freshIp()), origin: 'https://evil.example' },
+      const untrusted = await send(service.publicUrl, '/api/auth/sign-in/email', {
+        headers: { origin: 'https://evil.example' },
         body: { email: 'cors@example.com', password: STRONG_PASSWORD },
       });
       expect(untrusted.status).toBe(403);
@@ -144,11 +143,6 @@ describe('CORS (scenario 28)', () => {
       expect(res.headers.get('access-control-allow-origin')).toBeNull();
       expect(res.headers.get('access-control-allow-credentials')).toBeNull();
     });
-  });
-
-  it('the internal listener sends no CORS headers at all', async () => {
-    const res = await fetch(`${service.internalUrl}/api/auth/get-session`, { headers: { origin: BASE } });
-    expect(res.headers.get('access-control-allow-origin')).toBeNull();
   });
 });
 
@@ -196,13 +190,6 @@ describe('the diag route (P-4)', () => {
     for (const entry of (shape.headers['x-forwarded-for'] ?? '').split(',').map((e) => e.trim())) {
       if (entry && entry !== shape.headers['x-real-ip']) expect(text).not.toContain(entry);
     }
-  });
-
-  it('is not on the internal listener', async () => {
-    const res = await send(service.internalUrl, '/__diag/client-ip', {
-      headers: { 'x-ansari-internal-auth': 'test-internal-secret-at-least-32-characters' },
-    });
-    expect(res.status).toBe(404);
   });
 });
 

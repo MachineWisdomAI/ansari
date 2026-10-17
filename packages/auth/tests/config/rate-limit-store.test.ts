@@ -1,5 +1,5 @@
 // The fixed-window store apps/auth's own limiters use (rate-limit-store.ts),
-// the router rules per AUTH_RATE_LIMIT_MODE, and the retention rule that stops
+// and the retention rule that stops
 // better-auth's pruner from deleting apps/auth's longer-window rows.
 import type { PGlite } from '@electric-sql/pglite';
 import { eq } from 'drizzle-orm';
@@ -10,14 +10,12 @@ import {
   createAuth,
   keysSeenSince,
   peekWindow,
-  resetEnvCache,
-  routerRules,
   schema,
   touchKey,
   type Auth,
   type Db,
 } from '../../src/index';
-import { LONGEST_WINDOW, RESET_REQUEST_PER_EMAIL, ROUTER_RULES, SIGN_IN } from '../../src/limits';
+import { LONGEST_WINDOW, RESET_REQUEST_PER_EMAIL } from '../../src/limits';
 import { drizzleFor, migrate, setAuthEnv } from '../helpers/auth-db';
 import { BASE, call } from '../helpers/http';
 
@@ -97,44 +95,6 @@ describe('peekWindow and touchKey', () => {
   });
 });
 
-describe('router rules per AUTH_RATE_LIMIT_MODE', () => {
-  it('ip mode keeps every per-IP rule', () => {
-    expect(routerRules('ip')).toEqual(ROUTER_RULES);
-  });
-
-  it('email mode drops the per-IP sign-in and sign-up rules, and only those', () => {
-    const rules = routerRules('email');
-    expect(rules['/sign-in/email']).toBe(false);
-    expect(rules['/sign-up/email']).toBe(false);
-    const others = Object.entries(ROUTER_RULES).filter(
-      ([path]) => path !== '/sign-in/email' && path !== '/sign-up/email'
-    );
-    expect(others.length).toBeGreaterThan(0);
-    for (const [path, rule] of others) expect(rules[path as keyof typeof rules]).toEqual(rule);
-  });
-
-  it('createAuth reads the mode from AUTH_RATE_LIMIT_MODE, defaulting to email', async () => {
-    const before = process.env.AUTH_RATE_LIMIT_MODE;
-    try {
-      delete process.env.AUTH_RATE_LIMIT_MODE;
-      resetEnvCache();
-      const emailMode = createAuth(db);
-      expect(emailMode.options.rateLimit?.customRules?.['/sign-in/email']).toBe(false);
-      // No per-IP sign-in limit in email mode: the sixth attempt from one IP is not 429.
-      for (let i = 0; i < SIGN_IN.max + 1; i++) {
-        const res = await call(emailMode, '/sign-in/email', {
-          ip: '203.0.113.200',
-          body: { email: 'nobody@example.com', password: 'Wrong-Passw0rd!' },
-        });
-        expect(res.status).toBe(401);
-      }
-    } finally {
-      process.env.AUTH_RATE_LIMIT_MODE = before;
-      resetEnvCache();
-    }
-  });
-});
-
 describe("better-auth's pruner keeps apps/auth rows for the longest window", () => {
   it('a 30-minute-old per-email reset row survives a prune; a 2-hour-old row does not', async () => {
     expect(LONGEST_WINDOW).toBe(RESET_REQUEST_PER_EMAIL.window);
@@ -142,13 +102,10 @@ describe("better-auth's pruner keeps apps/auth rows for the longest window", () 
     await db.insert(schema.rateLimit).values([
       { key: 'email:keep|/request-password-reset', count: 3, lastRequest: now - 30 * 60_000 },
       { key: 'email:gone|/request-password-reset', count: 3, lastRequest: now - 2 * 3_600_000 },
-      // An expired router row: the next sign-in from this IP resets it, which prunes.
-      { key: '203.0.113.201|/sign-in/email', count: 5, lastRequest: now - 2 * 60_000 },
+      // An expired router row: the next request from this IP resets it, which prunes.
+      { key: '203.0.113.201|/ok', count: 5, lastRequest: now - 2 * 60_000 },
     ]);
-    await call(auth, '/sign-in/email', {
-      ip: '203.0.113.201',
-      body: { email: 'nobody@example.com', password: 'Wrong-Passw0rd!' },
-    });
+    await call(auth, '/ok', { ip: '203.0.113.201' });
     expect(await row('email:gone|/request-password-reset')).toBeUndefined();
     expect(await row('email:keep|/request-password-reset')).toBeDefined();
   });

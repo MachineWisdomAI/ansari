@@ -67,11 +67,9 @@ export function setAuthEnv(baseUrl: string): void {
   process.env.NODE_ENV = 'test';
   process.env.AUTH_JWT_ISSUER = TEST_JWT_ISSUER;
   process.env.AUTH_JWT_AUDIENCE = TEST_JWT_AUDIENCE;
-  process.env.AUTH_INTERNAL_SECRET = 'test-internal-secret-at-least-32-characters';
   process.env.RESEND_API_KEY = 're_test_key_at_least_20_chars';
   process.env.FRONTEND_URL = 'http://localhost:8081';
   process.env.ADMIN_EMAILS = TEST_ADMIN_EMAIL;
-  process.env.AUTH_RATE_LIMIT_MODE = 'ip';
   delete process.env.MARKETMAKER_URL;
   resetEnvCache();
 }

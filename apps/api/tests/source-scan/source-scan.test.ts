@@ -13,6 +13,8 @@ import {
   isExcludedFromDatabaseUrlScan,
   legacySqlHits,
   readSource,
+  removedHopHits,
+  removedHopTextHits,
   sourceFiles,
 } from './scan';
 
@@ -175,5 +177,71 @@ describe('scan 3: apps/api has no better-auth or @ansari/auth import or dependen
     console.info(`[source-scan] better-auth/@ansari/auth dependencies (apps/api/package.json): ${deps.length} hits`);
     expect(hits).toEqual({});
     expect(deps).toEqual([]);
+  });
+});
+
+describe('scan 4: the removed internal hop stays gone (owner amendment 2026-10-17)', () => {
+  // apps/api reaches apps/auth at its public URL with no shared secret, no
+  // forwarded IP and no internal listener. These are the hop's names.
+  const CONFIG = [
+    'turbo.json',
+    '.github/workflows/ci.yml',
+    'apps/auth/Dockerfile',
+    'apps/auth/railway.toml',
+    'apps/api/railway.toml',
+    'apps/api/eslint.config.mjs',
+    'apps/auth/.env.example',
+    'apps/auth/.env.ci',
+    'apps/api/.env.example',
+    'apps/api/.env.ci',
+  ];
+
+  it('catches planted lines', () => {
+    for (const bad of [
+      'const secret = process.env.AUTH_INTERNAL_SECRET;',
+      "const url = getEnv()['AUTH_INTERNAL_URL'];",
+      'app.listen(env.INTERNAL_PORT);',
+      "const mode = process.env.AUTH_RATE_LIMIT_MODE ?? 'email';",
+      "headers['x-ansari-internal-auth'] = secret;",
+      "headers['X-Ansari-Forwarded-Client-IP'] = ip;",
+      'headers[INTERNAL_AUTH_HEADER] = secret;',
+      'headers[FORWARDED_IP_HEADER] = ip;',
+      "fetch('http://auth.railway.internal:3101/api/auth/jwks');",
+      "router.use('/internal', internalRouter);",
+      'await fetch(`/internal/users/${id}/profile`);',
+    ]) {
+      expect(removedHopHits(bad), bad).not.toEqual([]);
+    }
+  });
+
+  it('ignores near-misses', () => {
+    for (const fine of [
+      '// AUTH_INTERNAL_SECRET and the /internal/ routes were removed (2026-10-17)',
+      'const { internalAdapter } = await auth.$context;',
+      "headers['x-ansari-client'] = 'ios';",
+      'const internal = false;',
+      "fetch('/api/account/me');",
+      "const path = '/internals-guide';",
+      'const url = process.env.AUTH_URL;',
+    ]) {
+      expect(removedHopHits(fine), fine).toEqual([]);
+    }
+  });
+
+  it('the config-file scan reads comments too', () => {
+    expect(removedHopTextHits('# INTERNAL_PORT  3101  internal listener')).not.toEqual([]);
+    expect(removedHopTextHits('# One listener, PORT (3100)')).toEqual([]);
+  });
+
+  it('apps/api and apps/auth runtime trees and the config files have no hits', () => {
+    const files = [...API_RUNTIME, ...AUTH_RUNTIME];
+    expect(files.length).toBeGreaterThan(80);
+    const hits = scanTree(files, removedHopHits);
+    for (const file of CONFIG) {
+      const found = removedHopTextHits(readSource(file));
+      if (found.length > 0) hits[file] = found;
+    }
+    report('removed internal hop (runtime + config)', [...files, ...CONFIG], hits);
+    expect(hits).toEqual({});
   });
 });
