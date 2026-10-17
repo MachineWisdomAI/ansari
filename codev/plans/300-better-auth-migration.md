@@ -1255,8 +1255,13 @@ pglite pair. The real `psql` pipe is exercised in phase 13.
 
 **Dependencies**: Phases 1 to 12. **External prerequisites, all resolved by the owner on
 2026-10-16:**
-- C-3: staging is isolated from production and has its own database. The production clone is
-  restored into the staging app database.
+- C-3: staging is isolated from production and has its own database. **Owner amendment R-1 (2026-10-17):** the
+  rehearsal uses the existing staging users, with no production restore (spec R-1). The
+  mitigations:
+  - the production preflight (counts only), with the hash-format distribution
+  - the copy's refusal of non-bcrypt hashes
+  - the anomaly seed (`apps/auth/scripts/cutover/rehearsal-anomalies.ts`), so every guard fires
+  - copy-and-audit timings scaled by production's `to_copy`, with a 3× comms allowance
 - C-4: the owner provisions the auth Postgres in staging and production.
 - I-4: the owner operates.
 
@@ -1291,8 +1296,12 @@ Produce the evidence the spec requires before the merge, and commit it.
     after 15 minutes, refresh, retry
   - the admin analytics login
   (`legacy/frontend-web` is retired at go-live and is not run; the window replaces it.)
-- [ ] The full rehearsal on a **clone of production** plus a fresh auth database, following the
-  runbook exactly: all audits pass, and both services boot on the rehearsed databases and pass the
+- [ ] **The guards fire** on staging (R-1): seeded with one row per anomaly class, the copy
+  aborts on the collision with the auth database empty and no TEMP table, then on the NULL
+  timestamp. Then the pass run: the mixed-case row signs in by its uppercase address, both hash
+  prefixes sign in, the admin gets the role, the guest signs in, and system rows are absent.
+- [ ] The full rehearsal on the **staging users** (owner amendment R-1; not a production clone)
+  plus a fresh auth database, following the runbook exactly: all audits pass, and both services boot on the rehearsed databases and pass the
   smoke tests. Then the **rollback**: post-cutover users are removed, the previous image is
   redeployed, a migrated user signs in with the legacy password through the legacy code, and no
   post-cutover user remains.
@@ -1340,7 +1349,7 @@ The spec's risk table stands. These are the risks this plan adds or sharpens.
 | The owner-provisioned staging resources (C-3, C-4) are not ready when phase 13 starts | Low | High (no merge) | All resolved by the owner; phases 1 to 12 do not depend on them; phase 13 stops and reports rather than guessing |
 | Production domains behave differently from staging at the edge | Low | High | P-4 probe in the window; `AUTH_RATE_LIMIT_MODE` flips to `email` without code (P-3) |
 | The phase 1 contract suite is weakened during phase 8 to pass | Low | High | CI diff check on the fixtures; assertions are never forked between modes |
-| Copy tests on pglite miss a `psql` pipe behaviour | Medium | Medium | The real pipe is rehearsed in phase 13 on a production clone, with checksums |
+| Copy tests on pglite miss a `psql` pipe behaviour | Medium | Medium | The real pipe is rehearsed in phase 13 on staging, seeded with every anomaly class (R-1), with checksums |
 | The private-network peer residual (P-1) | Low | Medium | Recorded in `arch.md`; the production 400 rule removes the shared bucket |
 | Rate-limit numbers are wrong for real traffic | Medium | Medium | B-1 to B-4 before merge; one constants module; the fallback ceiling floor |
 | A long-lived branch drifts; migration numbering collides | Medium | Medium | `develop` merges at each phase boundary; the numbering re-check is recorded in the thread every time |
@@ -1394,6 +1403,6 @@ gate:
     rehearsal includes a stored-guest sign-in against the migrated database.
   - **Position:** keep the decided 3/60s, narrow the catch, and let B-1 measure.
 - **Resolved from the spec** (owner, 2026-10-16): C-3 (staging is isolated and has its own
-  database, which the production clone is restored into), C-4 (the owner provisions the auth
+  database; amended 2026-10-17 by R-1: the existing staging users, no production restore), C-4 (the owner provisions the auth
   Postgres), and I-4 (the owner operates the window). I-6 is **resolved**: the app architect agreed
   to phase 10 with four changes, now folded in.

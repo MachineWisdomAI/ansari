@@ -20,6 +20,13 @@ import {
   migrate,
   setAuthEnv,
 } from '../../../../packages/auth/tests/helpers/auth-db';
+import {
+  ID_PREFIX,
+  ROWS,
+  anomalySql,
+  makeHashes,
+  refusal,
+} from '../../scripts/cutover/rehearsal-anomalies';
 import { runPsqlFile } from './psql';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -445,6 +452,100 @@ describe('hash formats: only bcrypt $2a$/$2b$ of length 60 is copied', () => {
       preflightQuery('== Rows whose hash is not bcrypt').replace('count(*)', 'count(*)::int')
     );
     expect(refused.rows[0]?.not_bcrypt).toBe(1);
+  });
+});
+
+describe('the staging anomaly seed (rehearsal-anomalies.ts), through the rehearsal order', () => {
+  const ok = { markerExists: true, environmentName: 'staging', stdoutIsTTY: false, command: 'seed', password: 'x'.repeat(12) };
+
+  it('refuses outside the image, outside staging, on a terminal, an unknown command or a short password', () => {
+    expect(refusal(ok)).toBeNull();
+    expect(refusal({ ...ok, command: 'remove', password: undefined })).toBeNull();
+    expect(refusal({ ...ok, markerExists: false })).toMatch(/outside the auth image/);
+    expect(refusal({ ...ok, environmentName: 'production' })).toMatch(/staging environment .*'production'/);
+    expect(refusal({ ...ok, environmentName: undefined })).toMatch(/unset/);
+    expect(refusal({ ...ok, stdoutIsTTY: true })).toMatch(/terminal/);
+    expect(refusal({ ...ok, command: 'drop' })).toMatch(/usage/);
+    expect(refusal({ ...ok, password: 'x'.repeat(11) })).toMatch(/REHEARSAL_PASSWORD/);
+    // Location first: a laptop run in production is refused on location.
+    expect(refusal({ ...ok, markerExists: false, environmentName: 'production', stdoutIsTTY: true })).toMatch(/outside the auth image/);
+  });
+
+  it('seed → the preflight sees every class; the copy stops on the collision, then the NULL timestamp, then passes', async () => {
+    const hashes = await makeHashes(PASSWORD, 4);
+    expect(hashes.h2a.startsWith('$2a$')).toBe(true);
+    expect(hashes.h2b.startsWith('$2b$')).toBe(true);
+    // A pre-existing staging user and the system row stay throughout.
+    await seed(app, [
+      { id: id(1), email: 'existing@example.com' },
+      { id: id(9), email: 'ai-skill@system.ansari.chat', hash: 'nologin', systemKey: 'ai-skill' },
+    ]);
+    await app.exec(anomalySql('seed', hashes));
+    await expect(app.exec(anomalySql('seed', hashes))).rejects.toThrow(/already exist/);
+
+    const n = async (heading: string, col: string) =>
+      Number((await app.query<Record<string, unknown>>(preflightQuery(heading))).rows[0]?.[col]);
+    expect((await app.query(preflightQuery('== Collisions'))).rows).toHaveLength(1);
+    expect(await n('== Case audit', 'not_normalized')).toBe(2);
+    expect(await n('== Rows with a NULL timestamp', 'null_updated_at')).toBe(1);
+    expect(await n('== Rows whose hash is not bcrypt', 'not_bcrypt')).toBe(0);
+    expect(await n('== Guests', 'guests')).toBe(1);
+    expect((await app.query(preflightQuery('== Legacy admin'))).rows).toHaveLength(1);
+    const formats = await app.query<{ prefix: string; rows: string }>(preflightQuery('== Hash formats'));
+    expect(formats.rows.map((r) => [r.prefix, Number(r.rows)])).toEqual([['$2b$', 7], ['$2a$', 1]]);
+
+    // 1. The collision aborts: auth empty, no TEMP table left.
+    await expect(copy(app, auth)).rejects.toThrow(/held by more than one row/);
+    expect(await count(auth, 'auth.users')).toBe(0);
+    expect(await count(auth, "pg_class WHERE relname = 'import_users'")).toBe(0);
+    // 2. The pair removed, the NULL timestamp aborts.
+    await app.exec(anomalySql('resolve-collision'));
+    await expect(copy(app, auth)).rejects.toThrow(/NULL created_at or updated_at/);
+    expect(await count(auth, 'auth.users')).toBe(0);
+    // 3. Fixed, the copy passes and the audits match.
+    await app.exec(anomalySql('resolve-null'));
+    await copy(app, auth);
+    const { app: a, auth: b } = await audits(app, auth);
+    expect(b).toEqual(a);
+    expect(a).toContain('rows|6');
+
+    // The pass run: system rows absent; mixed case signs in by its uppercase
+    // address; both prefixes sign in; the guest signs in.
+    expect(await count(auth, "auth.users WHERE email LIKE '%@system.ansari.chat'")).toBe(0);
+    setAuthEnv('http://localhost:3100');
+    const service = createAuth(drizzleFor(auth));
+    for (const [email, userId] of [
+      ['REHEARSAL.MIXED@EXAMPLE.COM', ROWS.mixedCase2a.id],
+      [ROWS.plain2b.email, ROWS.plain2b.id],
+      [ROWS.guest.email, ROWS.guest.id],
+      [ROWS.legacyAdmin.email, ROWS.legacyAdmin.id],
+    ] as const) {
+      const result = await service.api.signInEmail({ body: { email, password: PASSWORD } });
+      expect(result.user.id).toBe(userId);
+    }
+
+    // remove touches only rehearsal rows.
+    await app.exec(anomalySql('remove'));
+    expect(await count(app, `users WHERE id::text LIKE '${ID_PREFIX}%'`)).toBe(0);
+    expect(await count(app, 'users')).toBe(2);
+  });
+
+  it('the CLI exits 2 before generating anything when run outside the image (a laptop, even as "staging")', () => {
+    const tsx = resolve(here, '../../node_modules/.bin/tsx');
+    const result = spawnSync(tsx, [script('rehearsal-anomalies.ts'), 'seed'], {
+      env: { PATH: process.env.PATH ?? '', RAILWAY_ENVIRONMENT_NAME: 'staging', REHEARSAL_PASSWORD: 'x'.repeat(16) },
+      encoding: 'utf8',
+    });
+    expect(result.status).toBe(2);
+    expect(result.stderr).toMatch(/outside the auth image/);
+    expect(result.stdout).toBe('');
+  });
+
+  it('every rehearsal row is outside the system domain, and every id carries the prefix', () => {
+    for (const row of Object.values(ROWS)) {
+      expect(row.id.startsWith(ID_PREFIX)).toBe(true);
+      expect(row.email).not.toMatch(/@system\.ansari\.chat$/);
+    }
   });
 });
 

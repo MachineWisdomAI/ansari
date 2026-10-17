@@ -35,6 +35,18 @@ This spec defines WHAT and WHY. The plan defines HOW and WHEN.
 >   before the merge.
 > - **G-5.** Sign-up stays at 3/60s, with the guest fall-through in `apps/frontend` narrowed.
 >
+> **Owner amendment, 2026-10-17, during phase 13** (accepted by the security architect).
+>
+> - **R-1.** This amends C-3 and the rehearsal assumption. The rehearsal runs on the users already
+>   in the staging app database, with **no production restore**. In its place:
+>   - The owner runs the read-only preflight against production. It includes a hash-format
+>     distribution, and the copy refuses any non-bcrypt hash.
+>   - Staging is seeded with one row per anomaly class, so every copy guard is shown to fire in
+>     the real environment.
+>   - Only the copy and audits are timed by scaling to production's row count; the window's comms
+>     allowance is three times the scaled total.
+>   - `docs/cutover/rehearsal.md` records counts and checksums only.
+>
 > **Lineage.** This spec is written for issue #300. Its evidence base is the issue #60 reference
 > spec and plan (`codev/specs/60-better-auth-migration-reference.md`,
 > `codev/plans/60-better-auth-migration-reference.md`), updated in #299 against better-auth 1.7.7.
@@ -1201,10 +1213,9 @@ decided rate limits apply to every production sign-in, because all of them pass 
   may not have them at all. Whether they exist on staging or production is a `psql \dt` question for
   the owner (main's condition 6). Either way, the scaffold cleanup's guard refuses to drop a
   non-empty table.
-- The rehearsal runs against a **clone of production data**, whatever host it runs on.
-  Staging and production are isolated environments, and staging has its own database (owner,
-  2026-10-16; C-3 resolved), so the rehearsal restores the production clone into the staging app
-  database. The rehearsal must never run against a database that production also uses. It needs an `apps/auth`
+- **Owner amendment R-1 (2026-10-17):** the rehearsal runs on the **existing staging users** in the staging app database,
+  not a clone of production data (R-1 above). Staging and production are isolated environments,
+  and staging has its own database (owner, 2026-10-16; C-3 resolved). The rehearsal must never run against a database that production also uses. It needs an `apps/auth`
   instance and its own auth database too.
 - The operator can take a snapshot or PITR mark of **both** databases. The app database's
   pre-window mark is a last resort only; the planned rollback is a redeploy. The owner provisions
@@ -1284,8 +1295,9 @@ This was the first draft's proposal.
   Postgres service for `apps/auth`, in staging and production, with snapshots or PITR on before its
   first real row.
 - **C-3 (resolved, owner, 2026-10-16):** staging and production are isolated environments, and
-  staging has its own database. The rehearsal restores the production clone into the staging app
-  database, with a fresh staging auth database beside it. The rehearsal stays a hard prerequisite
+  staging has its own database. **Owner amendment R-1 (2026-10-17):** the rehearsal uses the existing staging users in the
+  staging app database (no production restore), seeded with one row per anomaly class, with a fresh
+  staging auth database beside it. The rehearsal stays a hard prerequisite
   for merging.
 
 **Important (shapes design)**
@@ -1464,7 +1476,7 @@ This was the first draft's proposal.
 | Admin HTTP surface abused (stolen admin token or frontend XSS leads to account takeover) | Low | Critical | Whole admin surface blocked: `disabledPaths` plus a case-insensitive prefix middleware before `toNodeHandler`; variant tests; enumerating regression test |
 | `apps/frontend` client change slips or breaks in the window | Medium | High | Agreed with the app architect up front; rehearsed; web rollback by redeploy; native release timing decided (I-6) |
 | Long-lived branch drifts from `develop` | Medium | Medium | Regular `develop` merges; numbering re-check after each; rehearsal re-run after the last rebase; nothing merges early, so releases never freeze |
-| More lands in one window | Medium | High | Full rehearsal on a production clone; ordered, gated runbook; 24-hour snapshot rollback |
+| More lands in one window | Medium | High | Full rehearsal on staging, seeded with every anomaly class, plus the production preflight (R-1); ordered, gated runbook; 24-hour snapshot rollback |
 | Rollback after cutover | Low | High | A redeploy, never a restore: nothing legacy reads is dropped until the contract migration; post-cutover users removed by `created_at` (owner-accepted cost); rollback rehearsed |
 | Legacy hashes readable by `apps/api`'s database account until the contract migration | Certain (owner: no separate logins) | Medium | No code reads them (Drizzle schema, scan); contract migration dated to the first release after the deadline |
 | A compromised service runs DDL on its own database | Low | High | Owner-accepted (default accounts); it still cannot reach the other database; snapshots or PITR on both |

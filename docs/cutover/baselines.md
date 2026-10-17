@@ -4,6 +4,11 @@ The rate-limit numbers in `packages/auth/src/limits.ts` were approved pending th
 measurements. The operator runs them before the merge; the results, and any amendment to a
 number, are recorded here. An amended number changes `limits.ts` in the cutover PR.
 
+**Counts only.** The owner runs `00-preflight-app.sql` against production. This file carries its
+counts and rates, never an id, an address or a row. The preflight's legacy admin inventory (ids
+and addresses) stays with the owner. The same run's `to_copy` feeds the timing scale in
+[`rehearsal.md`](rehearsal.md).
+
 | Baseline | Source | How |
 |---|---|---|
 | **B-1** sign-ups per minute and per hour, 90 days, peak and p99; guest-shaped separately | the app database | `apps/auth/scripts/cutover/00-preflight-app.sql` (section B-1), and the guest row count it prints |

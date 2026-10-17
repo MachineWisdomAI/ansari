@@ -41,7 +41,7 @@ migration merges to `develop`, in either journal.
 - **`main` is current except for spec 300.** A normal release of `develop` at the tip just
   before the cutover PR has been promoted and has soaked, so this window promotes only the
   spec 300 delta.
-- The phase 13 rehearsal (staging, a clone of the production app database plus a fresh auth
+- The phase 13 rehearsal ([`rehearsal.md`](rehearsal.md): staging users seeded with every anomaly class, owner amendment R-1, plus a fresh auth
   database, including a rollback rehearsal) is signed off, and was re-run after the branch's
   last rebase.
 - The phase 13 image check passed: `docker build -f apps/auth/Dockerfile .`, run as the image's
