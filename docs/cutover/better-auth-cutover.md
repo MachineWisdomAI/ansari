@@ -33,17 +33,71 @@ run without `--single-transaction`.
 commit, every SQL file with the commit it was applied from, `cutover_at`, every check's output
 (counts and checksums only) and every decision taken.
 
-**Schema freeze.** From the merge of the cutover PR to the end of this window, no other
-migration merges to `develop`, in either journal.
+**Freeze.** From the merge of the cutover PR to the end of the production window, **nothing**
+merges to `develop` except the staging rehearsal's docs-only evidence PR (owner amendment R-2).
+So the staging rehearsal runs on exactly what production receives.
+
+## Staging rehearsal (owner amendment R-2): this runbook, on staging, first
+
+The branch is never deployed to staging. After the cutover PR merges to `develop`, **this whole
+runbook runs on staging, from step 1**, before production. That run is the rehearsal, recorded in
+[`rehearsal.md`](rehearsal.md).
+
+Roles:
+- the owner operates the Railway side
+- the main architect prepares the filled-in staging command sheet from this runbook and checks
+  every output
+- the builder runs the client-side checks: the edge probes, the released mobile build, the admin
+  analytics login, the stored-guest sign-in
+
+The evidence lands as a docs-only PR to `develop`, and only then does the production window
+promote `develop`. Each step is run as written, except for these differences:
+
+| Production | Staging rehearsal |
+|---|---|
+| Step 4 promotes `develop` to `main`; every deploy and file comes from the promoted commit | **No promotion.** The cutover PR's merge commit on `develop` stands in for `main`. Record it in step 1; every deploy and every applied file comes from it |
+| `railway ssh --service auth --environment production` | `railway ssh --service auth --environment staging` |
+| `api.askansari.ai`, `api-35.ansari.chat`; `auth.askansari.ai`; the production web domain | `api-staging.askansari.ai`; `auth-staging.askansari.ai`; the staging web domain. Service names are on main's sheet |
+| Auto-deploy is turned off for the window (step 1) and back on in step 18 | **Set before the cutover PR merges** (owner): staging `backend` auto-deploy off, and the staging `auth` service deploying from `develop` with auto-deploy off. The staging web service is confirmed on main's sheet. Every deploy is manual. Auto-deploy comes back only after the rollback rehearsal and the second forward run (below) |
+| The auth database is created for the window, or found (C-4) | It already exists, empty, on Postgres 18. Step 1's empty and version checks apply as written |
+| The app database is production's | The staging app database (Postgres 18) with its **existing staging users**, no production restore (R-1), plus the anomaly seed below |
+| Step 2: the public maintenance notice | The team only; no public notice |
+| Steps 14 and 15: production domains | The staging domains, on **both paths**: via Cloudflare once the owner orange-clouds `api-staging` and `auth-staging`, and direct with `--resolve` ([`edge-check.md`](edge-check.md)). The staging verdict is recorded only after both paths are measured |
+| Step 18 closes the window | Then the **rollback** is rehearsed ([`rollback.md`](rollback.md), all of it). Then the second forward run (rollback's restart procedure), so staging ends on `develop`. Then auto-deploy goes back on |
+
+**`cutover_at` on staging** is the staging app database's clock at step 6, as in production. In
+the rollback rehearsal it marks the users to remove. The step 17 smoke test signs up a new user
+after it, so the rollback has at least one user to remove, and must leave none behind.
+
+**The seeded anomaly users** (`apps/auth/scripts/cutover/rehearsal-anomalies.ts`; staging only).
+They are seeded in the operator environment after step 6 and before step 7. Every seeded
+`created_at` is in the past, so the rollback never removes them. Step 8 then runs three times:
+
+| Run | State | `copy.sh` must | Then |
+|---|---|---|---|
+| 1 | as seeded | **abort** on the collision (`1 normalized email(s) are held by more than one row`); `auth.users` and `auth.account` hold 0 rows; no `import_users` table | `rehearsal-anomalies.ts resolve-collision \| psql …` |
+| 2 | collision removed | **abort** on the NULL timestamp (`1 row(s) have a NULL created_at or updated_at`); auth still empty | `rehearsal-anomalies.ts resolve-null \| psql …` |
+| 3 | both resolved | **pass**: `copy.sh: audit OK`, the six lines identical | continue at step 9 |
+
+After the pass:
+- the mixed-case row signs in with its address in upper case
+- the `$2a$` and `$2b$` rows both sign in
+- the legacy admin gets `role = 'admin'` in step 10, and `05` lists it
+- the guest signs in
+- `system_domain_rows|0`
+
+The exact commands and the result tables are in [`rehearsal.md`](rehearsal.md). After the second
+forward run, `rehearsal-anomalies.ts remove | psql …` deletes the seeded rows.
 
 ## 1. Preconditions (all must hold; any missing → do not start)
 
 - **`main` is current except for spec 300.** A normal release of `develop` at the tip just
   before the cutover PR has been promoted and has soaked, so this window promotes only the
   spec 300 delta.
-- The phase 13 rehearsal ([`rehearsal.md`](rehearsal.md): staging users seeded with every anomaly class, owner amendment R-1, plus a fresh auth
-  database, including a rollback rehearsal) is signed off, and was re-run after the branch's
-  last rebase.
+- **Production only:** the staging rehearsal (the section above: this runbook, the rollback and
+  the second forward run, on staging, from the same `develop` merge commit) passed, the security
+  architect has its verdicts, and its docs-only evidence PR is merged. On the staging run itself,
+  this item reads: the cutover PR's merge commit on `develop` is recorded.
 - The phase 13 image check passed: `docker build -f apps/auth/Dockerfile .`, run as the image's
   `node` user, `./node_modules/.bin/tsx scripts/grant-admin.ts --list` inside it.
 - Baselines B-1 to B-4 are recorded in [`baselines.md`](baselines.md). `AUTH_RATE_LIMIT_MODE` for
@@ -52,10 +106,16 @@ migration merges to `develop`, in either journal.
   inventory.
 - **Postgres 18 on both servers, so the cutover runs 18 to 18.** The production app database
   has been upgraded from 17 to 18 (Railway's native upgrade, **before** this window, never inside
-  it), and the auth database was provisioned on 18. From the operator
+  it), and the auth database runs on 18. From the operator
   environment, `psql "$APP_DATABASE_URL" -X -At -c "select version()"` and
   `psql "$AUTH_DATABASE_URL" -X -At -c "select version()"` both report `PostgreSQL 18`, and
   `psql --version` beside them reports 18 (the auth image's `PG_CLIENT_MAJOR`).
+- **The auth database is empty**, checked mechanically against `AUTH_DATABASE_URL`, whether it was
+  created for this window (production) or already existed (staging):
+  `psql "$AUTH_DATABASE_URL" -X -At -c "select count(*) from information_schema.tables where table_schema not in ('pg_catalog','information_schema')"`
+  prints `0`. Step 7 then applies the `0000` auth baseline as written. If the `auth` service has
+  no deployment yet, so there is no operator environment, run this check and the version check
+  above when step 6 opens one, before step 7.
 - Every **collision** the preflight lists is decided and resolved (the copy and `0011` abort on
   any), the preflight shows no NULL `created_at`/`updated_at` (the copy aborts on any: it
   copies timestamps exactly), and `not_bcrypt = 0` (the copy aborts on any hash that is not
@@ -64,7 +124,8 @@ migration merges to `develop`, in either journal.
 - Phases 10b (#304) and 10c (#306) are merged into `builder/spir-300`, so the cutover PR carries
   the reset and delete-account pages (legacy web retires in step 16).
 - The cutover PR is approved and merged to `develop`; record its merge commit.
-- Railway (main architect's runbook section): the `auth` service exists with its variables set
+- Railway (main architect's runbook section): the `auth` service exists (in production it is
+  created for this window, or found; in staging it already exists) with its variables set
   (see `docs/self-hosting.md`) **and `ADMIN_EMAILS` empty** until step 10; private networking on;
   **no domain on `INTERNAL_PORT` (3101)**; its own Postgres with snapshots or PITR **on**. The
   auth database is **empty** (no schema yet).
@@ -141,7 +202,8 @@ It is taken **here**, with `apps/api` offline and before any new code can create
 
 **Check:** the deployment is healthy; in the ssh session, `test -f /etc/ansari-auth-image && echo image`
 prints `image`; `psql --version` shows 18, and `select version()` reports `PostgreSQL 18` on both
-`$APP_DATABASE_URL` and `$AUTH_DATABASE_URL`; `cutover_at` is in the record.
+`$APP_DATABASE_URL` and `$AUTH_DATABASE_URL`; step 1's empty-database check prints `0` on
+`$AUTH_DATABASE_URL`; `cutover_at` is in the record.
 **Abort:** remove the deployment, bring `apps/api` back online.
 
 ## 7. The auth baseline

@@ -12,7 +12,8 @@
     // client imports a file outside them. tests/cutover/copy.test.ts builds
     // the APP database from apps/api's journal, so a change there re-runs it.
     // tests/client-ip.test.ts and tests/public-face.test.ts read the edge
-    // header shapes in docs/cutover/edge-header-shapes.json.
+    // header shapes in docs/cutover/edge-header-shapes.json; client-ip.test.ts
+    // also reads rehearsal.md's verdict line (provisional shapes cannot ship).
     "test": {
       "inputs": [
         "$TURBO_DEFAULT$",
@@ -23,7 +24,8 @@
         "$TURBO_ROOT$/apps/frontend/lib/api/wire-schemas.ts",
         "$TURBO_ROOT$/apps/frontend/vendor/api-client-react/custom-fetch.ts",
         "$TURBO_ROOT$/apps/api/drizzle/**",
-        "$TURBO_ROOT$/docs/cutover/edge-header-shapes.json"
+        "$TURBO_ROOT$/docs/cutover/edge-header-shapes.json",
+        "$TURBO_ROOT$/docs/cutover/rehearsal.md"
       ]
     }
   }

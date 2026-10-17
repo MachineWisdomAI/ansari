@@ -59,6 +59,37 @@ apps/auth src, a `postgres://` literal in packages/auth src, `APP_DATABASE_URL` 
 script, the exclusion widened to all scripts; control: the same line under `scripts/cutover/`
 passes); scan 3 (a `better-auth` re-export in apps/api lib, an `@ansari/auth` dependency).
 
+## Phase 13 evidence (owner amendments R-1, R-2)
+
+**Pre-merge, done in phase 13:**
+- the anomaly seed `apps/auth/scripts/cutover/rehearsal-anomalies.ts`, with its abort/pass order
+  tested in pglite
+- the copy's refusal of non-bcrypt hashes, and the preflight's hash-format counts
+- Postgres 18 everywhere, proven end to end in the rebuilt auth image against a `postgres:18`
+  container (the thread has the counts)
+- the edge probe on both paths, with the extended probe fields
+- the provisional edge-shape fixtures, read by both services' tests, with a guard that keeps them
+  from shipping as evidence
+- the runbook's Staging rehearsal section
+- `rehearsal.md` (the procedure)
+
+**Filled in by the docs-only evidence PR after the staging rehearsal** (R-2: the branch is never
+deployed; staging runs the window from the cutover PR's `develop` merge commit). Counts, checksums
+and timings only:
+
+| Evidence | Where it is recorded | Result |
+|---|---|---|
+| `develop` merge commit rehearsed | `docs/cutover/rehearsal.md` Part F | _pending_ |
+| Guards fire: collision abort, NULL abort, then the pass | `rehearsal.md` Part A | _pending_ |
+| Audits, both sides (six lines) | `rehearsal.md` Part B | _pending_ |
+| Step timings; the scaled copy; comms allowance (3×) | `rehearsal.md` Part B | _pending_ |
+| Unmodified clients (released mobile build, admin analytics) | `rehearsal.md` Part C | _pending_ |
+| Stored-guest sign-in: same id, same threads, no sign-up (G-5) | `rehearsal.md` Part D | _pending_ |
+| Rollback rehearsal (scenario 9k) | `rehearsal.md` Part E | _pending_ |
+| Edge check, both paths, two networks; staging verdict | `docs/cutover/edge-check.md`; `rehearsal.md` Verdicts | _pending_ |
+| Measured shapes replace the provisional fixture | `docs/cutover/edge-header-shapes.json` | _pending_ |
+| B-1 to B-4; any `limits.ts` amendment | `docs/cutover/baselines.md` | _pending_ |
+
 ## Flaky Tests
 
 Found during phase 9's full `npm test` runs. Before the fixes: 2 of 4 runs red with the new CORS

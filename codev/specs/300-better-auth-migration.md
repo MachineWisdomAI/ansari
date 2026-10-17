@@ -47,6 +47,34 @@ This spec defines WHAT and WHY. The plan defines HOW and WHEN.
 >     allowance is three times the scaled total.
 >   - `docs/cutover/rehearsal.md` records counts and checksums only.
 >
+> **Owner amendment, 2026-10-17, phase 13 reshaped** (owner rule with the main architect; the
+> security architect concurs).
+>
+> - **R-2.** This amends every "before the PR merges" verification below, and the Phasing table.
+>   **The branch is never deployed to staging.** Staging deploys only from `develop`, and
+>   production from `main`. **The staging rehearsal is the window, run on staging after the
+>   merge:**
+>   1. Before the merge, the owner turns staging `backend` auto-deploy **off**, and sets the
+>      staging `auth` service to deploy from `develop` with auto-deploy off.
+>   2. The cutover PR merges to `develop` on the owner's word, after the security architect's
+>      review. `develop` is **frozen** from that merge until the production window.
+>   3. The window runbook runs on staging from step 1, with `develop`'s merge commit standing in
+>      for `main`, and every deploy done by hand. The roles:
+>      - the owner operates the Railway side
+>      - the main architect prepares the filled-in staging command sheet and checks the outputs
+>      - the builder runs the client-side checks: the edge probes on both paths, the released
+>        mobile build against staging, the admin analytics login, the stored-guest sign-in
+>   4. The rollback is rehearsed on staging.
+>   5. The evidence (the staging edge verdict, the scaled timings, the baselines) lands as a small
+>      docs-only PR to `develop`.
+>   6. The production window then promotes `develop` to `main`.
+>
+>   **Until the staging check passes, `develop` is not promoted.**
+> - **C-4 (clarified, owner, 2026-10-17).** In **staging**, the auth service and its Postgres 18
+>   already exist, and the auth database is empty. In **production** they are created afterwards
+>   (or found) with the settings the main architect confirms. Either way, window step 1 checks
+>   mechanically that the auth server reports major 18 and that the database has no tables.
+>
 > **Lineage.** This spec is written for issue #300. Its evidence base is the issue #60 reference
 > spec and plan (`codev/specs/60-better-auth-migration-reference.md`,
 > `codev/plans/60-better-auth-migration-reference.md`), updated in #299 against better-auth 1.7.7.
@@ -326,8 +354,9 @@ Evidence:
 The documentation establishes only that the header exists. The overwrite guarantee is a staff
 statement, staff answers on the forum conflict, and Help Station threads report `X-Real-IP`
 sometimes carrying **Railway infrastructure IPs** instead of the client's. So the header **must be
-verified empirically on a deployed service before the PR merges** (staging, deployed from the
-branch). **Owner amendment G-2 (2026-10-16):** the production domains are probed in the window
+verified empirically on a deployed service before production depends on it** (owner amendment
+R-2: staging, deployed from `develop` after the merge, on both the Cloudflare and the direct
+path). **Owner amendment G-2 (2026-10-16):** the production domains are probed in the window
 through diagnostic routes, because they cannot be probed before the merge without deploying project
 code to production. Before the merge they get a passive DNS and proxy-chain check, and production
 ships in the mode the staging verdict chose. The check passes only if it proves both properties:
@@ -340,8 +369,8 @@ ships in the mode the staging verdict chose. The check passes only if it proves 
    equal to that client's own public address, across repeated requests. A value that is the same
    for both clients, or that falls in a non-public range, fails the check.
 
-The method, raw observations and verdict are recorded in the plan and the review. Until the check
-passes, the PR does not merge.
+The method, raw observations and verdict are recorded in `docs/cutover/edge-check.md` and the
+review. **Until the staging check passes, `develop` is not promoted** (owner amendment R-2).
 
 **Fallback if the check fails** (either property). Per-IP limiting is then not trustworthy: it is
 either spoofable or collapses into a shared bucket. The fallback changes how the layer keys and
@@ -418,7 +447,7 @@ of time, and nothing reads it. In the window, `apps/auth` is deployed after the 
 audits, and its **public domain is attached last**, after the smoke tests on the private network. A
 reachable `apps/auth` before the copy would accept sign-ups into `auth.users`, which the copy's
 emptiness guard would then refuse. The edge check and the rehearsal use staging deployments from
-the branch.
+`develop` after the merge (owner amendment R-2); the branch is never deployed.
 
 **Token model: JWT via JWKS** (Better Auth's `jwt` plugin on `apps/auth`), alongside `bearer()` so
 native and web clients can carry the session token without third-party cookies. Verified on the
@@ -768,7 +797,7 @@ a commit recorded in the release notes.
 | PR / stage | Reference phases | What happens |
 |---|---|---|
 | **1. Cutover PR, built on the branch** | 0 to 2 (code) | The `apps/auth` config (UUIDs, `auth` schema, dual verify, `bearer()`, `jwt()`, `admin()` kept for its columns with its whole HTTP surface blocked, `change-email` and `update-user` blocked, rate limiting and client IP, the internal hop and endpoints), its Dockerfile and service; the fresh `packages/auth` `0000`; the app migrations (scaffold cleanup, `public.deleted_users`, the window migration); the rollback SQL; the copy script and audits; the `apps/api` JWKS verification, app-row creation, tombstoned deletion, role calls and compatibility layer; the CORS fix; contract tests written first against today's implementation; removal of the legacy JWT code and the `JWT_*` config (and their `globalEnv` names), with `grant-admin.ts` and `ADMIN_EMAILS` moving to `apps/auth`; the `apps/frontend` switch to `apps/auth` (agreed with the app architect); `RELEASE.md` and `CONTRIBUTING.md` |
-| **Before the window** | 2 | Staging deployments from the branch: the empirical edge check, and the **rehearsal** (including a rollback rehearsal) on a clone of the production app database plus a fresh auth database. The empty production auth database is created on Railway, with backups or PITR on before the first real row (C-4). The branch is kept current with `develop`, the numbering is re-checked after every merge, and the rehearsal is re-run after the last rebase |
+| **Before the window** | 2 | **Owner amendment R-2.** Staging auto-deploy off; the cutover PR merges to `develop`, which is frozen until the production window. The window runbook runs on **staging** from `develop`'s merge commit: the empirical edge check (both paths), the **rehearsal** (including a rollback rehearsal) on the staging users seeded with every anomaly class (R-1) plus the empty staging auth database, and the unmodified clients. The evidence lands as a docs-only PR to `develop`. The empty production auth database is created on Railway (or found), with backups or PITR on before the first real row (C-4). Before the merge, the branch is kept current with `develop`, and the numbering is re-checked after every merge |
 | **The window** | 3 | Merge and promote the cutover PR with `apps/api` offline: the app database's snapshot or PITR mark, the auth database's baseline, the copy and its audits, the window migration, admin roles, deploy `apps/auth`, `apps/api` and `apps/frontend`, smoke tests, then `apps/auth`'s public domain |
 | **2. Contract PR** (the first release after the 24-hour deadline passes; owner, C-2) | 4 | The contract migration: drop `password_hash`, `is_admin`, `session_version` and `tokens`, with its own `DEPLOYED_THROUGH` bump; the remaining pglite DDL; `RELEASE.md` names it as the one exception |
 | Out of this project (follow-up issues) | 4 triggers, 5 | Remove the layer (its trigger). A profile sync design before `change-email` or `update-user` is enabled |
@@ -781,7 +810,8 @@ described under the cutover data copy, never a code toggle.
 **Costs, accepted by the owner.**
 
 - A long-lived cutover branch must be kept current with `develop`. The numbering rule's re-check
-  after every merge applies, and the rehearsal is re-run after the last rebase.
+  after every merge applies. After the merge, `develop` is frozen until the production window
+  (R-2), so the staging rehearsal runs on exactly what production receives.
 - The issue's "migrated before the window" for the `auth` tables no longer holds. The auth database
   is created empty beforehand, and its tables are created in the window's first step, which is
   quick on an empty database.
@@ -1059,9 +1089,10 @@ rollback deadline passing, and the contract PR's release.
 - [ ] `apps/api`'s `getClientIp` (used by `mcp-complete`, and by the layer to forward) reads
   `X-Real-IP` only. `tests/rate-limit.test.ts`, which asserts the opposite preference today, is
   updated.
-- [ ] **Empirical edge verification is recorded** (method, raw observations, verdict). It is done
-  **before the PR merges** on the staging domains and the `*.up.railway.app` domains, plus a
-  passive DNS and proxy-chain check of each production domain. It is done **in the window** on
+- [ ] **Empirical edge verification is recorded** (method, raw observations, verdict). It is done on
+  the staging domains (via Cloudflare and direct) and the `*.up.railway.app` domains, from
+  `develop` after the merge and **before `develop` is promoted** (owner amendment R-2), plus a
+  passive DNS and proxy-chain check of each production domain before the merge. It is done **in the window** on
   each production domain and on `apps/auth`'s domain once attached (owner amendment G-2). It proves
   both properties from the Client IP section:
   - forged `X-Real-IP` and `X-Forwarded-For` values never appear as the observed `X-Real-IP`
@@ -1098,9 +1129,10 @@ rollback deadline passing, and the contract PR's release.
     `created_at`, redeploy the
     previous `apps/api` and `apps/frontend` deployments, and detach `apps/auth`'s public domain.
     It is a redeploy, never a database restore. After the deadline, fix forward.
-- [ ] The rehearsal of the full runbook, **including the rollback** (removal of post-cutover users, redeploy of the previous image, which then serves legacy logins), runs on a
-  clone of the production app database and a fresh auth database, never a database production
-  uses. It passes all audits, then boots the cutover PR's
+- [ ] The rehearsal of the full runbook, **including the rollback** (removal of post-cutover users, redeploy of the previous image, which then serves legacy logins), runs on
+  staging, from `develop` after the merge and before its promotion (R-2), on the staging users
+  seeded with every anomaly class (R-1) and the empty staging auth database, never a database
+  production uses. It passes all audits, then boots the cutover PR's
   `apps/api` and `apps/auth` against the rehearsed databases and passes the smoke tests.
 - [ ] The cutover PR amends `RELEASE.md` with the auth database and its window steps (baseline,
   copy, audits, app window migration), each `psql` step naming `APP_DATABASE_URL` or
@@ -1218,10 +1250,11 @@ decided rate limits apply to every production sign-in, because all of them pass 
   and staging has its own database (owner, 2026-10-16; C-3 resolved). The rehearsal must never run against a database that production also uses. It needs an `apps/auth`
   instance and its own auth database too.
 - The operator can take a snapshot or PITR mark of **both** databases. The app database's
-  pre-window mark is a last resort only; the planned rollback is a redeploy. The owner provisions
-  the second Postgres for `apps/auth` in staging and production (C-4 resolved).
-- Railway's `X-Real-IP` behaviour as stated by staff holds on our domains. It is verified during
-  before the PR merges, not assumed, and the spec carries a fallback if it does not hold.
+  pre-window mark is a last resort only; the planned rollback is a redeploy. In staging the
+  second Postgres for `apps/auth` already exists and is empty; in production the owner creates
+  it, or confirms it exists and is empty (C-4, clarified 2026-10-17).
+- Railway's `X-Real-IP` behaviour as stated by staff holds on our domains. It is verified on
+  staging before `develop` is promoted (R-2), not assumed, and the spec carries a fallback if it does not hold.
 - `apps/api` can reach `apps/auth` reliably, over the public domain or the private network (the plan
   chooses). The internal credential protects either.
 - Released mobile builds send `Authorization: Bearer` on every authenticated call, treat
@@ -1291,14 +1324,15 @@ This was the first draft's proposal.
 - **C-2 (resolved, owner, 2026-10-16):** the cutover PR, merged at the window, plus a contract PR
   in the first release after the 24-hour rollback deadline. No database logins, so no
   provisioning PR. See Phasing.
-- **C-4 (resolved, owner, 2026-10-16):** the owner provisions the auth database, a new Railway
-  Postgres service for `apps/auth`, in staging and production, with snapshots or PITR on before its
-  first real row.
+- **C-4 (resolved, owner, 2026-10-16; clarified 2026-10-17):** the auth database is a Railway
+  Postgres 18 service for `apps/auth`, with snapshots or PITR on before its first real row. In
+  staging it **already exists, empty**. In production the owner creates it, or confirms it exists.
+  Either way, window step 1 checks mechanically that it reports 18 and holds no tables.
 - **C-3 (resolved, owner, 2026-10-16):** staging and production are isolated environments, and
   staging has its own database. **Owner amendment R-1 (2026-10-17):** the rehearsal uses the existing staging users in the
   staging app database (no production restore), seeded with one row per anomaly class, with a fresh
   staging auth database beside it. The rehearsal stays a hard prerequisite
-  for merging.
+  for promoting `develop` to `main` (R-2).
 
 **Important (shapes design)**
 
@@ -1475,7 +1509,7 @@ This was the first draft's proposal.
 | Railway changes `X-Real-IP` semantics later | Low | Medium | Documented header; re-verify on any Railway networking change; an arch-critical fact makes the dependency visible |
 | Admin HTTP surface abused (stolen admin token or frontend XSS leads to account takeover) | Low | Critical | Whole admin surface blocked: `disabledPaths` plus a case-insensitive prefix middleware before `toNodeHandler`; variant tests; enumerating regression test |
 | `apps/frontend` client change slips or breaks in the window | Medium | High | Agreed with the app architect up front; rehearsed; web rollback by redeploy; native release timing decided (I-6) |
-| Long-lived branch drifts from `develop` | Medium | Medium | Regular `develop` merges; numbering re-check after each; rehearsal re-run after the last rebase; nothing merges early, so releases never freeze |
+| Long-lived branch drifts from `develop` | Medium | Medium | Regular `develop` merges; numbering re-check after each; `develop` frozen from the cutover merge to the production window (R-2), so the staging rehearsal runs on what production gets |
 | More lands in one window | Medium | High | Full rehearsal on staging, seeded with every anomaly class, plus the production preflight (R-1); ordered, gated runbook; 24-hour snapshot rollback |
 | Rollback after cutover | Low | High | A redeploy, never a restore: nothing legacy reads is dropped until the contract migration; post-cutover users removed by `created_at` (owner-accepted cost); rollback rehearsed |
 | Legacy hashes readable by `apps/api`'s database account until the contract migration | Certain (owner: no separate logins) | Medium | No code reads them (Drizzle schema, scan); contract migration dated to the first release after the deadline |

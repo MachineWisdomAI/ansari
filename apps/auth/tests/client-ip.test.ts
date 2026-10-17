@@ -29,10 +29,13 @@ import {
 const SIGN_IN = '/api/auth/sign-in/email';
 
 type EdgeShape = { name: string; headers: Record<string, string>; client?: string; never?: string[] };
+const DOCS_CUTOVER = resolve(dirname(fileURLToPath(import.meta.url)), '../../../docs/cutover');
 /** Header shapes behind Railway's edge, per path (docs/cutover/edge-check.md). */
-const EDGE = JSON.parse(
-  readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../../docs/cutover/edge-header-shapes.json'), 'utf8')
-) as { shapes: EdgeShape[]; withoutTheEdge: EdgeShape[] };
+const EDGE = JSON.parse(readFileSync(resolve(DOCS_CUTOVER, 'edge-header-shapes.json'), 'utf8')) as {
+  source: string;
+  shapes: EdgeShape[];
+  withoutTheEdge: EdgeShape[];
+};
 const wrongPassword = { email: 'nobody@example.com', password: 'Wrong-Passw0rd!' };
 
 let service: Service;
@@ -306,6 +309,13 @@ describe('edge header shapes (docs/cutover/edge-header-shapes.json): only X-Real
   it('the fixture has both paths and both no-edge shapes', () => {
     expect(EDGE.shapes).toHaveLength(2);
     expect(EDGE.withoutTheEdge).toHaveLength(2);
+  });
+
+  it('provisional shapes cannot ship as evidence: once rehearsal.md records a verdict, the fixture must be measured', () => {
+    const rehearsal = readFileSync(resolve(DOCS_CUTOVER, 'rehearsal.md'), 'utf8');
+    const verdict = /^\*\*Staging edge verdict:\*\* (.+)$/m.exec(rehearsal)?.[1];
+    expect(verdict, 'rehearsal.md has its verdict line').toBeDefined();
+    if (verdict !== '_pending_') expect(EDGE.source).not.toMatch(/not yet measured/);
   });
 
   it.each(EDGE.shapes.map((s) => [s.name, s] as const))(

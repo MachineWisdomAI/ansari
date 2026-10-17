@@ -1,8 +1,17 @@
 # Cutover rehearsal on staging (spec 300, plan phase 13)
 
-The full window runbook ([`better-auth-cutover.md`](better-auth-cutover.md)) and the rollback
-([`rollback.md`](rollback.md)) are rehearsed on staging before the PR merges. This file holds the
-method and the recorded results.
+**Owner amendment R-2 (2026-10-17).** The branch is never deployed to staging. After the
+cutover PR merges to `develop` (frozen from then on), the whole window runbook
+([`better-auth-cutover.md`](better-auth-cutover.md), its "Staging rehearsal" section gives the
+differences) and the rollback ([`rollback.md`](rollback.md)) run on staging from that merge
+commit. This file holds the procedure and, filled in by the docs-only evidence PR, the results.
+`develop` is not promoted until that PR merges.
+
+Who does what:
+- the owner operates Railway (`railway ssh`, `copy.sh`, `0009`–`0011`, `grant-admin.ts`, the
+  rollback script)
+- the main architect prepares the filled-in staging command sheet and checks outputs
+- the builder runs the client-side checks (Parts C and D, and the edge probes)
 
 **What is recorded here.** Counts, checksums, timings, exit codes and pass/fail only. Never a row,
 an email address, a password, a hash, or a URL with credentials. The preflight also prints the
@@ -27,23 +36,30 @@ A clone would have shown two things that staging cannot:
 
 ## Environment
 
-- Staging, isolated from production, each service deployed from the branch, with
-  `auth-staging.askansari.ai` attached.
+- Staging, isolated from production. Each service is deployed **by hand from the cutover PR's
+  merge commit on `develop`**, with auto-deploy off (set before the merge), and
+  `auth-staging.askansari.ai` attached at step 15.
 - Postgres 18 on both the staging app and auth servers. `psql --version` in the auth image reports
   18 (the window's step 1 precondition, rehearsed).
 - The operator environment is the window's, in staging:
   `railway ssh --service auth --environment staging`, then `cd /repo`, with `AUTH_DATABASE_URL`
   set to the service's `DATABASE_URL` and `APP_DATABASE_URL` typed in the session only.
 
-## Part A: the guards fire (before the pass run)
+## Part A: the guards fire (runbook steps 6 to 8)
 
-Seed the staging app database. The existing staging users and system rows stay. Every
-`rehearsal-anomalies.ts` command is piped straight into psql:
+In the operator environment, after runbook step 6 and before step 7, seed the staging app
+database. The existing staging users and system rows stay. Every `rehearsal-anomalies.ts`
+command is piped straight into psql. The script refuses outside the auth image, outside Railway's
+`staging` environment, or onto a terminal:
 
 ```bash
-REHEARSAL_PASSWORD=<typed, ≥ 12 characters> ./apps/auth/node_modules/.bin/tsx apps/auth/scripts/cutover/rehearsal-anomalies.ts seed \
-  | psql "$APP_DATABASE_URL" -X -q -v ON_ERROR_STOP=1 --single-transaction
+SEED="./apps/auth/node_modules/.bin/tsx apps/auth/scripts/cutover/rehearsal-anomalies.ts"
+read -rs REHEARSAL_PASSWORD && export REHEARSAL_PASSWORD   # typed, ≥ 12 characters; kept for Part B's sign-ins
+$SEED seed | psql "$APP_DATABASE_URL" -X -q -v ON_ERROR_STOP=1 --single-transaction
 ```
+
+Expected: no output and exit 0. Run it a second time and it must fail with
+`rehearsal rows already exist; run remove first`.
 
 The seed is seven rows:
 - a collision pair: two emails that normalize to one
@@ -53,14 +69,29 @@ The seed is seven rows:
 - a legacy `is_admin` row
 - a guest-shaped row (`guest_` + 10 characters, Welcome Guest)
 
-1. Run `00-preflight-app.sql`. Record the counts per class: collision groups, `not_normalized`,
-   `null_updated_at`, hash formats, `not_bcrypt`, guests, and the number of legacy admins.
-2. Apply the auth baseline (window step 7), then run `copy.sh`. **It must abort on the
-   collision.** Afterwards `auth.users` and `auth.account` hold 0 rows, and no `import_users`
-   table is left.
-3. Run `rehearsal-anomalies.ts resolve-collision | psql …`, then `copy.sh` again. **It must abort
-   on the NULL timestamp**, with the same empty-target checks.
-4. Run `rehearsal-anomalies.ts resolve-null | psql …`. The pass run (Part B) follows.
+1. Run the preflight:
+   `psql "$APP_DATABASE_URL" -X -v ON_ERROR_STOP=1 -f apps/auth/scripts/cutover/00-preflight-app.sql`.
+   On top of the staging users' own numbers, it must show the seed:
+   - one more collision group (of 2 rows)
+   - `not_normalized` up by 2
+   - `null_updated_at` = 1
+   - `$2a$`/60 ≥ 1
+   - `not_bcrypt` = 0
+   - guests up by 1
+   - one more legacy admin
+
+   Record counts only; the admin inventory stays with the owner.
+2. Apply the auth baseline (runbook step 7), then run step 8's `apps/auth/scripts/cutover/copy.sh`.
+   **It must exit non-zero** with
+   `cutover copy: 1 normalized email(s) are held by more than one row`. Then:
+   - `psql "$AUTH_DATABASE_URL" -X -At -c "select (select count(*) from auth.users) + (select count(*) from auth.account)"` prints `0`
+   - `psql "$AUTH_DATABASE_URL" -X -At -c "select count(*) from pg_class where relname = 'import_users'"` prints `0`
+3. `$SEED resolve-collision | psql "$APP_DATABASE_URL" -X -q -v ON_ERROR_STOP=1 --single-transaction`,
+   then `copy.sh` again. **It must exit non-zero** with
+   `cutover copy: 1 row(s) have a NULL created_at or updated_at`, and both checks above print `0`.
+4. `$SEED resolve-null | psql "$APP_DATABASE_URL" -X -q -v ON_ERROR_STOP=1 --single-transaction`,
+   then `copy.sh` a third time. It must print `copy.sh: audit OK`. The runbook continues at
+   step 9 (Part B).
 
 | Step | Expected | Exit code | Auth rows after | TEMP table left | Result |
 |---|---|---|---|---|---|
@@ -73,7 +104,9 @@ The seed is seven rows:
 Follow the window runbook step by step, as written. For each step, record the start, the end, and
 the **Check:** output (counts and checksums only).
 
-After the copy:
+After the copy, sign each seeded user in against the staging auth service with
+`REHEARSAL_PASSWORD`, once its public domain is attached (step 15) or on the private network in
+step 11. Each must return the seeded id (the `e0300000-…` ids in the script):
 - The mixed-case row signs in with its address in **upper case**.
 - The `$2a$` and `$2b$` rows both sign in.
 - The legacy admin holds `role = 'admin'` after `grant-admin.ts`, and `05` lists it.
@@ -163,12 +196,25 @@ Follow [`rollback.md`](rollback.md) as written:
 | legacy sign-in of a migrated user | |
 | time, rollback step 1 to step 6 | |
 
-Then clean up: run `rehearsal-anomalies.ts remove | psql …`, and empty the staging auth database
-before any re-run.
+## Part F: the second forward run, and clean-up
 
-## Part F: re-run after the last `develop` merge
+After the rollback, follow rollback.md's restart procedure (empty the auth database, restart from
+window step 7), so staging ends on `develop`. Then:
+1. Run `$SEED remove | psql "$APP_DATABASE_URL" -X -q -v ON_ERROR_STOP=1 --single-transaction`.
+2. Turn auto-deploy back on.
 
-| Run | Branch commit | Parts A–E all pass |
+`develop` is frozen, so there is no re-run after a later merge: the merge commit below is what
+production receives.
+
+| Run | `develop` merge commit | Result |
 |---|---|---|
-| first | | |
-| after the last `develop` merge | | |
+| forward run (Parts A–D) | | |
+| rollback (Part E) | | |
+| second forward run | | |
+
+## Verdicts
+
+**Staging edge verdict:** _pending_
+
+The verdict is recorded only after both paths are measured. It records the `AUTH_RATE_LIMIT_MODE`
+production ships in, with the measured shapes copied into `edge-header-shapes.json`.

@@ -62,7 +62,9 @@ migration runbook were both proven in real releases on 2026-08-02.
 > nothing else; `INTERNAL_PORT` (3101) has NO domain and is reached by `backend`
 > over the private network (`AUTH_INTERNAL_URL`). Set both as service variables.
 > It has its OWN Railway Postgres, the auth database, with snapshots or PITR
-> enabled before its first real row (C-4, provisioned by the owner). Its image is also the
+> enabled before its first real row, on Postgres 18 (C-4: the owner's service; in staging it
+> already exists, empty; in production it is created or found, and checked empty in window step 1).
+> Its image is also the
 > cutover's operator environment (`psql`, both migration journals, the cutover scripts; reached
 > with `railway ssh --service auth`). Operator scripts run in it, from `/repo/apps/auth`:
 > `./node_modules/.bin/tsx scripts/grant-admin.ts …` and `… scripts/ban-user.ts …`

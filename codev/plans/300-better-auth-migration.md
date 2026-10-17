@@ -22,8 +22,11 @@ This plan follows the spec's **Approach 1**:
 The work ships as **two PRs**, as the spec's Phasing section says:
 
 1. **The cutover PR.** It carries implementation phases 1 to 13 below, one git commit each, and is
-   built and kept on `builder/spir-300`. It merges **at the window**, never before. Phase 13 (staging
-   verification and rehearsal) is a hard gate on that merge.
+   built and kept on `builder/spir-300`. **Owner amendment R-2 (2026-10-17):** it merges to
+   `develop`, which is then frozen. The window runbook runs on staging from that merge (the staging
+   rehearsal). Its evidence lands as a docs-only PR, and only then is `develop` promoted to `main`
+   in the production window. Phase 13 produces the pre-merge deliverables. The staging rehearsal is
+   a hard gate on the promotion.
 2. **The contract PR.** It merges in the first release after the 24-hour rollback deadline has
    passed. It is not a porch implementation phase, because it cannot exist before the window. It is
    built and merged during this project's **verify** phase (see "After merge"). Its content is fixed
@@ -1111,7 +1114,8 @@ it.
   `ansari_auth`) with owner URLs, and developers who ran the old `packages/auth` `0000` must drop
   and recreate their local auth database.
 - `RELEASE.md`: the "Railway service configuration" block gains the `auth` service and the auth
-  Postgres (with backups or PITR before its first real row; C-4, provisioned by the owner).
+  Postgres (with backups or PITR before its first real row; C-4: the owner's service, existing
+  and empty in staging, created or found in production).
 
 #### Deliverables
 
@@ -1253,71 +1257,105 @@ pglite pair. The real `psql` pipe is exercised in phase 13.
 
 ### Phase 13: Staging verification: edge check, unmodified clients, full rehearsal
 
-**Dependencies**: Phases 1 to 12. **External prerequisites, all resolved by the owner on
-2026-10-16:**
-- C-3: staging is isolated from production and has its own database. **Owner amendment R-1 (2026-10-17):** the
-  rehearsal uses the existing staging users, with no production restore (spec R-1). The
-  mitigations:
+**Owner amendment R-2 (2026-10-17; spec R-2).** The branch is never deployed to staging:
+staging deploys from `develop`, production from `main`. **The staging rehearsal is the window,
+run on staging after the cutover PR merges to `develop`**, with `develop` frozen until the
+production window. So this phase produces what needs **no deployment**, and the deployed
+evidence lands afterwards as a small docs-only PR to `develop`, before `develop` is promoted.
+
+**Dependencies**: Phases 1 to 12. **External prerequisites** (owner):
+- C-3: staging is isolated from production and has its own database. **Owner amendment R-1
+  (2026-10-17):** the rehearsal uses the existing staging users, with no production restore
+  (spec R-1). The mitigations:
   - the production preflight (counts only), with the hash-format distribution
   - the copy's refusal of non-bcrypt hashes
   - the anomaly seed (`apps/auth/scripts/cutover/rehearsal-anomalies.ts`), so every guard fires
   - copy-and-audit timings scaled by production's `to_copy`, with a 3× comms allowance
-- C-4: the owner provisions the auth Postgres in staging and production.
-- I-4: the owner operates.
-
-The phase still **cannot complete until those resources exist**;
-if they are not available, the builder reports that and stops.
+- C-4 (clarified 2026-10-17): in staging, the auth service and its Postgres 18 **already exist,
+  empty**. In production they are created afterwards, or found, with the settings the main
+  architect confirms. Window step 1 checks mechanically, either way, that the server reports 18 and
+  holds no tables.
+- I-4: the owner operates, on staging as in production (R-2).
 
 #### Objective
 
-Produce the evidence the spec requires before the merge, and commit it.
+Before the merge: everything the staging rehearsal needs, and nothing that needs a deployment.
+After the merge: the staging rehearsal itself, whose evidence is the docs PR.
 
-#### Files to Create / Modify
+#### Files to Create / Modify (before the merge)
 
-- `docs/cutover/edge-check.md`: the pre-merge passive production check (`dig` CNAME chains and
-  plain `curl -sI` headers per production domain; P-4); the method (probe commands, networks used, IPv4 and IPv6), the raw
-  observations per domain, and the verdict for both properties. The verdict sets
-  `AUTH_RATE_LIMIT_MODE` (P-3).
-- `docs/cutover/baselines.md`: B-1 to B-4, with the P-2 numbers confirmed or amended. Amendments go
-  into `packages/auth/src/limits.ts` in the same commit.
-- `docs/cutover/rehearsal.md`: each runbook step's timing (scenario 34), the audit outputs (counts
-  and checksums only), the downtime mechanism chosen, and the rollback rehearsal result
-  (scenario 9k).
-- `codev/reviews/300-better-auth-migration.md`: started here with the evidence, and finished in
-  the review phase.
+- `docs/cutover/better-auth-cutover.md`: a **Staging rehearsal** section. It gives the
+  differences from production:
+  - `develop`'s merge commit stands in for `main`
+  - the staging domains and services
+  - the auto-deploy toggles
+  - the seeded anomaly users, with their abort/pass sequence
+  - what `cutover_at` means on staging
+- `apps/auth/scripts/cutover/rehearsal-anomalies.ts`: the anomaly seed (SQL on a pipe).
+- `docs/cutover/edge-check.md`: the passive production check, the probe commands for both paths
+  (via Cloudflare and direct to Railway's edge), the networks, and an empty observation table.
+- `docs/cutover/edge-header-shapes.json`: the header shapes per path, read by both services'
+  client-IP tests. They are provisional until measured.
+- `docs/cutover/rehearsal.md`: the step-by-step procedure, with exact commands, expected outputs
+  and empty result tables. Counts and checksums only.
+- `docs/cutover/baselines.md`: the counts-only rule.
+- `codev/reviews/300-better-auth-migration.md`: an evidence section with placeholders, which the
+  docs PR fills.
 
 #### Deliverables
 
-- [ ] Staging deployments of `apps/auth`, `apps/api` and `apps/frontend` from the branch, with
-  `auth-staging.askansari.ai`.
-- [ ] The edge check, both properties, on every staging domain.
-- [ ] The **unmodified** clients run against staging:
+Before the merge (this phase):
+- [ ] The runbook's Staging rehearsal section.
+- [ ] The anomaly seed, with its tests: the abort/pass order in pglite, and the guards.
+- [ ] The edge probe commands for both paths, and the probe fields that show the header shapes.
+- [ ] The edge-shape fixtures, with the tests in apps/auth (production public listener) and
+  apps/api (`getRealIp`, the probe).
+- [ ] The counts-only wording in `rehearsal.md` and `baselines.md`.
+- [ ] The review's evidence section, with placeholders.
+
+**Deferred to the docs PR after the merge (owner amendment R-2).** They need a deployment:
+- [ ] The window runbook run on staging from `develop`'s merge commit (owner operates; the main
+  architect's filled-in command sheet), with `auth-staging.askansari.ai`.
+- [ ] **The guards fire** (R-1): the copy aborts on the collision, with the auth database empty and
+  no TEMP table left, then on the NULL timestamp. Then the pass run:
+  - the mixed-case row signs in by its uppercase address
+  - both hash prefixes sign in
+  - the admin gets the role
+  - the guest signs in
+  - system rows are absent
+- [ ] The full rehearsal on the staging users: all audits pass, both services boot and pass the
+  smoke tests. Timings are scaled by the production preflight's `to_copy`.
+- [ ] The edge check, both properties, on both paths (via Cloudflare once the owner orange-clouds
+  the staging hostnames, and direct), from two networks. The measured shapes replace the
+  provisional fixtures. The staging verdict is recorded after both paths are measured.
+- [ ] The **unmodified** clients against staging (the builder):
   - the released mobile build (or its build pointed at staging): login, bearer call, the 401
     after 15 minutes, refresh, retry
   - the admin analytics login
-  (`legacy/frontend-web` is retired at go-live and is not run; the window replaces it.)
-- [ ] **The guards fire** on staging (R-1): seeded with one row per anomaly class, the copy
-  aborts on the collision with the auth database empty and no TEMP table, then on the NULL
-  timestamp. Then the pass run: the mixed-case row signs in by its uppercase address, both hash
-  prefixes sign in, the admin gets the role, the guest signs in, and system rows are absent.
-- [ ] The full rehearsal on the **staging users** (owner amendment R-1; not a production clone)
-  plus a fresh auth database, following the runbook exactly: all audits pass, and both services boot on the rehearsed databases and pass the
-  smoke tests. Then the **rollback**: post-cutover users are removed, the previous image is
-  redeployed, a migrated user signs in with the legacy password through the legacy code, and no
-  post-cutover user remains.
+
+  (`legacy/frontend-web` is retired at go-live and is not run.)
 - [ ] A **stored-guest sign-in** against the migrated database: a guest created on the legacy
-  stack before the copy signs in from the phase 10 client after it, and gets the same id and
-  threads, with no new sign-up (G-5).
-- [ ] The rehearsal is re-run after the last `develop` merge before the window.
+  stack before the copy signs in from the phase 10 client after it. It gets the same id and the
+  same threads, with no new sign-up (G-5).
+- [ ] The **rollback** on staging:
+  - post-cutover users removed
+  - the previous image redeployed
+  - a migrated user signs in with the legacy password through the legacy code
+  - no post-cutover user remains
+- [ ] B-1 to B-4, from the owner.
 
 #### Acceptance Criteria
 
-Every item above is recorded. The security architect has the verdicts before the PR proceeds (spec:
-"the security architect is told before the PR proceeds").
+The pre-merge deliverables are committed and reviewed. The deferred items are recorded in the docs
+PR, and the security architect has the verdicts before `develop` is promoted (spec: "until the
+staging check passes, `develop` is not promoted").
 
 #### Test Plan
 
-The rehearsal itself is the test. Results are counts and checksums, never raw rows or emails.
+Before the merge: the seed, the guards, and the edge shapes as unit and integration tests.
+
+After the merge: the staging rehearsal itself. Results are counts and checksums, never raw rows
+or emails.
 
 ## After merge: the window, the verify phase, and the contract PR
 
@@ -1346,7 +1384,7 @@ The spec's risk table stands. These are the risks this plan adds or sharpens.
 
 | Risk | Probability | Impact | Mitigation |
 |------|-------------|--------|------------|
-| The owner-provisioned staging resources (C-3, C-4) are not ready when phase 13 starts | Low | High (no merge) | All resolved by the owner; phases 1 to 12 do not depend on them; phase 13 stops and reports rather than guessing |
+| The staging resources (C-3, C-4) are not ready for the staging rehearsal | Low | High (no promotion) | Staging's auth service and empty Postgres 18 exist (owner, 2026-10-17); the branch needs no deployment before the merge (R-2); the staging rehearsal stops and reports rather than guessing |
 | Production domains behave differently from staging at the edge | Low | High | P-4 probe in the window; `AUTH_RATE_LIMIT_MODE` flips to `email` without code (P-3) |
 | The phase 1 contract suite is weakened during phase 8 to pass | Low | High | CI diff check on the fixtures; assertions are never forked between modes |
 | Copy tests on pglite miss a `psql` pipe behaviour | Medium | Medium | The real pipe is rehearsed in phase 13 on staging, seeded with every anomaly class (R-1), with checksums |
@@ -1403,6 +1441,6 @@ gate:
     rehearsal includes a stored-guest sign-in against the migrated database.
   - **Position:** keep the decided 3/60s, narrow the catch, and let B-1 measure.
 - **Resolved from the spec** (owner, 2026-10-16): C-3 (staging is isolated and has its own
-  database; amended 2026-10-17 by R-1: the existing staging users, no production restore), C-4 (the owner provisions the auth
-  Postgres), and I-4 (the owner operates the window). I-6 is **resolved**: the app architect agreed
+  database; amended 2026-10-17 by R-1: the existing staging users, no production restore), C-4 (the auth Postgres: it exists, empty, in staging; production's is created or found,
+  clarified 2026-10-17), and I-4 (the owner operates the window). I-6 is **resolved**: the app architect agreed
   to phase 10 with four changes, now folded in.
