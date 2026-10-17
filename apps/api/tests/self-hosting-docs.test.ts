@@ -51,7 +51,7 @@ describe('self-hosting docs: boot-blocks-on-unreachable-DB triage (issue #21)', 
 describe('self-hosting docs: two databases, two services (spec 300)', () => {
   it('asks for two databases and runs both services', () => {
     expect(doc).toMatch(/two databases/i);
-    expect(doc).toContain('packages/auth/drizzle/0000_auth_schema.sql');
+    expect(doc).toContain('applies packages/auth/drizzle/ to DATABASE_URL (the auth database)');
     expect(existsSync(resolve(__dirname, '../../../packages/auth/drizzle/0000_auth_schema.sql'))).toBe(true);
     expect(doc).toContain('pnpm auth dev');
     expect(doc).toContain('pnpm api dev');

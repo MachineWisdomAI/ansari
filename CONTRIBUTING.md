@@ -53,8 +53,7 @@ createdb ansari_auth
 cd apps/auth
 cp .env.example .env    # DATABASE_URL = the ansari_auth owner URL; the service's
                         # startup error names any variable still missing
-psql -X -v ON_ERROR_STOP=1 --single-transaction -d ansari_auth \
-  -f ../../packages/auth/drizzle/0000_auth_schema.sql
+pnpm db:migrate         # applies packages/auth/drizzle/ to that DATABASE_URL
 cd ../..
 
 # Then, from the repo root: starts BOTH apps (api + frontend) together
@@ -68,7 +67,11 @@ e.g. `ansari`) and the auth database (`apps/auth`, e.g. `ansari_auth`), each
 with its own owner URL. `apps/api` never reads the auth database; it reaches
 `apps/auth` over HTTP, so set its `AUTH_INTERNAL_URL=http://localhost:3101` and
 the same `AUTH_INTERNAL_SECRET` in both services (`pnpm auth dev` serves
-`:3100` public and `:3101` internal). **If you applied the old `packages/auth`
+`:3100` public and `:3101` internal). An auth database you set up earlier by
+applying `0000_auth_schema.sql` with psql has no drizzle journal row, so
+`db:migrate` re-runs `0000` against it and fails (drizzle-kit prints no
+reason); drop and recreate `ansari_auth`
+(local data only) and migrate again. **If you applied the old `packages/auth`
 `0000` migration** (before spec 300), drop and recreate your local auth
 database and apply the new `0000`: the journal was replaced, not extended.
 The test suites need neither database (they run on pglite).

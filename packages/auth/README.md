@@ -75,7 +75,8 @@ The #59 scaffold created `user`, `session`, `account` and `verification` in `pub
 1. Create a separate local database for auth, for example `createdb ansari_auth`, and point this
    package's `DATABASE_URL` (in `apps/auth/.env`) at it. Do not share the app database: both
    journals use drizzle's default `drizzle.__drizzle_migrations` bookkeeping table.
-2. Run `pnpm --filter @ansari/auth db:migrate` against it.
+2. Run `pnpm auth db:migrate` against it (the config reads `apps/auth/.env`; a
+   `DATABASE_URL` set in the shell wins).
 3. In the app database, drop the scaffold tables if you want them gone:
    `DROP TABLE IF EXISTS public.session, public.account, public.verification, public."user";`.
    The leftover `0000_better_auth_init` row in that database's `drizzle.__drizzle_migrations` is

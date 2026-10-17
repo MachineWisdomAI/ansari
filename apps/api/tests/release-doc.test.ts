@@ -87,7 +87,8 @@ describe('RELEASE.md consistency', () => {
 
   it('applies every migration with ON_ERROR_STOP and --single-transaction, naming the database', () => {
     const applies = doc.split('\n').filter((l) => /psql .*-f \S*drizzle\/\S+\.sql/.test(l) || /psql .*--single-transaction \\$/.test(l));
-    expect(applies.length).toBeGreaterThanOrEqual(3);
+    // The two production applies (app + auth); the fresh-database smoke uses db:migrate.
+    expect(applies.length).toBeGreaterThanOrEqual(2);
     for (const line of applies) {
       expect(line, `apply without both flags: "${line.trim()}"`).toMatch(/-v ON_ERROR_STOP=1 --single-transaction/);
     }

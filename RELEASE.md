@@ -155,12 +155,12 @@ verifies JWTs from `apps/auth`, so both services run, each on its own database.
    psql postgresql://postgres:postgres@localhost:5433/postgres -X -c 'create database ansari_auth'
    export DATABASE_URL=postgresql://postgres:postgres@localhost:5433/postgres
    pnpm db:migrate
-   psql postgresql://postgres:postgres@localhost:5433/ansari_auth -X -v ON_ERROR_STOP=1 --single-transaction \
-     -f ../../packages/auth/drizzle/0000_auth_schema.sql
+   DATABASE_URL=postgresql://postgres:postgres@localhost:5433/ansari_auth pnpm --filter @ansari/auth db:migrate
    ```
 
    `pnpm db:migrate` applies `apps/api/drizzle/0000_baseline.sql` → latest to the app
-   database; the auth database gets `packages/auth/drizzle/0000_auth_schema.sql`.
+   database; the second command applies `packages/auth/drizzle/` (from
+   `0000_auth_schema.sql`) to the auth database.
 
 3. **Boot both production builds.** `apps/auth` first, in its own shell, from `apps/auth/`,
    with its `DATABASE_URL` set to the auth database and its env file loaded (it listens on

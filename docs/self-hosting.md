@@ -149,8 +149,7 @@ cd ../..
 createdb ansari_auth
 cd apps/auth
 cp .env.example .env        # DATABASE_URL = the auth database
-psql "$(grep '^DATABASE_URL=' .env | cut -d= -f2-)" -X -v ON_ERROR_STOP=1 --single-transaction \
-  -f ../../packages/auth/drizzle/0000_auth_schema.sql
+pnpm db:migrate             # applies packages/auth/drizzle/ to DATABASE_URL (the auth database)
 cd ../..
 
 pnpm auth dev               # apps/auth on :3100 (public) and :3101 (internal)

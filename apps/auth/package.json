@@ -14,7 +14,8 @@
     "start": "node dist/index.mjs",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "db:migrate": "pnpm --filter @ansari/auth db:migrate"
   },
   "dependencies": {
     "@ansari/auth": "workspace:*",
