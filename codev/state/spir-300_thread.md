@@ -486,3 +486,13 @@
 - Owner: remove ADMIN_EMAILS entirely (H-7). Security's conditions: grant by id with `--confirm`, squat warnings, the system domain refused, 05 as the window's check, no auth redeploy at step 10. Main's guard: backend keeps the legacy var until the contract PR. The frozen contract case for the reserved admin 409 had to go; security signed off option 1 (delete and re-pin once, with a dated note). The system-domain 409 stays covered in the frozen file.
 - Owner review (9 comments) answered; the zod deprecation fixed (2615623). resolveUser now reads the row first (7459a92 and 13ba449: my git add failed on the old path, so 7459a92 is the file move alone, and 13ba449 has the content). requireAdmin rename; the invariant written into arch.md (0b7daf0); legacyError replaced by createErrorResponse (7d6a26f).
 - H-8 (owner): the cutover runs from the owner's machine over Tailscale, with no psql in the auth image. Security set conditions 1-7 and main added a-e. Hosts are `*.railway.internal`; whether TLS is offered on that path is still unanswered, so a step-1 probe records it. operator-env.sh replaces the image marker. Each refusal is tested in a temp git checkout with a fake psql, and the passing run uses a real pty via `script` (spawnSync needs stdin 'ignore' for macOS `script`). The seed needs ANSARI_CUTOVER_ENV=staging, because internal host names are the same in staging and production. Scan 4's railway.internal pattern is narrowed to :3101.
+
+## 2026-10-19 — `--allow-local` for the cutover scripts (a116e5a)
+
+Owner asked to test the cutover copy end to end locally. `copy.sh` and `complete-tombstones.sh`
+now take `--allow-local`, which swaps the `<name>.railway.internal` host check for a loopback-only
+one (both URLs: localhost, 127.0.0.1, ::1); every other operator check still runs. Verified end
+to end on a throwaway PG18 cluster from a clean detached worktree: copy (normalized emails,
+credential accounts, matching audit), re-run refused, tombstone completion. Mutation (loopback
+check → true) fails the new tests. Note for local use: a worktree with untracked files counts as
+dirty, so run from a separate clean checkout. PR stays DRAFT at the pr gate.
