@@ -25,7 +25,7 @@ import {
   ID_PREFIX,
   ROWS,
   anomalySql,
-  isInternalHost,
+  isForwarderHost,
   makeHashes,
   refusal,
   urlHost,
@@ -514,24 +514,36 @@ describe('hash formats: only bcrypt $2a$/$2b$ of length 60 is copied', () => {
 describe('the staging anomaly seed (rehearsal-anomalies.ts), through the rehearsal order', () => {
   const ok = {
     cutoverEnv: 'staging',
-    appHost: 'postgres.railway.internal',
+    appHost: 'ansari-staging-tailscale-forwarder',
     checkout: 'ok' as const,
     stdoutIsTTY: false,
     command: 'seed',
     password: 'x'.repeat(12),
   };
 
-  it('refuses anything but staging, a non-internal host, a bad checkout, a terminal, an unknown command or a short password', () => {
+  it("refuses anything but staging, a host that is not staging's forwarder, a bad checkout, a terminal, an unknown command or a short password", () => {
     expect(refusal(ok)).toBeNull();
     expect(refusal({ ...ok, command: 'remove', password: undefined })).toBeNull();
     expect(refusal({ ...ok, cutoverEnv: 'production' })).toMatch(/anything but staging .*'production'/);
     expect(refusal({ ...ok, cutoverEnv: undefined })).toMatch(/unset/);
     expect(refusal({ ...ok, appHost: null })).toMatch(/APP_DATABASE_URL is unset/);
     expect(refusal({ ...ok, appHost: 'roundhouse.proxy.rlwy.net' })).toMatch(/public TCP proxy/);
-    for (const host of ['db.example.com', 'railway.internal', 'postgres.railway.internal.evil.com', '10.0.0.5']) {
-      expect(refusal({ ...ok, appHost: host }), host).toMatch(/not Railway-internal/);
+    for (const host of [
+      'db.example.com',
+      'postgres.railway.internal',
+      'tailscale-forwarder',
+      'ansari-staging-tailscale-forwarder.evil.com',
+      'localhost',
+      '100.64.0.7',
+    ]) {
+      expect(refusal({ ...ok, appHost: host }), host).toMatch(/not a Tailscale forwarder/);
     }
-    expect(refusal({ ...ok, appHost: 'postgres-staging.railway.internal' })).toBeNull();
+    for (const host of ['ansari-production-tailscale-forwarder', 'ansari-production-tailscale-forwarder.tail1234.ts.net']) {
+      expect(refusal({ ...ok, appHost: host }), host).toMatch(/not staging's forwarder/);
+    }
+    for (const host of ['ansari-staging-tailscale-forwarder-2', 'ansari-staging-tailscale-forwarder.tail1234.ts.net']) {
+      expect(refusal({ ...ok, appHost: host }), host).toBeNull();
+    }
     expect(refusal({ ...ok, checkout: 'dirty' })).toMatch(/uncommitted/);
     expect(refusal({ ...ok, checkout: 'not-promoted' })).toMatch(/PROMOTED_COMMIT/);
     expect(refusal({ ...ok, checkout: 'no-commit' })).toMatch(/PROMOTED_COMMIT is unset/);
@@ -542,13 +554,16 @@ describe('the staging anomaly seed (rehearsal-anomalies.ts), through the rehears
     expect(refusal({ ...ok, cutoverEnv: 'production', appHost: null, stdoutIsTTY: true })).toMatch(/anything but staging/);
   });
 
-  it('urlHost and isInternalHost read the host as operator-env.sh does', () => {
-    expect(urlHost('postgresql://u:p@postgres.railway.internal:5432/railway?sslmode=require')).toBe('postgres.railway.internal');
-    expect(urlHost('postgres://u:p%40x@Postgres.Railway.Internal/db')).toBe('postgres.railway.internal');
+  it('urlHost and isForwarderHost read the host as operator-env.sh does', () => {
+    expect(urlHost('postgresql://u:p@ansari-staging-tailscale-forwarder:5432/railway?sslmode=require')).toBe(
+      'ansari-staging-tailscale-forwarder'
+    );
+    expect(urlHost('postgres://u:p%40x@Ansari-Staging-Tailscale-Forwarder/db')).toBe('ansari-staging-tailscale-forwarder');
     expect(urlHost('not a url')).toBeNull();
     expect(urlHost(undefined)).toBeNull();
-    expect(isInternalHost('postgres.railway.internal.')).toBe(true);
-    expect(isInternalHost('-bad.railway.internal')).toBe(false);
+    expect(isForwarderHost('ansari-staging-tailscale-forwarder.')).toBe(true);
+    expect(isForwarderHost('-bad-tailscale-forwarder')).toBe(false);
+    expect(isForwarderHost('ansari-staging-tailscale-forwarder.ts.net')).toBe(false);
   });
 
   it('seed → the preflight sees every class; the copy stops on the collision, then the NULL timestamp, then passes', async () => {
@@ -618,9 +633,10 @@ describe('the staging anomaly seed (rehearsal-anomalies.ts), through the rehears
   it('the CLI exits 2 before generating anything: production, or a laptop shell without the staging word', () => {
     const tsx = resolve(here, '../../node_modules/.bin/tsx');
     for (const env of [
-      { ANSARI_CUTOVER_ENV: 'production', APP_DATABASE_URL: 'postgresql://u:p@postgres.railway.internal/railway' },
+      { ANSARI_CUTOVER_ENV: 'production', APP_DATABASE_URL: 'postgresql://u:p@ansari-staging-tailscale-forwarder/railway' },
       // Railway's own variables prove nothing (a laptop `railway shell` injects them).
-      { RAILWAY_ENVIRONMENT_NAME: 'staging', APP_DATABASE_URL: 'postgresql://u:p@postgres.railway.internal/railway' },
+      { RAILWAY_ENVIRONMENT_NAME: 'staging', APP_DATABASE_URL: 'postgresql://u:p@ansari-staging-tailscale-forwarder/railway' },
+      { ANSARI_CUTOVER_ENV: 'staging', APP_DATABASE_URL: 'postgresql://u:p@ansari-production-tailscale-forwarder/railway' },
       { ANSARI_CUTOVER_ENV: 'staging', APP_DATABASE_URL: 'postgresql://u:p@roundhouse.proxy.rlwy.net:41234/railway' },
     ]) {
       const result = spawnSync(tsx, [script('rehearsal-anomalies.ts'), 'seed'], {
@@ -628,7 +644,7 @@ describe('the staging anomaly seed (rehearsal-anomalies.ts), through the rehears
         encoding: 'utf8',
       });
       expect(result.status).toBe(2);
-      expect(result.stderr).toMatch(/anything but staging|public TCP proxy/);
+      expect(result.stderr).toMatch(/anything but staging|public TCP proxy|not staging's forwarder/);
       expect(result.stdout).toBe('');
     }
   });
@@ -772,8 +788,9 @@ describe('copy.sh and complete-tombstones.sh: the operator-environment check (sp
   });
 
   const good = () => ({
-    APP_DATABASE_URL: 'postgresql://u:p@postgres.railway.internal:5432/railway?sslmode=require',
-    AUTH_DATABASE_URL: 'postgresql://u:p@postgres-auth.railway.internal:5432/railway?sslmode=require',
+    // One forwarder, two mappings: 5432 → the app database, 5433 → the auth database.
+    APP_DATABASE_URL: 'postgresql://u:p@ansari-production-tailscale-forwarder:5432/railway?sslmode=require',
+    AUTH_DATABASE_URL: 'postgresql://u:p@ansari-production-tailscale-forwarder:5433/railway?sslmode=require',
     PROMOTED_COMMIT: commit,
   });
 
@@ -797,10 +814,11 @@ describe('copy.sh and complete-tombstones.sh: the operator-environment check (sp
       ['no AUTH_DATABASE_URL', { ...good(), AUTH_DATABASE_URL: '' }, /AUTH_DATABASE_URL is unset/],
       ['the same database', { ...good(), AUTH_DATABASE_URL: good().APP_DATABASE_URL }, /same database/],
       ['the public TCP proxy', { ...good(), APP_DATABASE_URL: 'postgresql://u:p@roundhouse.proxy.rlwy.net:41234/railway' }, /public TCP proxy/],
-      ['a public host', { ...good(), AUTH_DATABASE_URL: 'postgresql://u:p@db.example.com/railway' }, /not Railway-internal/],
-      ['a near-miss host', { ...good(), APP_DATABASE_URL: 'postgresql://u:p@postgres.railway.internal.evil.com/railway' }, /not Railway-internal/],
-      ['a bare IP', { ...good(), APP_DATABASE_URL: 'postgresql://u:p@100.64.0.7:5432/railway' }, /not Railway-internal/],
-      ['localhost without --allow-local', { ...good(), APP_DATABASE_URL: 'postgresql://u:p@localhost:5432/app' }, /not Railway-internal/],
+      ['a public host', { ...good(), AUTH_DATABASE_URL: 'postgresql://u:p@db.example.com/railway' }, /not a Tailscale forwarder/],
+      ['a near-miss host', { ...good(), APP_DATABASE_URL: 'postgresql://u:p@ansari-production-tailscale-forwarder.evil.com/railway' }, /not a Tailscale forwarder/],
+      ['a railway.internal host (it resolves only inside Railway)', { ...good(), APP_DATABASE_URL: 'postgresql://u:p@postgres.railway.internal:5432/railway' }, /not a Tailscale forwarder/],
+      ['a bare IP', { ...good(), APP_DATABASE_URL: 'postgresql://u:p@100.64.0.7:5432/railway' }, /not a Tailscale forwarder/],
+      ['localhost without --allow-local', { ...good(), APP_DATABASE_URL: 'postgresql://u:p@localhost:5432/app' }, /not a Tailscale forwarder/],
       ['psql 17', { ...good(), FAKE_PSQL_MAJOR: '17' }, /psql must be major 18 .*17/],
       ['no PROMOTED_COMMIT', { ...good(), PROMOTED_COMMIT: undefined }, /PROMOTED_COMMIT is unset/],
       ['HEAD is not the promoted commit', { ...good(), PROMOTED_COMMIT: 'HEAD~0^' }, /HEAD is not PROMOTED_COMMIT/],
@@ -823,7 +841,7 @@ describe('copy.sh and complete-tombstones.sh: the operator-environment check (sp
 
   it.each(['copy.sh', 'complete-tombstones.sh'])('%s --allow-local: loopback only, every other check still runs', (name) => {
     const cases: [string, Record<string, string | undefined>, string[], RegExp][] = [
-      ['a Railway-internal host', { ...local(), AUTH_DATABASE_URL: good().AUTH_DATABASE_URL }, ['--allow-local'], /not loopback/],
+      ['a forwarder host', { ...local(), AUTH_DATABASE_URL: good().AUTH_DATABASE_URL }, ['--allow-local'], /not loopback/],
       ['a public host', { ...local(), APP_DATABASE_URL: 'postgresql://u:p@db.example.com/app' }, ['--allow-local'], /not loopback/],
       ['the public TCP proxy', { ...local(), APP_DATABASE_URL: 'postgresql://u:p@roundhouse.proxy.rlwy.net:41234/railway' }, ['--allow-local'], /not loopback/],
       ['a near-miss host', { ...local(), APP_DATABASE_URL: 'postgresql://u:p@localhost.evil.com/app' }, ['--allow-local'], /not loopback/],
@@ -881,7 +899,7 @@ describe('copy.sh and complete-tombstones.sh: the operator-environment check (sp
     });
     // Past the check, the fake psql is called (and fails, so nothing else runs).
     expect(psqlCalls()).toMatch(/^called /);
-    expect(`${result.stdout}${result.stderr}`).not.toMatch(/refusing|not Railway-internal|PROMOTED_COMMIT|uncommitted/);
+    expect(`${result.stdout}${result.stderr}`).not.toMatch(/refusing|not a Tailscale forwarder|PROMOTED_COMMIT|uncommitted/);
   });
 
   it.each(['copy.sh', 'complete-tombstones.sh'])('%s: no image marker or railway ssh is left in it', (name) => {

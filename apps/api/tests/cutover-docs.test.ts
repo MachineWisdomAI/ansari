@@ -117,12 +117,13 @@ describe('the window runbook', () => {
     expect(steps[deployAuth - 1]).not.toMatch(/`ADMIN_EMAILS` empty/);
   });
 
-  it("names the operator environment: the owner's machine over Tailscale, a clean promoted checkout (H-8)", () => {
+  it("names the operator environment: the owner's machine through the Tailscale forwarder, a clean promoted checkout (H-8)", () => {
     expect(doc).toContain('**The operator environment (spec H-8).**');
     expect(doc).toContain('export PROMOTED_COMMIT=<promoted commit>');
     expect(doc).toContain('read -rs APP_DATABASE_URL && export APP_DATABASE_URL');
     expect(doc).toContain('set +o history');
-    expect(doc).toMatch(/`<name>\.railway\.internal`/);
+    expect(doc).toMatch(/`<project>-<environment>-tailscale-forwarder`/);
+    expect(doc).toContain('CONNECTION_MAPPING_2=5433:<auth-postgres>.railway.internal:5432');
     expect(doc).toMatch(/`\*\.proxy\.rlwy\.net`/);
     expect(doc).toContain('select ssl from pg_stat_ssl where pid = pg_backend_pid()');
     expect(doc).not.toMatch(/RAILWAY_ENVIRONMENT=/);
@@ -132,7 +133,8 @@ describe('the window runbook', () => {
     const step1 = steps[0] as string;
     for (const item of [
       'full-disk encryption is on',
-      'the Tailscale route is up',
+      'the Tailscale forwarder is up',
+      'each URL reaches its own database',
       'TLS on that path is probed and recorded',
       'entered with `read -rs` only',
       'shell history is off',

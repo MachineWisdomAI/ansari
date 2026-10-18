@@ -2,8 +2,8 @@
 # The cutover copy (docs/cutover/better-auth-cutover.md, step 6): app database
 # → auth database, then the cross-database audit.
 #
-# Run on the owner's machine, over the owner's Tailscale route to Railway's
-# private network (spec 300 amendment H-8), from the promoted commit's clean
+# Run on the owner's machine, through Railway's Tailscale forwarder to the
+# databases' private hosts (spec 300 amendment H-8), from the promoted commit's clean
 # checkout; operator-env.sh refuses anything else. APP_DATABASE_URL and
 # AUTH_DATABASE_URL are entered for this session only (`read -rs`): never set
 # on a service, never written to a file. This script writes no file either:

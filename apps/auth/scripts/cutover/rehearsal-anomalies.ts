@@ -20,12 +20,13 @@
  *   resolve-null       set the NULL updated_at to its created_at (the copy then passes)
  *   remove             delete every rehearsal row (threads etc. go with the cascade)
  *
- * Runs on the owner's machine over the Tailscale route (spec 300 amendment
- * H-8), from the promoted commit's clean checkout, against STAGING only. A
- * Railway-internal host name is the same in both environments, so nothing in
- * the URL says which one it is: the operator types ANSARI_CUTOVER_ENV=staging,
- * and anything else is refused (an owner-accepted residual: a typed word, not
- * a check the environment can prove).
+ * Runs on the owner's machine through the Tailscale forwarder (spec 300
+ * amendment H-8), from the promoted commit's clean checkout, against STAGING
+ * only, on two counts: the operator types ANSARI_CUTOVER_ENV=staging, and the
+ * forwarder's machine name, which Railway derives from the environment, must
+ * be staging's (`<project>-staging-tailscale-forwarder`). Both are names, not
+ * proof (an owner-accepted residual): a forwarder whose mapping points at
+ * production's database would still pass.
  */
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -37,8 +38,16 @@ const bcrypt = createRequire(import.meta.url)('bcrypt') as {
   hash(data: string, salt: string): Promise<string>;
 };
 
-/** A Railway-internal host, as operator-env.sh allows: `<name>.railway.internal`, a trailing dot allowed. */
-const INTERNAL_HOST = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?\.railway\.internal\.?$/;
+/**
+ * A Tailscale forwarder's MagicDNS name, as operator-env.sh allows:
+ * `<project>-<environment>-tailscale-forwarder`, an optional `-<n>` dedupe
+ * suffix, optionally `.<tailnet>.ts.net`, a trailing dot allowed.
+ */
+const FORWARDER_HOST =
+  /^[a-z0-9]([a-z0-9-]*[a-z0-9])?-tailscale-forwarder(-[0-9]+)?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?\.ts\.net)?\.?$/;
+
+/** The forwarder's name carries its Railway environment; the seed runs on staging's only. */
+const STAGING_FORWARDER = /-staging-tailscale-forwarder(-[0-9]+)?(\.|$)/;
 
 /** The host of a postgres URL, lower-cased, or null when it does not parse. */
 export function urlHost(url: string | undefined): string | null {
@@ -50,8 +59,8 @@ export function urlHost(url: string | undefined): string | null {
   }
 }
 
-export function isInternalHost(host: string | null): boolean {
-  return host !== null && INTERNAL_HOST.test(host);
+export function isForwarderHost(host: string | null): boolean {
+  return host !== null && FORWARDER_HOST.test(host);
 }
 
 /** Every rehearsal row's id starts with this, so `remove` touches nothing else. */
@@ -90,9 +99,11 @@ export function refusal(input: {
     return `refusing to run against anything but staging (ANSARI_CUTOVER_ENV is ${input.cutoverEnv ? `'${input.cutoverEnv}'` : 'unset'}; type ANSARI_CUTOVER_ENV=staging)`;
   if (input.appHost === null) return 'APP_DATABASE_URL is unset or not a URL';
   if (input.appHost.endsWith('.proxy.rlwy.net'))
-    return "APP_DATABASE_URL points at Railway's public TCP proxy; use the <name>.railway.internal host over the Tailscale route";
-  if (!isInternalHost(input.appHost))
-    return "APP_DATABASE_URL's host is not Railway-internal (<name>.railway.internal over the Tailscale route)";
+    return "APP_DATABASE_URL points at Railway's public TCP proxy; use the Tailscale forwarder's host (<project>-<environment>-tailscale-forwarder)";
+  if (!isForwarderHost(input.appHost))
+    return "APP_DATABASE_URL's host is not a Tailscale forwarder (<project>-<environment>-tailscale-forwarder)";
+  if (!STAGING_FORWARDER.test(input.appHost))
+    return "APP_DATABASE_URL's host is not staging's forwarder (<project>-staging-tailscale-forwarder): the seed runs on staging only";
   if (input.checkout === 'no-git') return 'not inside a git checkout';
   if (input.checkout === 'no-commit') return 'PROMOTED_COMMIT is unset (the commit the window recorded)';
   if (input.checkout === 'dirty') return 'the checkout has uncommitted changes';

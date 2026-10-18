@@ -404,8 +404,10 @@ to 7, and main added a to e. This supersedes the earlier "inside the auth image 
 - [x] `operator-env.sh`, sourced by `copy.sh` and `complete-tombstones.sh`, refuses before any
   database call:
   - an unset, empty or identical URL;
-  - a host that is not `<name>.railway.internal`: the public proxy `*.proxy.rlwy.net` is refused,
-    and so is any other host, a bare IP, or a near-miss like `….railway.internal.evil.com`;
+  - a host that is not a Tailscale forwarder's MagicDNS name (corrected 2026-10-19 from
+    `<name>.railway.internal`, after the owner's actual setup proved to be Railway's Tailscale
+    forwarder): the public proxy `*.proxy.rlwy.net` is refused, and so is `*.railway.internal`,
+    any other host, a bare IP, or a near-miss like `…-tailscale-forwarder.evil.com`;
   - a `psql` that is not major 18;
   - a missing `PROMOTED_COMMIT`, a HEAD other than it, or a dirty checkout;
   - stdout that is not a terminal.

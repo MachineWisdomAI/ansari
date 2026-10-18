@@ -9,7 +9,7 @@ commit. This file holds the procedure and, filled in by the docs-only evidence P
 
 Who does what:
 - the owner operates Railway and runs every database step from the operator environment, the
-  owner's machine over the Tailscale route (`copy.sh`, `0009`–`0011`, `grant-admin.ts`, the
+  owner's machine through staging's Tailscale forwarder (`copy.sh`, `0009`–`0011`, `grant-admin.ts`, the
   rollback script)
 - the main architect prepares the filled-in staging command sheet and checks outputs
 - the builder runs the client-side checks (Parts C and D, and the edge probes)
@@ -44,7 +44,7 @@ A clone would have shown two things that staging cannot:
 - Postgres 18 on both the staging app and auth servers. `psql --version` on the owner's machine
   reports 18 (the window's step 1 precondition, rehearsed).
 - **The operator environment is the window's (spec H-8), and the rehearsal proves it, not only
-  the SQL:** the owner's machine, the Tailscale route to staging's private network, the clean
+  the SQL:** the owner's machine, staging's Tailscale forwarder (the runbook's two mappings), the clean
   checkout of the `develop` merge commit as `PROMOTED_COMMIT`, staging's two URLs entered with
   `read -rs`, the step 1 hygiene checklist, and the TLS probe recorded. Record the timings of the
   copy and the audits from this machine: the production window's estimate scales from them.

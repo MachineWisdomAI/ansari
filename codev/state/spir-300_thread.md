@@ -496,3 +496,14 @@ to end on a throwaway PG18 cluster from a clean detached worktree: copy (normali
 credential accounts, matching audit), re-run refused, tombstone completion. Mutation (loopback
 check → true) fails the new tests. Note for local use: a worktree with untracked files counts as
 dirty, so run from a separate clean checkout. PR stays DRAFT at the pr gate.
+
+## 2026-10-19 — the cutover host rule follows the Tailscale forwarder
+
+Owner: the real route is Railway's Tailscale forwarder (docs.railway.com "Set up a Tailscale
+forwarder"); URLs look like `postgresql://postgres:<pw>@my-project-production-tailscale-forwarder:5432/railway`.
+The earlier "hosts resolve as <name>.railway.internal" (relayed, H-8) was wrong for that setup.
+operator-env.sh and the seed now accept only `<project>-<environment>-tailscale-forwarder`
+(+ optional `-<n>`, `.<tailnet>.ts.net`); `*.railway.internal`, proxy, IPs refused. Seed also
+requires staging's forwarder (the name carries the environment). Runbook: forwarder setup with two
+mappings (5432 app, 5433 auth), ACL, remove after the window, and a to_regclass check that each URL
+reaches its own database. Mutations caught; copy suite 55, doc tests 71.

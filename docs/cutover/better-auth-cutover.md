@@ -8,12 +8,28 @@ operator SQL is described in
 [`apps/auth/scripts/cutover/README.md`](../../apps/auth/scripts/cutover/README.md).
 
 **The operator environment (spec H-8).** Every database step runs on **the owner's machine**, in
-one terminal session, over the owner's **Tailscale route to Railway's private network**, from a
-**clean checkout of the promoted commit** (step 4). The auth image carries no Postgres client:
+one terminal session, through **Railway's Tailscale forwarder** (docs.railway.com, "Set up a
+Tailscale forwarder"), from a **clean checkout of the promoted commit** (step 4).
+
+**The forwarder.** A Railway service in the environment being cut over (staging for the
+rehearsal, production for the window) that joins the owner's tailnet and relays ports to the
+databases' private hosts. One forwarder, two mappings:
+
+```
+CONNECTION_MAPPING_1=5432:<app-postgres>.railway.internal:5432    # the app database
+CONNECTION_MAPPING_2=5433:<auth-postgres>.railway.internal:5432   # the auth database
+```
+
+MagicDNS is on, this machine uses Tailscale DNS, and the tailnet ACL lets only this machine
+reach the forwarder, on those two ports. Each URL then names the forwarder's machine name, which
+Railway derives from the project, environment and service, and the mapping's port:
+`postgresql://postgres:<password>@<project>-<environment>-tailscale-forwarder:5432/railway`
+(`:5433` for the auth database). After the window, remove the forwarder service, or at least
+expire its Tailscale key: it keeps its machine identity across restarts (`TS_EPHEMERAL=false`). The auth image carries no Postgres client:
 the cutover tooling runs from this checkout, once, and nowhere else.
 
 ```bash
-tailscale status                                   # up, and the route to Railway's private network is listed
+tailscale status                                   # up, and the environment's forwarder is listed
 git -C <repo> fetch origin && git -C <repo> checkout --detach <promoted commit>
 cd <repo> && git status --porcelain                # prints nothing: a clean checkout
 set +o history                                     # shell history off for this session
@@ -22,17 +38,22 @@ read -rs APP_DATABASE_URL && export APP_DATABASE_URL     # pasted at the prompt,
 read -rs AUTH_DATABASE_URL && export AUTH_DATABASE_URL
 ```
 
-- **The hosts.** Each URL's host is Railway-internal, `<name>.railway.internal`, reached over the
-  Tailscale route: `copy.sh`, `complete-tombstones.sh` and the rehearsal seed refuse Railway's
-  public TCP proxy (`*.proxy.rlwy.net`) and every other host. They also refuse a `psql` that is not
+- **The hosts.** Each URL's host is the forwarder's MagicDNS name,
+  `<project>-<environment>-tailscale-forwarder` (Tailscale may add `-<n>`; the full
+  `.<tailnet>.ts.net` form is accepted too): `copy.sh`, `complete-tombstones.sh` and the
+  rehearsal seed refuse Railway's public TCP proxy (`*.proxy.rlwy.net`), `<name>.railway.internal`
+  (it resolves only inside Railway), IPs and every other host. The seed also requires staging's
+  forwarder (`<project>-staging-tailscale-forwarder`). They also refuse a `psql` that is not
   major 18, a dirty checkout, a HEAD that is not `PROMOTED_COMMIT`, and stdout that is not a
   terminal (`apps/auth/scripts/cutover/operator-env.sh`).
 - **TLS on the path.** Append `sslmode=require` to both URLs, then
   `psql "$APP_DATABASE_URL" -X -At -c "select ssl from pg_stat_ssl where pid = pg_backend_pid()"`
-  (and the same for `$AUTH_DATABASE_URL`) must print `t`. **If Railway refuses TLS on its private
-  path,** drop `sslmode=require`, record that in the release record, and rely on the tunnel: the hop
-  from this machine to Railway's private network is inside Tailscale's WireGuard encryption, and
-  past it the connection stays on Railway's private network. The scripts then print a TLS warning,
+  (and the same for `$AUTH_DATABASE_URL`) must print `t`. The forwarder relays plain TCP, so TLS,
+  when Postgres offers it, runs end to end through it (`verify-full` would fail on the forwarder's
+  name; `require` does not check the name). **If Postgres refuses TLS on this path,** drop
+  `sslmode=require`, record that in the release record, and rely on the tunnel: the hop from this
+  machine to the forwarder is inside Tailscale's WireGuard encryption, and from the forwarder on
+  the connection stays on Railway's private network. The scripts then print a TLS warning,
   which is expected.
 - **What passes through this machine.** The copy (step 8) streams every email and bcrypt hash
   from the app database into the auth database through a pipe in this session's memory. Nothing
@@ -86,7 +107,7 @@ promote `develop`. Each step is run as written, except for these differences:
 | Production | Staging rehearsal |
 |---|---|
 | Step 4 promotes `develop` to `main`; every deploy and file comes from the promoted commit | **No promotion.** The cutover PR's merge commit on `develop` stands in for `main`. Record it in step 1; every deploy and every applied file comes from it |
-| The operator environment, with production's URLs | The **same machine, Tailscale route and checkout path**, with staging's URLs (the rehearsal proves this environment, not only the SQL); the seed also needs `ANSARI_CUTOVER_ENV=staging`, because an internal host name is the same in both environments |
+| The operator environment, with production's URLs | The **same machine, forwarder setup and checkout path**, with staging's forwarder and URLs (the rehearsal proves this environment, not only the SQL); the seed also needs `ANSARI_CUTOVER_ENV=staging` and refuses any forwarder but staging's |
 | `api.askansari.ai`, `api-35.ansari.chat`; `auth.askansari.ai`; the production web domain | `api-staging.askansari.ai`; `auth-staging.askansari.ai`; the staging web domain. Service names are on main's sheet |
 | Auto-deploy is turned off for the window (step 1) and back on in step 18 | **Set before the cutover PR merges** (owner): auto-deploy off on staging `backend` and the staging web service, and the staging `auth` service deploying from `develop` with auto-deploy off. Every deploy is manual: the new frontend is deployed by hand at step 12, so the step 16 web change is rehearsed in order. Auto-deploy comes back only after the rollback rehearsal and the second forward run (below) |
 | The auth database is created for the window, or found (C-4) | It already exists, empty, on Postgres 18. Step 1's empty and version checks apply as written |
@@ -138,9 +159,12 @@ forward run, `rehearsal-anomalies.ts remove | psql …` deletes the seeded rows.
   this item reads: the cutover PR's merge commit on `develop` is recorded.
 - **The operator machine (spec H-8), checked before anything goes offline:**
   - full-disk encryption is on;
-  - the Tailscale route is up: `tailscale status` lists the route to Railway's private network,
-    and `psql "$AUTH_DATABASE_URL" -X -At -c "select 1"` answers over it. Both URLs' hosts are
-    `<name>.railway.internal` (never `*.proxy.rlwy.net`);
+  - the Tailscale forwarder is up: `tailscale status` lists this environment's forwarder, and
+    both URLs' hosts are its name, `<project>-<environment>-tailscale-forwarder` (never
+    `*.proxy.rlwy.net`, never another environment's forwarder);
+  - each URL reaches its own database, not the other one (a swapped mapping):
+    `psql "$APP_DATABASE_URL" -X -At -c "select to_regclass('public.users')"` prints `users`, and
+    `psql "$AUTH_DATABASE_URL" -X -At -c "select to_regclass('auth.users')"` prints `auth.users`;
   - TLS on that path is probed and recorded (the operator environment section): `sslmode=require`
     with `pg_stat_ssl` printing `t`, or the recorded reason for going without it;
   - the URLs are entered with `read -rs` only: never typed as a command, never in a file, a note

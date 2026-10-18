@@ -4,7 +4,7 @@
 # database (04a), deletes those users directly in the auth database (04b; the
 # cascade removes their sessions and accounts), and marks them done (04c).
 # It never calls the delete endpoint. Ids only. Runs where copy.sh runs: the
-# owner's machine over the Tailscale route, checked by operator-env.sh.
+# owner's machine through the Tailscale forwarder, checked by operator-env.sh.
 set -euo pipefail
 set +o history 2>/dev/null || true
 

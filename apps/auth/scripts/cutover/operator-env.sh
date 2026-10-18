@@ -1,13 +1,16 @@
 # The operator-environment check for the cutover scripts (spec 300 amendment
 # H-8): sourced by copy.sh and complete-tombstones.sh, which run on the
-# owner's machine over the owner's Tailscale route to Railway's private
-# network. It replaces the old auth-image marker. It refuses, before any
-# database is touched:
+# owner's machine through Railway's Tailscale forwarder (docs.railway.com,
+# "Set up a Tailscale forwarder"): a Railway service on the owner's tailnet
+# that relays a port to a database's private host. It replaces the old
+# auth-image marker. It refuses, before any database is touched:
 #
 #   1. a missing or empty APP_DATABASE_URL / AUTH_DATABASE_URL, or both the same;
-#   2. a database host that is not Railway-internal (`<name>.railway.internal`,
-#      reached over the Tailscale route): Railway's public TCP proxy
-#      (`*.proxy.rlwy.net`) and every other host are refused;
+#   2. a database host that is not a Tailscale forwarder's MagicDNS name
+#      (`<project>-<environment>-tailscale-forwarder`, optionally with
+#      Tailscale's `-<n>` dedupe suffix and the tailnet's `.<tailnet>.ts.net`):
+#      Railway's public TCP proxy (`*.proxy.rlwy.net`), `*.railway.internal`
+#      (it resolves only inside Railway), IPs and every other host are refused;
 #   3. a psql that is not major 18 (the production major);
 #   4. a checkout that is not clean, or whose HEAD is not PROMOTED_COMMIT, the
 #      commit the window recorded: the scripts and SQL run from this tree;
@@ -15,7 +18,7 @@
 #      only) cannot be captured to a file by accident.
 #
 # It prints a warning when a URL does not carry sslmode=require (runbook step
-# 1 records whether TLS is offered on the Tailscale path). Ids only; it never
+# 1 records whether TLS is offered through the forwarder). Ids only; it never
 # prints a URL.
 #
 # `--allow-local` (local end-to-end testing only, LOCAL-TESTING) replaces check
@@ -43,12 +46,15 @@ operator_url_host() {
   fi
 }
 
-# 0 when the host is Railway-internal, 1 otherwise. Lower-cased; a trailing dot is allowed.
+# 0 when the host is a Tailscale forwarder's MagicDNS name, 1 otherwise:
+# `<project>-<environment>-tailscale-forwarder`, an optional `-<n>` (Tailscale
+# dedupes a reused machine name), and optionally `.<tailnet>.ts.net`.
+# Lower-cased; a trailing dot is allowed.
 operator_host_allowed() {
   local host
   host="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
   host="${host%.}"
-  [[ "$host" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?\.railway\.internal$ ]]
+  [[ "$host" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?-tailscale-forwarder(-[0-9]+)?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?\.ts\.net)?$ ]]
 }
 
 # 0 when the host is loopback (the only hosts --allow-local accepts), 1 otherwise.
@@ -83,10 +89,10 @@ operator_check() {
     fi
     case "$host" in
       *.proxy.rlwy.net | *.proxy.rlwy.net.)
-        operator_die "$name" "$var points at Railway's public TCP proxy; use the <name>.railway.internal host over the Tailscale route" ;;
+        operator_die "$name" "$var points at Railway's public TCP proxy; use the Tailscale forwarder's host (<project>-<environment>-tailscale-forwarder)" ;;
     esac
     operator_host_allowed "$host" \
-      || operator_die "$name" "$var's host is not Railway-internal (<name>.railway.internal over the Tailscale route)"
+      || operator_die "$name" "$var's host is not a Tailscale forwarder (<project>-<environment>-tailscale-forwarder)"
   done
 
   command -v psql >/dev/null 2>&1 || operator_die "$name" "psql is not on PATH (install the PostgreSQL 18 client)"
@@ -107,12 +113,12 @@ operator_check() {
   [ -t 1 ] || operator_die "$name" "refusing to run with stdout redirected: run it in the terminal, and read its counts there"
 
   [ "$allow_local" = 0 ] \
-    || echo "$name: LOCAL TEST RUN (--allow-local): loopback databases only; the Railway-internal host check is skipped" >&2
+    || echo "$name: LOCAL TEST RUN (--allow-local): loopback databases only; the Tailscale forwarder host check is skipped" >&2
 
   for var in APP_DATABASE_URL AUTH_DATABASE_URL; do
     case "${!var}" in
       *sslmode=require* | *sslmode=verify-ca* | *sslmode=verify-full*) ;;
-      *) echo "$name: WARNING: $var carries no sslmode=require (runbook step 1 records whether TLS is offered on this path)" >&2 ;;
+      *) echo "$name: WARNING: $var carries no sslmode=require (runbook step 1 records whether TLS is offered through the forwarder)" >&2 ;;
     esac
   done
 }

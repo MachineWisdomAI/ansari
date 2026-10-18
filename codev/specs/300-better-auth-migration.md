@@ -145,6 +145,15 @@ This spec defines WHAT and WHY. The plan defines HOW and WHEN.
 >   (full-disk encryption, no session recording, history off, screen sharing off: runbook step
 >   1); the URLs live in that session for the window; and the staging guard for the seed is a
 >   typed word, because an internal host name is the same in staging and production.
+>   **Corrected (owner, 2026-10-19):** the owner's route is **Railway's Tailscale forwarder**
+>   (docs.railway.com, "Set up a Tailscale forwarder"), not a route that resolves
+>   `*.railway.internal` on the operator machine. The URLs therefore name the forwarder's MagicDNS
+>   machine name, `<project>-<environment>-tailscale-forwarder` (optionally `-<n>` and
+>   `.<tailnet>.ts.net`), with one port mapping per database. `operator-env.sh` accepts only that
+>   shape; `*.railway.internal`, the public proxy, IPs and anything else are refused. The
+>   forwarder's name carries its environment, so the rehearsal seed now also requires staging's
+>   forwarder, alongside the typed word (still names, not proof: a forwarder mapped to the wrong
+>   database would pass). Runbook step 1 checks each URL reaches its own database.
 >
 > This amendment supersedes every passage below about the internal credential, the internal
 > listener, the private network, the forwarded IP and `AUTH_RATE_LIMIT_MODE`; those passages are

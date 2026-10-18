@@ -7,19 +7,22 @@ rollback is in [`docs/cutover/rollback.md`](../../../../docs/cutover/rollback.md
 file says what each piece is.
 
 **Where they run (spec 300 amendment H-8).** On **the owner's machine**, over the owner's
-Tailscale route to Railway's private network, from a **clean checkout of the promoted commit**
+Railway's Tailscale forwarder (a service on the owner's tailnet that relays a port to each
+database's private host; the runbook's operator environment), from a **clean checkout of the promoted commit**
 (the runbook's "operator environment"). The auth image carries no Postgres client. `copy.sh` and
 `complete-tombstones.sh` source `operator-env.sh`, which refuses, before any database call:
 - a missing, empty or identical `APP_DATABASE_URL` / `AUTH_DATABASE_URL`;
-- a host that is not `<name>.railway.internal` (Railway's public TCP proxy, `*.proxy.rlwy.net`,
-  and every other host);
+- a host that is not a forwarder's MagicDNS name, `<project>-<environment>-tailscale-forwarder`
+  (optionally `-<n>` and `.<tailnet>.ts.net`): Railway's public TCP proxy (`*.proxy.rlwy.net`),
+  `<name>.railway.internal` (it resolves only inside Railway), IPs and every other host are refused;
 - a `psql` that is not major 18;
 - a dirty checkout, or a HEAD that is not `PROMOTED_COMMIT`;
 - stdout that is not a terminal.
 
 It warns when a URL carries no `sslmode=require`; the runbook records whether TLS is offered on
 the path. `rehearsal-anomalies.ts` makes the same host and checkout checks, and also needs
-`ANSARI_CUTOVER_ENV=staging`, because an internal host name is the same in both environments.
+`ANSARI_CUTOVER_ENV=staging` and refuses any forwarder but staging's
+(`<project>-staging-tailscale-forwarder`).
 
 **Local end-to-end testing only: `--allow-local`.** `copy.sh --allow-local` and
 `complete-tombstones.sh --allow-local` replace the host check with a stricter one: **both** hosts
