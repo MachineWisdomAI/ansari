@@ -7,7 +7,7 @@
  * It prints SQL for psql to read on a pipe; the bcrypt hashes in it never
  * touch a file or a terminal:
  *
- *   ANSARI_CUTOVER_ENV=staging ./node_modules/.bin/tsx scripts/cutover/rehearsal-anomalies.ts seed \
+ *   CUTOVER_ENV=staging ./node_modules/.bin/tsx scripts/cutover/rehearsal-anomalies.ts seed \
  *     | psql "$APP_DATABASE_URL" -X -q -v ON_ERROR_STOP=1 --single-transaction
  *
  * (REHEARSAL_PASSWORD, APP_DATABASE_URL and PROMOTED_COMMIT are already in the
@@ -22,11 +22,11 @@
  *
  * Runs on the owner's machine through the Tailscale forwarder (spec 300
  * amendment H-8), from the promoted commit's clean checkout, against STAGING
- * only, on two counts: the operator types ANSARI_CUTOVER_ENV=staging, and the
- * forwarder's machine name, which Railway derives from the environment, must
- * be staging's (`<project>-staging-tailscale-forwarder`). Both are names, not
- * proof (an owner-accepted residual): a forwarder whose mapping points at
- * production's database would still pass.
+ * only, on two counts: CUTOVER_ENV=staging (the same variable copy.sh reads),
+ * and the forwarder's machine name, which Railway derives from the
+ * environment, must be staging's (`<project>-staging-tailscale-forwarder`).
+ * Both are names, not proof (an owner-accepted residual): a forwarder whose
+ * mapping points at production's database would still pass.
  */
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -38,16 +38,17 @@ const bcrypt = createRequire(import.meta.url)('bcrypt') as {
   hash(data: string, salt: string): Promise<string>;
 };
 
-/**
- * A Tailscale forwarder's MagicDNS name, as operator-env.sh allows:
- * `<project>-<environment>-tailscale-forwarder`, an optional `-<n>` dedupe
- * suffix, optionally `.<tailnet>.ts.net`, a trailing dot allowed.
- */
-const FORWARDER_HOST =
-  /^[a-z0-9]([a-z0-9-]*[a-z0-9])?-tailscale-forwarder(-[0-9]+)?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?\.ts\.net)?\.?$/;
+export type CutoverEnv = 'production' | 'staging';
 
-/** The forwarder's name carries its Railway environment; the seed runs on staging's only. */
-const STAGING_FORWARDER = /-staging-tailscale-forwarder(-[0-9]+)?(\.|$)/;
+/**
+ * Environment `env`'s Tailscale forwarder, as operator-env.sh allows:
+ * `<project>-<env>-tailscale-forwarder`, an optional `-<n>` dedupe suffix,
+ * optionally `.<tailnet>.ts.net`, a trailing dot allowed.
+ */
+const forwarderHost = (env: CutoverEnv) =>
+  new RegExp(
+    `^[a-z0-9]([a-z0-9-]*[a-z0-9])?-${env}-tailscale-forwarder(-[0-9]+)?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?\\.ts\\.net)?\\.?$`
+  );
 
 /** The host of a postgres URL, lower-cased, or null when it does not parse. */
 export function urlHost(url: string | undefined): string | null {
@@ -59,8 +60,8 @@ export function urlHost(url: string | undefined): string | null {
   }
 }
 
-export function isForwarderHost(host: string | null): boolean {
-  return host !== null && FORWARDER_HOST.test(host);
+export function isForwarderHost(host: string | null, env: CutoverEnv): boolean {
+  return host !== null && forwarderHost(env).test(host);
 }
 
 /** Every rehearsal row's id starts with this, so `remove` touches nothing else. */
@@ -96,14 +97,12 @@ export function refusal(input: {
   password: string | undefined;
 }): string | null {
   if (input.cutoverEnv !== 'staging')
-    return `refusing to run against anything but staging (ANSARI_CUTOVER_ENV is ${input.cutoverEnv ? `'${input.cutoverEnv}'` : 'unset'}; type ANSARI_CUTOVER_ENV=staging)`;
+    return `refusing to run against anything but staging (CUTOVER_ENV is ${input.cutoverEnv ? `'${input.cutoverEnv}'` : 'unset'}; type CUTOVER_ENV=staging)`;
   if (input.appHost === null) return 'APP_DATABASE_URL is unset or not a URL';
   if (input.appHost.endsWith('.proxy.rlwy.net'))
-    return "APP_DATABASE_URL points at Railway's public TCP proxy; use the Tailscale forwarder's host (<project>-<environment>-tailscale-forwarder)";
-  if (!isForwarderHost(input.appHost))
-    return "APP_DATABASE_URL's host is not a Tailscale forwarder (<project>-<environment>-tailscale-forwarder)";
-  if (!STAGING_FORWARDER.test(input.appHost))
-    return "APP_DATABASE_URL's host is not staging's forwarder (<project>-staging-tailscale-forwarder): the seed runs on staging only";
+    return "APP_DATABASE_URL points at Railway's public TCP proxy; use staging's Tailscale forwarder (<project>-staging-tailscale-forwarder)";
+  if (!isForwarderHost(input.appHost, 'staging'))
+    return "APP_DATABASE_URL's host is not staging's Tailscale forwarder (<project>-staging-tailscale-forwarder): the seed runs on staging only";
   if (input.checkout === 'no-git') return 'not inside a git checkout';
   if (input.checkout === 'no-commit') return 'PROMOTED_COMMIT is unset (the commit the window recorded)';
   if (input.checkout === 'dirty') return 'the checkout has uncommitted changes';
@@ -185,7 +184,7 @@ async function main(): Promise<void> {
   const command = process.argv[2];
   const password = process.env.REHEARSAL_PASSWORD;
   const refused = refusal({
-    cutoverEnv: process.env.ANSARI_CUTOVER_ENV,
+    cutoverEnv: process.env.CUTOVER_ENV,
     appHost: urlHost(process.env.APP_DATABASE_URL),
     checkout: checkoutState(process.env.PROMOTED_COMMIT, import.meta.dirname),
     stdoutIsTTY: Boolean(process.stdout.isTTY),

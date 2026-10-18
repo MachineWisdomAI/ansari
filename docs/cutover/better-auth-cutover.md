@@ -21,12 +21,19 @@ CONNECTION_MAPPING_2=5433:<auth-postgres>.railway.internal:5432   # the auth dat
 ```
 
 MagicDNS is on, this machine uses Tailscale DNS, and the tailnet ACL lets only this machine
-reach the forwarder, on those two ports. Each URL then names the forwarder's machine name, which
-Railway derives from the project, environment and service, and the mapping's port:
-`postgresql://postgres:<password>@<project>-<environment>-tailscale-forwarder:5432/railway`
-(`:5433` for the auth database). After the window, remove the forwarder service, or at least
-expire its Tailscale key: it keeps its machine identity across restarts (`TS_EPHEMERAL=false`). The auth image carries no Postgres client:
-the cutover tooling runs from this checkout, once, and nowhere else.
+reach the forwarder, on those two ports. The forwarder service has **no public networking and no
+domain** in Railway, and its Tailscale auth key is a **tagged** key, scoped by that ACL, that
+exists only as the forwarder service's `TS_AUTHKEY` variable. Both URLs name the **same**
+forwarder, its machine name (which Railway derives from the project, environment and service),
+and differ by the mapping's port:
+`postgresql://postgres:<password>@<project>-<environment>-tailscale-forwarder:5432/railway` for
+the app database, `:5433` for the auth database. The scripts refuse two different hosts, and any
+host that is not the forwarder of `CUTOVER_ENV`'s environment, so a URL pasted from the other
+environment is refused before anything runs. After the window, remove the forwarder service and
+revoke its key (step 18): it keeps its machine identity across restarts (`TS_EPHEMERAL=false`).
+
+The auth image carries no Postgres client: the cutover tooling runs from this checkout, once,
+and nowhere else.
 
 ```bash
 tailscale status                                   # up, and the environment's forwarder is listed
@@ -34,6 +41,8 @@ git -C <repo> fetch origin && git -C <repo> checkout --detach <promoted commit>
 cd <repo> && git status --porcelain                # prints nothing: a clean checkout
 set +o history                                     # shell history off for this session
 export PROMOTED_COMMIT=<promoted commit>           # the scripts refuse any other HEAD
+export CUTOVER_ENV=production                      # staging in the rehearsal; read it back aloud
+echo "$CUTOVER_ENV"                                # say the word aloud before going on
 read -rs APP_DATABASE_URL && export APP_DATABASE_URL     # pasted at the prompt, never typed as a command
 read -rs AUTH_DATABASE_URL && export AUTH_DATABASE_URL
 ```
@@ -107,7 +116,7 @@ promote `develop`. Each step is run as written, except for these differences:
 | Production | Staging rehearsal |
 |---|---|
 | Step 4 promotes `develop` to `main`; every deploy and file comes from the promoted commit | **No promotion.** The cutover PR's merge commit on `develop` stands in for `main`. Record it in step 1; every deploy and every applied file comes from it |
-| The operator environment, with production's URLs | The **same machine, forwarder setup and checkout path**, with staging's forwarder and URLs (the rehearsal proves this environment, not only the SQL); the seed also needs `ANSARI_CUTOVER_ENV=staging` and refuses any forwarder but staging's |
+| The operator environment, with production's URLs | The **same machine, forwarder setup and checkout path**, with staging's forwarder and URLs (the rehearsal proves this environment, not only the SQL); `CUTOVER_ENV=staging`, which the seed also requires, with staging's forwarder |
 | `api.askansari.ai`, `api-35.ansari.chat`; `auth.askansari.ai`; the production web domain | `api-staging.askansari.ai`; `auth-staging.askansari.ai`; the staging web domain. Service names are on main's sheet |
 | Auto-deploy is turned off for the window (step 1) and back on in step 18 | **Set before the cutover PR merges** (owner): auto-deploy off on staging `backend` and the staging web service, and the staging `auth` service deploying from `develop` with auto-deploy off. Every deploy is manual: the new frontend is deployed by hand at step 12, so the step 16 web change is rehearsed in order. Auto-deploy comes back only after the rollback rehearsal and the second forward run (below) |
 | The auth database is created for the window, or found (C-4) | It already exists, empty, on Postgres 18. Step 1's empty and version checks apply as written |
@@ -159,12 +168,25 @@ forward run, `rehearsal-anomalies.ts remove | psql …` deletes the seeded rows.
   this item reads: the cutover PR's merge commit on `develop` is recorded.
 - **The operator machine (spec H-8), checked before anything goes offline:**
   - full-disk encryption is on;
+  - `CUTOVER_ENV` is set to this window's environment (`production`; `staging` in the
+    rehearsal) and **read back aloud**; the scripts refuse any other value, and any host that is
+    not `<project>-$CUTOVER_ENV-tailscale-forwarder`;
   - the Tailscale forwarder is up: `tailscale status` lists this environment's forwarder, and
-    both URLs' hosts are its name, `<project>-<environment>-tailscale-forwarder` (never
+    both URLs' hosts are that one name, `<project>-<environment>-tailscale-forwarder` (never
     `*.proxy.rlwy.net`, never another environment's forwarder);
-  - each URL reaches its own database, not the other one (a swapped mapping):
-    `psql "$APP_DATABASE_URL" -X -At -c "select to_regclass('public.users')"` prints `users`, and
-    `psql "$AUTH_DATABASE_URL" -X -At -c "select to_regclass('auth.users')"` prints `auth.users`;
+  - the forwarder service has no public networking and no domain in Railway's dashboard, and its
+    Tailscale auth key exists only as that service's `TS_AUTHKEY` variable, as a tagged key
+    scoped by the ACL to this machine and ports 5432 and 5433;
+  - each URL reaches its own database, and the two are different clusters (a swapped mapping, or
+    one database mapped twice). The auth database is empty here (the baseline lands at step 7),
+    so the checks hold for an empty one:
+    - `psql "$APP_DATABASE_URL" -X -At -c "select to_regclass('public.users')"` prints `users`;
+    - `psql "$AUTH_DATABASE_URL" -X -At -c "select to_regclass('public.users')"` prints an empty
+      line (NULL);
+    - `psql "$AUTH_DATABASE_URL" -X -At -c "select count(*) from information_schema.schemata where schema_name = 'auth'"`
+      prints `0`;
+    - `psql "$APP_DATABASE_URL" -X -At -c "select system_identifier from pg_control_system()"` and
+      the same for `$AUTH_DATABASE_URL` print two **different** numbers;
   - TLS on that path is probed and recorded (the operator environment section): `sslmode=require`
     with `pg_stat_ssl` printing `t`, or the recorded reason for going without it;
   - the URLs are entered with `read -rs` only: never typed as a command, never in a file, a note
@@ -305,7 +327,9 @@ psql "$AUTH_DATABASE_URL" -X -v ON_ERROR_STOP=1 --single-transaction -f packages
 
 **Check:** `psql "$AUTH_DATABASE_URL" -X -At -c "select count(*) from information_schema.tables where table_schema = 'auth'"`
 prints `6`, and `psql "$AUTH_DATABASE_URL" -X -At -c "select count(*) from auth.users"` prints `0`.
-Record `auth-journal-applied: 0000_auth_schema` and the commit.
+Record `auth-journal-applied: 0000_auth_schema` and the commit. Now the auth URL also answers
+for the auth schema: `psql "$AUTH_DATABASE_URL" -X -At -c "select to_regclass('auth.users')"`
+prints `auth.users`.
 **Abort:** `psql "$AUTH_DATABASE_URL" -X -c 'DROP SCHEMA auth CASCADE'`, remove the `auth`
 deployment, bring `apps/api` back online.
 
@@ -471,7 +495,11 @@ Un-silence the alerts from step 2. Re-enable auto-deploy for `backend`, the web 
 `auth`. Complete the release record: the promoted commit, each applied file with its commit,
 `cutover_at`, the rollback deadline (`cutover_at` + 24 hours), and every check's output.
 
-**Check:** the record is complete and posted; auto-deploy is on again.
+Remove the environment's Tailscale forwarder service, and revoke its auth key in the Tailscale
+admin console.
+
+**Check:** the record is complete and posted; auto-deploy is on again; `tailscale status` no
+longer lists the forwarder; the forwarder's key shows as revoked in the Tailscale admin console.
 **Abort:** n/a.
 
 ## Orphan app rows (owner-accepted residual, spec H-6)

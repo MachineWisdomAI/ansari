@@ -6,23 +6,28 @@
 # auth-image marker. It refuses, before any database is touched:
 #
 #   1. a missing or empty APP_DATABASE_URL / AUTH_DATABASE_URL, or both the same;
-#   2. a database host that is not a Tailscale forwarder's MagicDNS name
-#      (`<project>-<environment>-tailscale-forwarder`, optionally with
-#      Tailscale's `-<n>` dedupe suffix and the tailnet's `.<tailnet>.ts.net`):
-#      Railway's public TCP proxy (`*.proxy.rlwy.net`), `*.railway.internal`
-#      (it resolves only inside Railway), IPs and every other host are refused;
-#   3. a psql that is not major 18 (the production major);
-#   4. a checkout that is not clean, or whose HEAD is not PROMOTED_COMMIT, the
+#   2. a CUTOVER_ENV that is not `production` or `staging` (set at runbook step
+#      1 and read back aloud);
+#   3. a database host that is not THIS environment's Tailscale forwarder
+#      (`<project>-<CUTOVER_ENV>-tailscale-forwarder`, optionally with
+#      Tailscale's `-<n>` dedupe suffix and the tailnet's `.<tailnet>.ts.net`),
+#      or two URLs that name different hosts: one forwarder per environment
+#      serves the app database on 5432 and the auth database on 5433, so a URL
+#      pasted from the other environment cannot pair with this one. Railway's
+#      public TCP proxy (`*.proxy.rlwy.net`), `*.railway.internal` (it
+#      resolves only inside Railway), IPs and every other host are refused;
+#   4. a psql that is not major 18 (the production major);
+#   5. a checkout that is not clean, or whose HEAD is not PROMOTED_COMMIT, the
 #      commit the window recorded: the scripts and SQL run from this tree;
-#   5. stdout that is not a terminal, so the output (counts and checksums
+#   6. stdout that is not a terminal, so the output (counts and checksums
 #      only) cannot be captured to a file by accident.
 #
 # It prints a warning when a URL does not carry sslmode=require (runbook step
 # 1 records whether TLS is offered through the forwarder). Ids only; it never
 # prints a URL.
 #
-# `--allow-local` (local end-to-end testing only, LOCAL-TESTING) replaces check
-# 2 with a stricter one: BOTH hosts must be loopback (localhost, 127.0.0.1,
+# `--allow-local` (local end-to-end testing only, LOCAL-TESTING) replaces checks
+# 2 and 3 with a stricter one: BOTH hosts must be loopback (localhost, 127.0.0.1,
 # ::1). Loopback is not local: a tunnel or port-forward on loopback (railway
 # connect, ssh -L, a Tailscale forward) would reach a Railway database, so never
 # run it while one is open; it is for throwaway local clusters. Every other
@@ -46,22 +51,26 @@ operator_url_host() {
   fi
 }
 
-# 0 when the host is a Tailscale forwarder's MagicDNS name, 1 otherwise:
-# `<project>-<environment>-tailscale-forwarder`, an optional `-<n>` (Tailscale
-# dedupes a reused machine name), and optionally `.<tailnet>.ts.net`.
-# Lower-cased; a trailing dot is allowed.
-operator_host_allowed() {
+# The host, lower-cased, without a trailing dot.
+operator_host_norm() {
   local host
   host="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
-  host="${host%.}"
-  [[ "$host" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?-tailscale-forwarder(-[0-9]+)?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?\.ts\.net)?$ ]]
+  echo "${host%.}"
+}
+
+# 0 when the host is the Tailscale forwarder of environment $2, 1 otherwise:
+# `<project>-<env>-tailscale-forwarder`, an optional `-<n>` (Tailscale dedupes a
+# reused machine name), and optionally `.<tailnet>.ts.net`.
+operator_host_allowed() {
+  local host
+  host="$(operator_host_norm "$1")"
+  [[ "$host" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?-$2-tailscale-forwarder(-[0-9]+)?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?\.ts\.net)?$ ]]
 }
 
 # 0 when the host is loopback (the only hosts --allow-local accepts), 1 otherwise.
 operator_host_loopback() {
   local host
-  host="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
-  host="${host%.}"
+  host="$(operator_host_norm "$1")"
   [ "$host" = "localhost" ] || [ "$host" = "127.0.0.1" ] || [ "$host" = "::1" ]
 }
 
@@ -79,6 +88,14 @@ operator_check() {
   [ "$APP_DATABASE_URL" != "$AUTH_DATABASE_URL" ] \
     || operator_die "$name" "APP_DATABASE_URL and AUTH_DATABASE_URL are the same database"
 
+  local env="${CUTOVER_ENV:-}"
+  if [ "$allow_local" = 0 ]; then
+    case "$env" in
+      production | staging) ;;
+      *) operator_die "$name" "CUTOVER_ENV must be production or staging (runbook step 1)" ;;
+    esac
+  fi
+
   local var host
   for var in APP_DATABASE_URL AUTH_DATABASE_URL; do
     host="$(operator_url_host "${!var}")"
@@ -89,11 +106,14 @@ operator_check() {
     fi
     case "$host" in
       *.proxy.rlwy.net | *.proxy.rlwy.net.)
-        operator_die "$name" "$var points at Railway's public TCP proxy; use the Tailscale forwarder's host (<project>-<environment>-tailscale-forwarder)" ;;
+        operator_die "$name" "$var points at Railway's public TCP proxy; use the $env Tailscale forwarder's host (<project>-$env-tailscale-forwarder)" ;;
     esac
-    operator_host_allowed "$host" \
-      || operator_die "$name" "$var's host is not a Tailscale forwarder (<project>-<environment>-tailscale-forwarder)"
+    operator_host_allowed "$host" "$env" \
+      || operator_die "$name" "$var's host is not the $env Tailscale forwarder (<project>-$env-tailscale-forwarder)"
   done
+  [ "$allow_local" = 1 ] \
+    || [ "$(operator_host_norm "$(operator_url_host "$APP_DATABASE_URL")")" = "$(operator_host_norm "$(operator_url_host "$AUTH_DATABASE_URL")")" ] \
+    || operator_die "$name" "APP_DATABASE_URL and AUTH_DATABASE_URL name different hosts; both go through this environment's one forwarder (app on 5432, auth on 5433)"
 
   command -v psql >/dev/null 2>&1 || operator_die "$name" "psql is not on PATH (install the PostgreSQL 18 client)"
   local version major

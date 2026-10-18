@@ -78,11 +78,11 @@ A clone would have shown two things that staging cannot:
 
 From the operator environment, after runbook step 6 and before step 7, seed the staging app
 database. The existing staging users and system rows stay. Every `rehearsal-anomalies.ts`
-command is piped straight into psql. The script refuses without `ANSARI_CUTOVER_ENV=staging`,
-a non-internal app host, a dirty or unpromoted checkout, or a terminal on stdout:
+command is piped straight into psql. The script refuses without `CUTOVER_ENV=staging` (the runbook's
+step 1 variable), an app host that is not staging's forwarder, a dirty or unpromoted checkout, or a terminal on stdout:
 
 ```bash
-export ANSARI_CUTOVER_ENV=staging                          # typed: the host cannot tell staging from production
+export CUTOVER_ENV=staging                                 # set at step 1 already; the host must be staging's forwarder
 SEED="./apps/auth/node_modules/.bin/tsx apps/auth/scripts/cutover/rehearsal-anomalies.ts"
 read -rs REHEARSAL_PASSWORD && export REHEARSAL_PASSWORD   # typed, ≥ 12 characters; kept for Part B's sign-ins
 $SEED seed | psql "$APP_DATABASE_URL" -X -q -v ON_ERROR_STOP=1 --single-transaction

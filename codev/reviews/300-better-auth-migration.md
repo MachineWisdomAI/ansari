@@ -416,7 +416,10 @@ to 7, and main added a to e. This supersedes the earlier "inside the auth image 
   against a throwaway clean checkout with a fake `psql`, and asserts that no URL is echoed and
   `psql` is never called. A positive run under a real pseudo-terminal (`script`) gets past the
   check.
-- [x] The rehearsal seed checks the same host and checkout, and needs `ANSARI_CUTOVER_ENV=staging`.
+- [x] The rehearsal seed checks the same host and checkout, and needs `CUTOVER_ENV=staging`
+  (renamed from `ANSARI_CUTOVER_ENV` on 2026-10-19, when the scripts were bound to the
+  environment: `CUTOVER_ENV` is required by `copy.sh` and `complete-tombstones.sh` too, both
+  hosts must be `<project>-$CUTOVER_ENV-tailscale-forwarder` and the same host).
   Railway's own variables prove nothing, because a laptop shell injects them. That is tested.
 - [x] The Dockerfile is back to the service image: no PGDG, no psql, no `apps/api/drizzle` copy
   or chmod, no marker, and the comment no longer calls it the operator environment. The full

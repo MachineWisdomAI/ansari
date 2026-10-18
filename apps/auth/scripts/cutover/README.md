@@ -12,17 +12,20 @@ database's private host; the runbook's operator environment), from a **clean che
 (the runbook's "operator environment"). The auth image carries no Postgres client. `copy.sh` and
 `complete-tombstones.sh` source `operator-env.sh`, which refuses, before any database call:
 - a missing, empty or identical `APP_DATABASE_URL` / `AUTH_DATABASE_URL`;
-- a host that is not a forwarder's MagicDNS name, `<project>-<environment>-tailscale-forwarder`
-  (optionally `-<n>` and `.<tailnet>.ts.net`): Railway's public TCP proxy (`*.proxy.rlwy.net`),
-  `<name>.railway.internal` (it resolves only inside Railway), IPs and every other host are refused;
+- a `CUTOVER_ENV` that is not `production` or `staging` (set at runbook step 1, read back aloud);
+- a host that is not that environment's forwarder, `<project>-$CUTOVER_ENV-tailscale-forwarder`
+  (optionally `-<n>` and `.<tailnet>.ts.net`), or two URLs naming different hosts (one forwarder
+  serves the app database on 5432 and the auth database on 5433): Railway's public TCP proxy
+  (`*.proxy.rlwy.net`), `<name>.railway.internal` (it resolves only inside Railway), IPs, the
+  other environment's forwarder and every other host are refused;
 - a `psql` that is not major 18;
 - a dirty checkout, or a HEAD that is not `PROMOTED_COMMIT`;
 - stdout that is not a terminal.
 
 It warns when a URL carries no `sslmode=require`; the runbook records whether TLS is offered on
 the path. `rehearsal-anomalies.ts` makes the same host and checkout checks, and also needs
-`ANSARI_CUTOVER_ENV=staging` and refuses any forwarder but staging's
-(`<project>-staging-tailscale-forwarder`).
+`CUTOVER_ENV=staging` and staging's forwarder (`<project>-staging-tailscale-forwarder`).
+`--allow-local` needs no `CUTOVER_ENV`.
 
 **Local end-to-end testing only: `--allow-local`.** `copy.sh --allow-local` and
 `complete-tombstones.sh --allow-local` replace the host check with a stricter one: **both** hosts
@@ -57,7 +60,7 @@ also prints the legacy admins' addresses, because the owner approves that list b
 | `04-tombstones-mark-app.sql` | app | yes | Marks those tombstones complete |
 | `complete-tombstones.sh` | both | via `04b`, `04c` | Same guards as `copy.sh`; runs `04a → 04b → 04c` |
 | `rollback-remove-post-cutover-users.sql` | app | only with `-v confirm=yes` | Counts, then (confirmed) deletes the users created at or after `-v cutover_at`. Rollback runbook step 2 |
-| `rehearsal-anomalies.ts` | app (staging only) | via `psql` | **Phase 13 rehearsal, never production.** Refuses without `ANSARI_CUTOVER_ENV=staging`, a non-internal app host, a dirty or unpromoted checkout, or a terminal on stdout (it must be piped into `psql`). Prints SQL for `psql --single-transaction`: `seed` (eight rows: a case-collision pair, a non-bcrypt hash, a NULL `updated_at`, a mixed-case `$2a$`, a `$2b$`, a legacy admin, a guest; password from `REHEARSAL_PASSWORD`, never printed), `resolve-collision`, `resolve-hash`, `resolve-null`, `remove` (rehearsal ids only). See [`docs/cutover/rehearsal.md`](../../../../docs/cutover/rehearsal.md) |
+| `rehearsal-anomalies.ts` | app (staging only) | via `psql` | **Phase 13 rehearsal, never production.** Refuses without `CUTOVER_ENV=staging`, an app host that is not staging's forwarder, a dirty or unpromoted checkout, or a terminal on stdout (it must be piped into `psql`). Prints SQL for `psql --single-transaction`: `seed` (eight rows: a case-collision pair, a non-bcrypt hash, a NULL `updated_at`, a mixed-case `$2a$`, a `$2b$`, a legacy admin, a guest; password from `REHEARSAL_PASSWORD`, never printed), `resolve-collision`, `resolve-hash`, `resolve-null`, `remove` (rehearsal ids only). See [`docs/cutover/rehearsal.md`](../../../../docs/cutover/rehearsal.md) |
 
 Every `psql` invocation uses `-X -v ON_ERROR_STOP=1`. The scripts that write open their
 own transaction (`BEGIN … COMMIT`), so they are run **without** `--single-transaction`:

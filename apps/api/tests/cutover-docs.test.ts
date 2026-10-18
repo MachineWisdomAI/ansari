@@ -129,12 +129,31 @@ describe('the window runbook', () => {
     expect(doc).not.toMatch(/RAILWAY_ENVIRONMENT=/);
   });
 
+  it('the operator block sets CUTOVER_ENV, and step 18 removes the forwarder and revokes its key', () => {
+    expect(doc).toContain('export CUTOVER_ENV=production                      # staging in the rehearsal; read it back aloud');
+    expect(doc).toContain('Both URLs name the **same**\nforwarder');
+    const step18 = doc.slice(doc.indexOf('## 18.'), doc.indexOf('## Orphan app rows'));
+    expect(step18).toContain('Remove the environment\'s Tailscale forwarder service, and revoke its auth key');
+    expect(step18).toMatch(/`tailscale status` no\s+longer lists the forwarder/);
+    expect(step18).toMatch(/key shows as revoked in the Tailscale admin console/);
+    expect(doc).not.toMatch(/ANSARI_CUTOVER_ENV/);
+  });
+
   it('step 1 carries the operator-machine hygiene checklist (H-8)', () => {
     const step1 = steps[0] as string;
     for (const item of [
       'full-disk encryption is on',
+      '`CUTOVER_ENV` is set to this window',
+      '**read back aloud**',
       'the Tailscale forwarder is up',
-      'each URL reaches its own database',
+      'both URLs\' hosts are that one name',
+      'the forwarder service has no public networking and no domain',
+      'as a tagged key\n    scoped by the ACL',
+      'each URL reaches its own database, and the two are different clusters',
+      `psql "$AUTH_DATABASE_URL" -X -At -c "select to_regclass('public.users')"\` prints an empty`,
+      "select count(*) from information_schema.schemata where schema_name = 'auth'",
+      'select system_identifier from pg_control_system()',
+      'print two **different** numbers',
       'TLS on that path is probed and recorded',
       'entered with `read -rs` only',
       'shell history is off',

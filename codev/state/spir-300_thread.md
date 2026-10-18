@@ -507,3 +507,13 @@ operator-env.sh and the seed now accept only `<project>-<environment>-tailscale-
 requires staging's forwarder (the name carries the environment). Runbook: forwarder setup with two
 mappings (5432 app, 5433 auth), ACL, remove after the window, and a to_regclass check that each URL
 reaches its own database. Mutations caught; copy suite 55, doc tests 71.
+- Follow-up (main + security, BLOCKING on 1847b89): the pattern admitted any forwarder, so a
+  pasted staging AUTH URL in the production window would copy production hashes into staging with
+  passing audits. Now: required `CUTOVER_ENV` (production|staging; replaces the seed's
+  ANSARI_CUTOVER_ENV; not needed under --allow-local), hosts must be
+  `<project>-$CUTOVER_ENV-tailscale-forwarder`, and both URLs the SAME host. Step 1's
+  own-database check rewritten for an empty auth DB (security: auth.users can't exist before step
+  7): public.users on app, NULL on auth, no `auth` schema, pg_control_system identifiers differ;
+  auth.users check moved after step 7. Runbook adds: forwarder has no public networking/domain,
+  tagged ACL-scoped key only as TS_AUTHKEY; step 18 removes forwarder + revokes key, with checks.
+  Three mutations (env any, env not in host, same-host off) each caught; doc pins mutation-proven.

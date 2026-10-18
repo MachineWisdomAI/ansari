@@ -139,7 +139,7 @@ This spec defines WHAT and WHY. The plan defines HOW and WHEN.
 >   (`apps/auth/scripts/cutover/operator-env.sh`): both URLs set and different, hosts
 >   `<name>.railway.internal` only (Railway's public proxy `*.proxy.rlwy.net` and anything else
 >   refused), `psql` major 18, a clean checkout at `PROMOTED_COMMIT`, stdout a terminal. The
->   rehearsal seed also needs `ANSARI_CUTOVER_ENV=staging`. TLS on the private path is probed and
+>   rehearsal seed also needs `ANSARI_CUTOVER_ENV=staging` (since 2026-10-19: `CUTOVER_ENV`, below). TLS on the private path is probed and
 >   recorded at step 1. The staging rehearsal runs the same machine path, so it proves the
 >   environment. **Residuals, owner-accepted:** the operator machine is in scope for the window
 >   (full-disk encryption, no session recording, history off, screen sharing off: runbook step
@@ -149,11 +149,18 @@ This spec defines WHAT and WHY. The plan defines HOW and WHEN.
 >   (docs.railway.com, "Set up a Tailscale forwarder"), not a route that resolves
 >   `*.railway.internal` on the operator machine. The URLs therefore name the forwarder's MagicDNS
 >   machine name, `<project>-<environment>-tailscale-forwarder` (optionally `-<n>` and
->   `.<tailnet>.ts.net`), with one port mapping per database. `operator-env.sh` accepts only that
->   shape; `*.railway.internal`, the public proxy, IPs and anything else are refused. The
->   forwarder's name carries its environment, so the rehearsal seed now also requires staging's
->   forwarder, alongside the typed word (still names, not proof: a forwarder mapped to the wrong
->   database would pass). Runbook step 1 checks each URL reaches its own database.
+>   `.<tailnet>.ts.net`): one forwarder per environment, the app database on 5432 and the auth
+>   database on 5433. **Bound to the environment (main and security, blocking on the first
+>   version):** a required `CUTOVER_ENV` (`production` or `staging`, set at runbook step 1 and read
+>   back aloud) replaces the seed's `ANSARI_CUTOVER_ENV`; both hosts must be
+>   `<project>-$CUTOVER_ENV-tailscale-forwarder` and the **same** host, so a URL pasted from the
+>   other environment (which would copy production's hashes into staging's auth database, with
+>   audits that pass because they compare the two ends) is refused. `*.railway.internal`, the
+>   public proxy, IPs and anything else are refused. Still names, not proof: a forwarder whose
+>   mapping points at the wrong database would pass, so runbook step 1 checks each URL reaches its
+>   own database and that the two are different clusters (`pg_control_system()`). The forwarder
+>   has no public networking or domain, its key is tagged and ACL-scoped, and step 18 removes the
+>   forwarder and revokes the key.
 >
 > This amendment supersedes every passage below about the internal credential, the internal
 > listener, the private network, the forwarded IP and `AUTH_RATE_LIMIT_MODE`; those passages are
