@@ -20,8 +20,10 @@
 #
 # `--allow-local` (local end-to-end testing only, LOCAL-TESTING) replaces check
 # 2 with a stricter one: BOTH hosts must be loopback (localhost, 127.0.0.1,
-# ::1), so the flag can never reach a remote database. Every other check still
-# runs, and it says so on stderr.
+# ::1). Loopback is not local: a tunnel or port-forward on loopback (railway
+# connect, ssh -L, a Tailscale forward) would reach a Railway database, so never
+# run it while one is open; it is for throwaway local clusters. Every other
+# check still runs, and it says so on stderr.
 #
 # Usage: operator_check <script name> [--allow-local]
 #        (dies with exit 2 on the first refusal, or on any other argument)

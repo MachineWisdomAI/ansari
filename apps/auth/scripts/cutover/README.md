@@ -23,8 +23,11 @@ the path. `rehearsal-anomalies.ts` makes the same host and checkout checks, and 
 
 **Local end-to-end testing only: `--allow-local`.** `copy.sh --allow-local` and
 `complete-tombstones.sh --allow-local` replace the host check with a stricter one: **both** hosts
-must be loopback (`localhost`, `127.0.0.1`, `::1`), so the flag can never reach a Railway or any
-other remote database. Every other check still runs (psql 18, a clean checkout at
+must be loopback (`localhost`, `127.0.0.1`, `::1`). Loopback is not the same as local: an SSH
+tunnel or port-forward on loopback (`railway connect`, `ssh -L`, a Tailscale forward) would make
+`localhost` reach a Railway database, so **never run `--allow-local` while any tunnel or
+port-forward to a Railway database is open**. It is for throwaway local clusters. Every other
+check still runs (psql 18, a clean checkout at
 `PROMOTED_COMMIT`, a terminal), and the run prints `LOCAL TEST RUN` on stderr. Any other argument
 is refused. Never pass it in the window.
 
