@@ -420,6 +420,10 @@ to 7, and main added a to e. This supersedes the earlier "inside the auth image 
   (renamed from `ANSARI_CUTOVER_ENV` on 2026-10-19, when the scripts were bound to the
   environment: `CUTOVER_ENV` is required by `copy.sh` and `complete-tombstones.sh` too, both
   hosts must be `<project>-$CUTOVER_ENV-tailscale-forwarder` and the same host).
+  **Accepted residual (main, 2026-10-19):** the project prefix is not pinned, so a host such as
+  `x-staging-production-tailscale-forwarder` passes under `CUTOVER_ENV=production`. No change:
+  Railway derives the machine name as `<project>-<environment>-<service>`, so a real staging
+  forwarder can never end in `-production-tailscale-forwarder`.
   Railway's own variables prove nothing, because a laptop shell injects them. That is tested.
 - [x] The Dockerfile is back to the service image: no PGDG, no psql, no `apps/api/drizzle` copy
   or chmod, no marker, and the comment no longer calls it the operator environment. The full
