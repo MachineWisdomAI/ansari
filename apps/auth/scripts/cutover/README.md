@@ -20,6 +20,14 @@ Tailscale route to Railway's private network, from a **clean checkout of the pro
 It warns when a URL carries no `sslmode=require`; the runbook records whether TLS is offered on
 the path. `rehearsal-anomalies.ts` makes the same host and checkout checks, and also needs
 `ANSARI_CUTOVER_ENV=staging`, because an internal host name is the same in both environments.
+
+**Local end-to-end testing only: `--allow-local`.** `copy.sh --allow-local` and
+`complete-tombstones.sh --allow-local` replace the host check with a stricter one: **both** hosts
+must be loopback (`localhost`, `127.0.0.1`, `::1`), so the flag can never reach a Railway or any
+other remote database. Every other check still runs (psql 18, a clean checkout at
+`PROMOTED_COMMIT`, a terminal), and the run prints `LOCAL TEST RUN` on stderr. Any other argument
+is refused. Never pass it in the window.
+
 Both URLs are entered with `read -rs` for the session only: never set on a Railway service,
 never added to `turbo.json`, never written to a file. The copy's rows pass through this
 machine's memory in a pipe and nowhere else. The source scans exclude this directory by path,

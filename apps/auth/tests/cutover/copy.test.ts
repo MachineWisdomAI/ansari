@@ -777,8 +777,8 @@ describe('copy.sh and complete-tombstones.sh: the operator-environment check (sp
     PROMOTED_COMMIT: commit,
   });
 
-  const run = (name: string, env: Record<string, string | undefined>) =>
-    spawnSync('bash', [resolve(repo, 'cutover', name)], {
+  const run = (name: string, env: Record<string, string | undefined>, args: string[] = []) =>
+    spawnSync('bash', [resolve(repo, 'cutover', name), ...args], {
       env: { PATH: `${bin}:${process.env.PATH ?? ''}`, HOME: process.env.HOME ?? '', ...env } as NodeJS.ProcessEnv,
       encoding: 'utf8',
     });
@@ -800,6 +800,7 @@ describe('copy.sh and complete-tombstones.sh: the operator-environment check (sp
       ['a public host', { ...good(), AUTH_DATABASE_URL: 'postgresql://u:p@db.example.com/railway' }, /not Railway-internal/],
       ['a near-miss host', { ...good(), APP_DATABASE_URL: 'postgresql://u:p@postgres.railway.internal.evil.com/railway' }, /not Railway-internal/],
       ['a bare IP', { ...good(), APP_DATABASE_URL: 'postgresql://u:p@100.64.0.7:5432/railway' }, /not Railway-internal/],
+      ['localhost without --allow-local', { ...good(), APP_DATABASE_URL: 'postgresql://u:p@localhost:5432/app' }, /not Railway-internal/],
       ['psql 17', { ...good(), FAKE_PSQL_MAJOR: '17' }, /psql must be major 18 .*17/],
       ['no PROMOTED_COMMIT', { ...good(), PROMOTED_COMMIT: undefined }, /PROMOTED_COMMIT is unset/],
       ['HEAD is not the promoted commit', { ...good(), PROMOTED_COMMIT: 'HEAD~0^' }, /HEAD is not PROMOTED_COMMIT/],
@@ -812,6 +813,51 @@ describe('copy.sh and complete-tombstones.sh: the operator-environment check (sp
       expect(result.stderr, label).not.toMatch(/u:p@/);
     }
     expect(psqlCalls()).toBe('');
+  });
+
+  const local = () => ({
+    APP_DATABASE_URL: 'postgresql://u:p@localhost:5432/copy_app',
+    AUTH_DATABASE_URL: 'postgresql://u:p@127.0.0.1:5432/copy_auth',
+    PROMOTED_COMMIT: commit,
+  });
+
+  it.each(['copy.sh', 'complete-tombstones.sh'])('%s --allow-local: loopback only, every other check still runs', (name) => {
+    const cases: [string, Record<string, string | undefined>, string[], RegExp][] = [
+      ['a Railway-internal host', { ...local(), AUTH_DATABASE_URL: good().AUTH_DATABASE_URL }, ['--allow-local'], /not loopback/],
+      ['a public host', { ...local(), APP_DATABASE_URL: 'postgresql://u:p@db.example.com/app' }, ['--allow-local'], /not loopback/],
+      ['the public TCP proxy', { ...local(), APP_DATABASE_URL: 'postgresql://u:p@roundhouse.proxy.rlwy.net:41234/railway' }, ['--allow-local'], /not loopback/],
+      ['a near-miss host', { ...local(), APP_DATABASE_URL: 'postgresql://u:p@localhost.evil.com/app' }, ['--allow-local'], /not loopback/],
+      ['the same database', { ...local(), AUTH_DATABASE_URL: local().APP_DATABASE_URL }, ['--allow-local'], /same database/],
+      ['psql 17', { ...local(), FAKE_PSQL_MAJOR: '17' }, ['--allow-local'], /psql must be major 18/],
+      ['no PROMOTED_COMMIT', { ...local(), PROMOTED_COMMIT: undefined }, ['--allow-local'], /PROMOTED_COMMIT is unset/],
+      ['stdout not a terminal', local(), ['--allow-local'], /stdout redirected/],
+      ['an unknown argument', local(), ['--allow-anything'], /unknown argument/],
+      ['a second argument', local(), ['--allow-local', '--allow-local'], /unknown argument/],
+    ];
+    for (const [label, env, args, message] of cases) {
+      const result = run(name, env, args);
+      expect({ label, status: result.status }).toEqual({ label, status: 2 });
+      expect(result.stderr, label).toMatch(message);
+      expect(result.stderr, label).not.toMatch(/u:p@/);
+    }
+    expect(psqlCalls()).toBe('');
+  });
+
+  it.each(['copy.sh', 'complete-tombstones.sh'])('%s --allow-local: in a terminal, loopback hosts pass the check, with a warning', (name) => {
+    const target = resolve(repo, 'cutover', name);
+    const [cmd, args] =
+      process.platform === 'darwin'
+        ? ['script', ['-q', '/dev/null', 'bash', target, '--allow-local']]
+        : ['script', ['-qec', `bash ${target} --allow-local`, '/dev/null']];
+    const result = spawnSync(cmd, args, {
+      env: { PATH: `${bin}:${process.env.PATH ?? ''}`, HOME: process.env.HOME ?? '', ...local(), APP_DATABASE_URL: 'postgresql://u:p@[::1]:5432/copy_app' } as NodeJS.ProcessEnv,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    expect(psqlCalls()).toMatch(/^called /);
+    const out = `${result.stdout}${result.stderr}`;
+    expect(out).toMatch(/LOCAL TEST RUN \(--allow-local\)/);
+    expect(out).not.toMatch(/refusing|not loopback|PROMOTED_COMMIT|uncommitted|u:p@/);
   });
 
   it.each(['copy.sh', 'complete-tombstones.sh'])('%s: a dirty checkout is refused', (name) => {

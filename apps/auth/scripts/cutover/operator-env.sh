@@ -18,7 +18,13 @@
 # 1 records whether TLS is offered on the Tailscale path). Ids only; it never
 # prints a URL.
 #
-# Usage: operator_check <script name>   (dies with exit 2 on the first refusal)
+# `--allow-local` (local end-to-end testing only, LOCAL-TESTING) replaces check
+# 2 with a stricter one: BOTH hosts must be loopback (localhost, 127.0.0.1,
+# ::1), so the flag can never reach a remote database. Every other check still
+# runs, and it says so on stderr.
+#
+# Usage: operator_check <script name> [--allow-local]
+#        (dies with exit 2 on the first refusal, or on any other argument)
 
 operator_die() { echo "$1: $2" >&2; exit 2; }
 
@@ -43,8 +49,23 @@ operator_host_allowed() {
   [[ "$host" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?\.railway\.internal$ ]]
 }
 
+# 0 when the host is loopback (the only hosts --allow-local accepts), 1 otherwise.
+operator_host_loopback() {
+  local host
+  host="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  host="${host%.}"
+  [ "$host" = "localhost" ] || [ "$host" = "127.0.0.1" ] || [ "$host" = "::1" ]
+}
+
 operator_check() {
   local name="$1"
+  shift
+  local allow_local=0
+  if [ "$#" -gt 0 ]; then
+    [ "$#" -eq 1 ] && [ "$1" = "--allow-local" ] \
+      || operator_die "$name" "unknown argument (the only one accepted is --allow-local)"
+    allow_local=1
+  fi
   [ -n "${APP_DATABASE_URL:-}" ] || operator_die "$name" "APP_DATABASE_URL is unset"
   [ -n "${AUTH_DATABASE_URL:-}" ] || operator_die "$name" "AUTH_DATABASE_URL is unset"
   [ "$APP_DATABASE_URL" != "$AUTH_DATABASE_URL" ] \
@@ -53,6 +74,11 @@ operator_check() {
   local var host
   for var in APP_DATABASE_URL AUTH_DATABASE_URL; do
     host="$(operator_url_host "${!var}")"
+    if [ "$allow_local" = 1 ]; then
+      operator_host_loopback "$host" \
+        || operator_die "$name" "--allow-local: $var's host is not loopback (localhost, 127.0.0.1 or ::1)"
+      continue
+    fi
     case "$host" in
       *.proxy.rlwy.net | *.proxy.rlwy.net.)
         operator_die "$name" "$var points at Railway's public TCP proxy; use the <name>.railway.internal host over the Tailscale route" ;;
@@ -77,6 +103,9 @@ operator_check() {
     || operator_die "$name" "HEAD is not PROMOTED_COMMIT"
 
   [ -t 1 ] || operator_die "$name" "refusing to run with stdout redirected: run it in the terminal, and read its counts there"
+
+  [ "$allow_local" = 0 ] \
+    || echo "$name: LOCAL TEST RUN (--allow-local): loopback databases only; the Railway-internal host check is skipped" >&2
 
   for var in APP_DATABASE_URL AUTH_DATABASE_URL; do
     case "${!var}" in

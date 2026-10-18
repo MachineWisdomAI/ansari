@@ -13,7 +13,7 @@ die() { echo "complete-tombstones.sh: $*" >&2; exit 2; }
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=operator-env.sh
 . "$here/operator-env.sh"
-operator_check complete-tombstones.sh
+operator_check complete-tombstones.sh "$@"
 ids="$(psql "$APP_DATABASE_URL" -X -q -v ON_ERROR_STOP=1 -f "$here/04-tombstones-pending-app.sql")"
 echo "complete-tombstones.sh: pending $ids"
 [ "$ids" != "{}" ] || { echo "complete-tombstones.sh: nothing pending"; exit 0; }

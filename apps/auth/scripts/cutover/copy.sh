@@ -21,7 +21,7 @@ die() { echo "copy.sh: $*" >&2; exit 2; }
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=operator-env.sh
 . "$here/operator-env.sh"
-operator_check copy.sh
+operator_check copy.sh "$@"
 
 psql_app() { psql "$APP_DATABASE_URL" -X -q -v ON_ERROR_STOP=1 "$@"; }
 psql_auth() { psql "$AUTH_DATABASE_URL" -X -q -v ON_ERROR_STOP=1 "$@"; }
