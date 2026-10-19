@@ -72,11 +72,11 @@ describe('the window runbook', () => {
     return index + 1;
   };
 
-  it('has 18 steps, in order (the plan 17 plus the promotion, security R5)', () => {
-    expect(steps.map((s) => Number(s.split('.')[0]))).toEqual(Array.from({ length: 18 }, (_, i) => i + 1));
+  it('has 16 steps, in order (the auto-deploy-on window, owner 2026-10-19)', () => {
+    expect(steps.map((s) => Number(s.split('.')[0]))).toEqual(Array.from({ length: 16 }, (_, i) => i + 1));
   });
 
-  it.each(Array.from({ length: 18 }, (_, i) => i + 1))('step %i has a check and an abort', (n) => {
+  it.each(Array.from({ length: 16 }, (_, i) => i + 1))('step %i has a check and an abort', (n) => {
     const step = steps[n - 1] as string;
     expect(step).toMatch(/\*\*Check:\*\*/);
     expect(step).toMatch(/\*\*Abort/);
@@ -90,31 +90,64 @@ describe('the window runbook', () => {
     }
   });
 
-  it('takes cutover_at after apps/api is offline and before the new apps/api deploys', () => {
-    const taken = steps.findIndex((s) => /select now\(\)/.test(s) && /cutover_at/.test(s)) + 1;
-    expect(taken).toBeGreaterThan(stepOf(/apps\/api` offline/));
-    expect(taken).toBeLessThan(stepOf(/Deploy `apps\/api` and `apps\/frontend`/));
+  it('takes cutover_at with maintenance on, before the copy and before anything deploys', () => {
+    const taken = steps.findIndex((s) => /select now\(\)/.test(s) && /cutover_at/i.test(s)) + 1;
+    expect(taken).toBe(stepOf(/Maintenance mode on, web off/));
+    expect(taken).toBeLessThan(stepOf(/The copy and the audits/));
+    expect(taken).toBeLessThan(stepOf(/Promote `develop` to `main`/));
   });
 
-  it('promotes to main only after apps/api is offline, with auto-deploy off (R5)', () => {
-    expect(stepOf(/Promote `develop` to `main`/)).toBeGreaterThan(stepOf(/apps\/api` offline/));
-    expect(doc).toMatch(/Auto-deploy is OFF for `backend`/);
+  it('auto-deploy stays on: every database step, the auth domain and the variables precede the promotion (owner 2026-10-19, W1)', () => {
+    const promote = stepOf(/Promote `develop` to `main` \(staging: merge the cutover PR\)/);
+    for (const title of [/Maintenance mode on/, /Snapshots/, /The auth baseline/, /The copy and the audits/, /The app window migration/, /Admin roles/, /Attach `auth\.askansari\.ai`/]) {
+      expect(stepOf(title), String(title)).toBeLessThan(promote);
+    }
+    expect(stepOf(/The copy and the audits/)).toBe(promote - 4);
+    expect(stepOf(/The deploys: `auth`, `backend` and web/)).toBe(promote + 1);
+    expect(doc).toMatch(/\*\*Auto-deploy is ON for `backend`, the web service and `auth`, and stays on\*\*/);
+    expect(doc).not.toMatch(/Auto-deploy is OFF|auto-deploy OFF on staging|Turn auto-deploy OFF on staging/);
+    expect(doc).toMatch(/Steps 3 to 10 are \*\*one continuous session\*\*/);
     expect(doc).toMatch(/main` is current except for spec 300/);
+    expect(doc).toMatch(/\*\*The web service has both build variables set before step 10\*\*/);
+  });
+
+  it('step 10 checks the deployed tree is PROMOTED_COMMIT (W5, M5)', () => {
+    const step10 = steps[stepOf(/Promote `develop` to `main`/) - 1] as string;
+    expect(step10).toContain('git diff-tree --quiet "$PROMOTED_COMMIT" origin/main && echo same-tree');
+    expect(step10).toMatch(/prints `same-tree`/);
+    expect(doc).toMatch(/cutover\s+PR is brought current with `develop`/);
+  });
+
+  it('maintenance mode is the offline mechanism; the residual and the comms say what does not carry over (W3, W8)', () => {
+    const step3 = steps[stepOf(/Maintenance mode on, web off/) - 1] as string;
+    expect(step3).toContain('`MAINTENANCE_MODE=true`');
+    expect(step3).toContain("clients don't ignore maintenance mode");
+    expect(step3).toMatch(/a sign-up during the window has an app row and no auth account/);
+    expect(step3).toMatch(/a password change or reset during the window is not in the auth database: the user resets again/);
+    const step2 = steps[stepOf(/Comms and alert silencing/) - 1] as string;
+    expect(step2).toMatch(/accounts created and passwords changed during the maintenance window do not carry over/);
+    expect(steps[stepOf(/Maintenance mode off/) - 1]).toContain('`MAINTENANCE_MODE=false`');
+  });
+
+  it('step 7 shows each window migration is safe for the serving apps/api (M1, W7)', () => {
+    const step7 = steps[stepOf(/The app window migration/) - 1] as string;
+    for (const file of ['0009_better_auth_scaffold_cleanup.sql', '0010_deleted_users.sql', '0011_better_auth_window.sql']) {
+      expect(step7).toMatch(new RegExp(`^\\| \`${file.replace(/\./g, '\\.')}\` \\|`, 'm'));
+    }
+    expect(step7).toContain('eq(users.email, email.toLowerCase())');
   });
 
   it('attaches the auth domain before the web swap (R4)', () => {
     expect(stepOf(/Attach `auth\.askansari\.ai`/)).toBeLessThan(stepOf(/Replace legacy web/));
   });
 
-  it('deploys apps/auth privately before any database step; admins are granted by id, with no list and no redeploy (H-7)', () => {
-    const deployAuth = stepOf(/Deploy `apps\/auth` privately/);
-    expect(deployAuth).toBeLessThan(stepOf(/The auth baseline/));
+  it('auth has no active deployment until the promotion; admins are granted by id, with no list and no redeploy (H-7)', () => {
+    expect(doc).toMatch(/\*\*no domain yet\*\* and \*\*no active deployment\*\*/);
     const admins = steps[stepOf(/Admin roles/) - 1] as string;
     expect(admins).toContain('grant-admin.ts <email> --confirm <id>');
     expect(admins).toContain('05-audit-admins-auth.sql');
     expect(admins).toMatch(/no `ADMIN_EMAILS` to set and no `auth` redeploy/);
     expect(admins).not.toMatch(/set `ADMIN_EMAILS`/);
-    expect(steps[deployAuth - 1]).not.toMatch(/`ADMIN_EMAILS` empty/);
   });
 
   it("names the operator environment: the owner's machine through the Tailscale forwarder, a clean promoted checkout (H-8)", () => {
@@ -132,7 +165,7 @@ describe('the window runbook', () => {
   it('the operator block sets CUTOVER_ENV, and step 18 removes the forwarder and revokes its key', () => {
     expect(doc).toContain('export CUTOVER_ENV=production                      # staging in the rehearsal; read it back aloud');
     expect(doc).toContain('Both URLs name the **same**\nforwarder');
-    const step18 = doc.slice(doc.indexOf('## 18.'), doc.indexOf('## Orphan app rows'));
+    const step18 = doc.slice(doc.indexOf('## 16.'), doc.indexOf('## Orphan app rows'));
     expect(step18).toContain('Remove the environment\'s Tailscale forwarder service, and revoke its auth key');
     expect(step18).toMatch(/`tailscale status` no\s+longer lists the forwarder/);
     expect(step18).toMatch(/key shows as revoked in the Tailscale admin console/);
@@ -186,7 +219,7 @@ describe('the window runbook', () => {
     expect(hits).toEqual([]);
   });
 
-  it.each([/Edge probe on the `apps\/api` production domains/, /Attach `auth\.askansari\.ai`/])(
+  it.each([/Edge probe on the `apps\/api` production domains/, /The deploys: `auth`, `backend` and web/])(
     '%s checks both edge properties on both paths: all three client-IP headers forged, and two networks differ',
     (title) => {
       const step = steps[stepOf(title) - 1] as string;
@@ -215,23 +248,23 @@ describe('the window runbook', () => {
     expect(doc).not.toMatch(/railway\.internal:3101|X-Ansari-Internal-Auth|:3101/i);
   });
 
-  it('step 0: staging auto-deploy is OFF before the cutover PR merges (main)', () => {
-    const step0 = doc.indexOf('### Step 0, before the cutover PR merges: staging auto-deploy OFF');
-    expect(step0).toBeGreaterThan(0);
-    expect(step0).toBeLessThan(doc.indexOf('## 1. Preconditions'));
-    expect(doc).toMatch(/Turn auto-deploy OFF on staging `backend`, the staging web service and staging `auth` before\s+the cutover PR merges/);
+  it('there is no step 0: staging keeps auto-deploy on, and its old auth deployment goes before the attach (owner, M3)', () => {
+    expect(doc).not.toContain('### Step 0');
+    expect(doc).toMatch(/remove its active deployment before step 9/);
   });
 
-  it('attaches the auth domain after the copy and the admin roles, before apps/api deploys (H-5)', () => {
+  it('attaches the auth domain after the copy and the admin roles, before the promotion (H-5, M3)', () => {
     const at = (heading: string) => doc.indexOf(heading);
-    const attach = at('## 11. Attach `auth.askansari.ai`');
-    expect(at('## 8. The copy and the audits')).toBeGreaterThan(0);
-    expect(attach).toBeGreaterThan(at('## 10. Admin roles'));
-    expect(attach).toBeLessThan(at('## 12. Deploy `apps/api` and `apps/frontend`'));
+    const attach = at('## 9. Attach `auth.askansari.ai`');
+    expect(at('## 6. The copy and the audits')).toBeGreaterThan(0);
+    expect(attach).toBeGreaterThan(at('## 8. Admin roles'));
+    expect(attach).toBeLessThan(at('## 10. Promote `develop` to `main`'));
+    const step9 = steps[8] as string;
+    expect(step9).toMatch(/prints `404` or `502` over\s+https with a \*\*valid certificate\*\*/);
+    expect(step9).toMatch(/A `200` means a deployment is live/);
     expect(doc).toMatch(/DNS record for `auth\.askansari\.ai` exists before the window and is not attached/);
-    expect(doc).toMatch(/valid certificate/);
     expect(doc).toMatch(/`AUTH_URL=https:\/\/auth\.askansari\.ai`/);
-    expect(doc).toContain('## 15. (Moved to step 11)');
+    expect(doc).not.toMatch(/Moved to step/);
   });
 
   it("rehearsal.md's timing table names each runbook step as the runbook does (batch 5, E)", () => {
@@ -240,7 +273,7 @@ describe('the window runbook', () => {
       [...doc.matchAll(/^## (\d+)\. (.+)$/gm)].map((m) => [m[1], (m[2] ?? '').toLowerCase()])
     );
     const rows = [...rehearsal.matchAll(/^\| (\d+) ([^|]+?) \| \| (?:no|\*\*yes\*\*) \|/gm)];
-    expect(rows.length).toBe(18);
+    expect(rows.length).toBe(16);
     for (const [, step, label] of rows) {
       const heading = headings.get(step as string);
       expect(heading, `runbook step ${step}`).toBeDefined();
@@ -250,8 +283,8 @@ describe('the window runbook', () => {
     expect(rehearsal).not.toMatch(/private-network smoke tests|on the private network in\s+step 11|attached at step 15/i);
   });
 
-  it('step 9 proves 0010 and 0011 landed before anything deploys (batch 5, F)', () => {
-    const step9 = doc.slice(doc.indexOf('## 9. The app window migration'), doc.indexOf('## 10. Admin roles'));
+  it('step 7 proves 0010 and 0011 landed before anything deploys (batch 5, F)', () => {
+    const step9 = doc.slice(doc.indexOf('## 7. The app window migration'), doc.indexOf('## 8. Admin roles'));
     expect(step9).toContain("select to_regclass('public.deleted_users') is not null");
     expect(step9).toMatch(/column_name = 'password_hash'"`\s+prints `YES`/);
   });
@@ -277,12 +310,21 @@ describe('the rollback runbook', () => {
     expect(confirm).toBeGreaterThan(dry);
   });
 
-  it('detaches the auth domain, attached at window step 11 (H-5)', () => {
-    expect(doc).toMatch(/attached at window step 11 \(spec H-5\)/);
+  it('detaches the auth domain, attached at window step 9 (H-5)', () => {
+    expect(doc).toMatch(/attached at window step 9 \(spec H-5\)/);
   });
 
-  it('restarts from the auth baseline (window step 7)', () => {
-    expect(doc).toMatch(/from \*\*step 7\*\* \(the auth\s+baseline\)/);
+  it('restarts from the auth baseline (window step 5)', () => {
+    expect(doc).toMatch(/from \*\*step 5\*\* \(the auth\s+baseline\)/);
+  });
+
+  it('has ONE mechanism: auto-deploy off and the recorded deployments back in the same step; the revert is the follow-up (M2)', () => {
+    const step3 = doc.slice(doc.indexOf('## 3. Auto-deploy off'), doc.indexOf('## 4.'));
+    expect(step3).toMatch(/\*\*Turn auto-deploy OFF\*\* on all three/);
+    expect(step3.indexOf('Turn auto-deploy OFF')).toBeLessThan(step3.indexOf('**Redeploy**'));
+    expect(step3).toMatch(/`auth`: back to its recorded state, \*\*no active deployment\*\*/);
+    expect(doc).toMatch(/the revert PR is the follow-up, never the mechanism/);
+    expect(doc).not.toMatch(/revert the promotion on `develop` and promote that before\s+re-enabling auto-deploy/);
   });
 
   it('empties the auth database if no second attempt follows within 7 days (R6)', () => {

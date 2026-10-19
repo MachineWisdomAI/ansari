@@ -166,6 +166,33 @@ This spec defines WHAT and WHY. The plan defines HOW and WHEN.
 > listener, the private network, the forwarded IP and `AUTH_RATE_LIMIT_MODE`; those passages are
 > amended in place where they are normative.
 >
+> **Owner amendment, 2026-10-19, at the pr gate: auto-deploy stays on** (owner decision; the
+> security architect's conditions W1 and W3 to W8 and the main architect's M1 to M5 folded in).
+> This amends R-2's step 1 (auto-deploy off, deploys by hand) and the window's order:
+> - **Auto-deploy is never turned off.** The new code's deploy is the promotion of `develop` to
+>   `main` (production) or the cutover PR's merge (staging), window step 10. Every database step,
+>   the auth domain and every variable precede it, run from `PROMOTED_COMMIT` (the `develop` tip
+>   about to be promoted; on staging, the PR head, current with `develop`), and step 10 checks
+>   that the deployed tree equals it.
+> - **The offline mechanism is maintenance mode:** `MAINTENANCE_MODE=true` on `backend` (the
+>   legacy app's launch-time maintenance screen) and the web domain detached. The legacy `apps/api`
+>   keeps serving until step 10. Steps 3 to 10 are one continuous session, with the copy last.
+> - **Owner-accepted residual, as the owner stated it:** clients don't ignore maintenance mode, so
+>   no legacy write is expected between the copy and the new code, and there is no late-writes
+>   audit (security's W2, dropped on this decision). If one happens anyway, a sign-up during the
+>   window has an app row and no auth account (the user signs up again, and the orphan-row
+>   procedure clears the email conflict), and a password change or reset during the window is not
+>   in the auth database (the user resets again). The maintenance notice says both do not carry
+>   over.
+> - **The window's migrations apply under the serving legacy code**, so each is shown safe for it
+>   (runbook step 7's table). `0011`'s email normalization lets legacy login, which lowercases the
+>   typed address, match a mixed-case row it could not match before.
+> - **The auth domain attaches before the promotion** (H-5 still holds: after the copy and the
+>   roles), to an `auth` service with no active deployment, so it serves nothing until step 10.
+> - **Rollback is one step:** auto-deploy off on `backend`, web and `auth`, and each returned to
+>   its recorded deployment, together. Auto-deploy comes back only when the branch carries a revert
+>   PR or the forward fix.
+>
 > **Lineage.** This spec is written for issue #300. Its evidence base is the issue #60 reference
 > spec and plan (`codev/specs/60-better-auth-migration-reference.md`,
 > `codev/plans/60-better-auth-migration-reference.md`), updated in #299 against better-auth 1.7.7.

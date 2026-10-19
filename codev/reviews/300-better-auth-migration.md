@@ -135,6 +135,13 @@ with the finished part named.
   cache), and it is never a revocation mechanism (arch-critical).
 - **The `/token` 401 delete path is covered by unit tests only.** The F3 simulator run covered an
   expired JWT and a `/token` 5xx, but not a `/token` 401.
+- **Legacy writes during the maintenance window (owner, 2026-10-19).** Auto-deploy stays on, so
+  the copy runs while the legacy `apps/api` still serves behind maintenance mode, which the legacy
+  app checks at launch. The owner's position: clients don't ignore maintenance mode; there is no
+  late-writes audit. A sign-up during the window has an app row and no auth account: the user
+  signs up again at `apps/auth`, and the orphan-row procedure clears the email conflict. A
+  password change or reset during the window is not in the auth database: the user resets again.
+  The maintenance notice says both do not carry over.
 
 ### Removal demonstrations (scenario 27)
 

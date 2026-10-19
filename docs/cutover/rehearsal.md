@@ -1,10 +1,10 @@
 # Cutover rehearsal on staging (spec 300, plan phase 13)
 
-**Owner amendment R-2 (2026-10-17).** The branch is never deployed to staging. After the
-cutover PR merges to `develop` (frozen from then on), the whole window runbook
+**Owner amendment R-2 (2026-10-17), with auto-deploy on (owner, 2026-10-19).** The branch is
+never deployed to staging ahead of its merge. The whole window runbook
 ([`better-auth-cutover.md`](better-auth-cutover.md), its "Staging rehearsal" section gives the
-differences) and the rollback ([`rollback.md`](rollback.md)) run on staging from that merge
-commit. This file holds the procedure and, filled in by the docs-only evidence PR, the results.
+differences) runs on staging, with the cutover PR's merge to `develop` as its step 10, and then
+the rollback ([`rollback.md`](rollback.md)). `develop` is frozen from that merge on. This file holds the procedure and, filled in by the docs-only evidence PR, the results.
 `develop` is not promoted until that PR merges.
 
 Who does what:
@@ -37,23 +37,25 @@ A clone would have shown two things that staging cannot:
 
 ## Environment
 
-- Staging, isolated from production. Each service is deployed **by hand from the cutover PR's
-  merge commit on `develop`**, with auto-deploy off (set before the merge), and
-  `auth-staging.askansari.ai` attached at step 11 (spec H-5), after the admin roles and before
-  the staging `backend` deploys.
+- Staging, isolated from production, with auto-deploy **on** for `backend`, the staging web
+  service and `auth`. The cutover PR's merge (step 10) deploys all three; before it, every
+  database step runs from the PR head, and `auth-staging.askansari.ai` is attached at step 9
+  (spec H-5, main M3), after the admin roles and before the merge, to an `auth` service with no
+  active deployment (its PIR #59 deployment removed first).
 - Postgres 18 on both the staging app and auth servers. `psql --version` on the owner's machine
   reports 18 (the window's step 1 precondition, rehearsed).
 - **The operator environment is the window's (spec H-8), and the rehearsal proves it, not only
   the SQL:** the owner's machine, staging's Tailscale forwarder (the runbook's two mappings), the clean
-  checkout of the `develop` merge commit as `PROMOTED_COMMIT`, staging's two URLs entered with
+  checkout of the cutover PR's head as `PROMOTED_COMMIT` (current with `develop`; step 10 checks the
+  merge commit's tree equals it), staging's two URLs entered with
   `read -rs`, the step 1 hygiene checklist, and the TLS probe recorded. Record the timings of the
   copy and the audits from this machine: the production window's estimate scales from them.
 
 ## Un-rehearsed residuals
 
-- **The production web swap (window step 16).** Staging web already serves `apps/frontend`
-  (title Ansari, built against `api-staging`). So on staging, step 16 rehearses only the rebuild
-  with `EXPO_PUBLIC_AUTH_URL` and the domain checks. Production's change of the web service's
+- **The production web swap (window step 13).** Staging web already serves `apps/frontend`
+  (title Ansari, built against `api-staging`). So on staging, step 13 rehearses only the rebuild
+  the merge triggers, with `EXPO_PUBLIC_AUTH_URL`, and re-attaching the domain step 3 detached. Production's change of the web service's
   Dockerfile path, from legacy web to `apps/frontend`, is not rehearsed. Its rollback,
   [`rollback.md`](rollback.md) step 4 (restore the previous legacy web deployment), is unchanged.
 
@@ -74,9 +76,9 @@ A clone would have shown two things that staging cannot:
 | audit lists the holder id | |
 | cleanup prints `INSERT 0 1`; the new account's first request succeeds | |
 
-## Part A: the guards fire (runbook steps 6 to 8)
+## Part A: the guards fire (runbook steps 4 to 6)
 
-From the operator environment, after runbook step 6 and before step 7, seed the staging app
+From the operator environment, after runbook step 4 and before step 5, seed the staging app
 database. The existing staging users and system rows stay. Every `rehearsal-anomalies.ts`
 command is piped straight into psql. The script refuses without `CUTOVER_ENV=staging` (the runbook's
 step 1 variable), an app host that is not staging's forwarder, a dirty or unpromoted checkout, or a terminal on stdout:
@@ -112,7 +114,7 @@ The seed is eight rows:
    - one more legacy admin
 
    Record counts only; the admin inventory stays with the owner.
-2. Apply the auth baseline (runbook step 7), then run step 8's `apps/auth/scripts/cutover/copy.sh`.
+2. Apply the auth baseline (runbook step 5), then run step 6's `apps/auth/scripts/cutover/copy.sh`.
    **It must exit non-zero** with
    `cutover copy: 1 normalized email(s) are held by more than one row`. Then:
    - `psql "$AUTH_DATABASE_URL" -X -At -c "select (select count(*) from auth.users) + (select count(*) from auth.account)"` prints `0`
@@ -126,7 +128,7 @@ The seed is eight rows:
    `cutover copy: 1 row(s) have a NULL created_at or updated_at`, and both checks above print `0`.
 5. `$SEED resolve-null | psql "$APP_DATABASE_URL" -X -q -v ON_ERROR_STOP=1 --single-transaction`,
    then `copy.sh` a fourth time. It must print `copy.sh: audit OK`. The runbook continues at
-   step 9 (Part B).
+   step 7 (Part B).
 
 | Step | Expected | Exit code | Auth rows after | TEMP table left | Result |
 |---|---|---|---|---|---|
@@ -141,7 +143,7 @@ Follow the window runbook step by step, as written. For each step, record the st
 the **Check:** output (counts and checksums only).
 
 After the copy, sign each seeded user in against the staging auth service with
-`REHEARSAL_PASSWORD`, once its public domain is attached (step 11). Each must return the seeded id (the `e0300000-…` ids in the script):
+`REHEARSAL_PASSWORD`, once its deployment is healthy (step 11). Each must return the seeded id (the `e0300000-…` ids in the script):
 - The mixed-case row signs in with its address in **upper case**.
 - The `$2a$` and `$2b$` rows both sign in.
 - The legacy admin holds `role = 'admin'` after `grant-admin.ts`, and `05` lists it.
@@ -152,25 +154,23 @@ After the copy, sign each seeded user in against the staging auth service with
 |---|---|---|---|---|
 | 1 Preconditions | | no | | |
 | 2 Comms and alert silencing | | no | | |
-| 3 `apps/api` offline | | no | | |
-| 4 Promote `develop` to `main` | | no | | |
-| 5 Snapshots | | no | | |
-| 6 Deploy `apps/auth` privately | | no | | |
-| 7 The auth baseline | | no | | |
-| 8 The copy and the audits | | **yes** | | |
-| 9 The app window migration | | no | | |
-| 10 Admin roles | | no | | |
-| 11 Attach `auth.askansari.ai` | | no | | |
-| 12 Deploy `apps/api` and `apps/frontend` | | no | | |
-| 13 Re-attach `apps/api`'s domains | | no | | |
-| 14 Edge probe | | no | | |
-| 15 (Moved to step 11) | | no | | |
-| 16 Replace legacy web | | no | | |
-| 17 Public smoke tests | | no | | |
-| 18 Re-enable alerting | | no | | |
+| 3 Maintenance mode on, web off, and `cutover_at` | | no | | |
+| 4 Snapshots | | no | | |
+| 5 The auth baseline | | no | | |
+| 6 The copy and the audits | | **yes** | | |
+| 7 The app window migration | | no | | |
+| 8 Admin roles | | no | | |
+| 9 Attach `auth.askansari.ai` | | no | | |
+| 10 Promote `develop` to `main` (staging: merge the cutover PR) | | no | | |
+| 11 The deploys: `auth`, `backend` and web | | no | | |
+| 12 Edge probe on the `apps/api` production domains | | no | | |
+| 13 Replace legacy web | | no | | |
+| 14 Public smoke tests | | no | | |
+| 15 Maintenance mode off | | no | | |
+| 16 Re-enable alerting | | no | | |
 
 **Scaling rule.**
-- Only step 8 (the copy and the audits) is scaled, by `production to_copy ÷ staging to_copy`. Both
+- Only step 6 (the copy and the audits) is scaled, by `production to_copy ÷ staging to_copy`. Both
   counts come from the preflight's "Rows to copy".
 - Deploys, snapshots, DNS and the smoke tests are recorded as measured.
 - The window's **comms allowance is three times the scaled total.**
@@ -180,7 +180,8 @@ After the copy, sign each seeded user in against the staging auth service with
 | staging `to_copy` | |
 | production `to_copy` (the owner's preflight) | |
 | scale factor | |
-| step 8 measured → scaled | |
+| step 6 measured → scaled | |
+| session, steps 3 to 10 (security W1) | |
 | scaled total (all steps) | |
 | comms allowance (3 × the scaled total) | |
 
@@ -221,7 +222,7 @@ Follow [`rollback.md`](rollback.md) as written:
 1. Remove the post-cutover users: the dry-run count, then `confirm=yes`.
 2. Redeploy the previous image.
 3. A migrated user signs in with the legacy password through the legacy code.
-4. A client signed in during the window (the released mobile build, signed in after step 13) is
+4. A client signed in during the window (the released mobile build, signed in after step 15) is
    signed out once on its next call, and signs in again with the legacy password.
 5. Check that no post-cutover user remains.
 
@@ -237,9 +238,11 @@ Follow [`rollback.md`](rollback.md) as written:
 ## Part F: the second forward run, and clean-up
 
 After the rollback, follow rollback.md's restart procedure (empty the auth database, restart from
-window step 7), so staging ends on `develop`. Then:
+window step 5, after steps 1 to 4), so staging ends on `develop`. Its step 10 redeploys the merge
+commit on `auth`, `backend` and the staging web service and turns auto-deploy back on (the merge
+is still on `develop`; the rehearsal does not revert it). Then:
 1. Run `$SEED remove | psql "$APP_DATABASE_URL" -X -q -v ON_ERROR_STOP=1 --single-transaction`.
-2. Turn auto-deploy back on.
+2. Confirm auto-deploy is on for all three.
 
 `develop` is frozen, so there is no re-run after a later merge: the merge commit below is what
 production receives.

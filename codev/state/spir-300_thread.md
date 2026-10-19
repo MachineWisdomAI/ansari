@@ -558,3 +558,44 @@ production runs only under the full operator checks and step 1's hygiene checkli
 README and the runbook. Security's position on `.env`, recorded for the owner: production and
 staging URLs stay `read -rs` only. A file is acceptable only under `--allow-local`, and
 operator-env.sh should refuse to source one without it. Holding until the owner decides.
+
+## 2026-10-19: the window redesign, with auto-deploy on (owner decision)
+The owner doesn't want auto-deploy turned off. The offline mechanism is now `MAINTENANCE_MODE`
+plus the web domain detached, and the new code's deploy is the promotion (production) or the
+cutover PR's merge (staging). The runbook goes from 18 steps to 16:
+1. preconditions
+2. comms
+3. maintenance on, web off, `cutover_at`
+4. snapshots
+5. baseline
+6. copy
+7. `0009`–`0011`
+8. admin roles
+9. attach the auth domain
+10. promote / merge
+11. the deploys
+12. api edge probe
+13. web domain
+14. smoke tests
+15. maintenance off
+16. close
+
+Security's conditions folded in: W1 (steps 3–10 are one session, copy last), W3 (comms say window
+sign-ups and password changes don't carry over), W5 (diff-tree check at step 10), W6 (503 until
+auth is healthy) and W8 (the residual as the owner stated it, with a one-sentence response each).
+W2, the late-writes audit, was drafted and then dropped on the owner's word ("clients don't ignore
+maintenance mode"); nothing of it was committed.
+
+Main's conditions folded in:
+- M1: step 7 table. 0009 is proven safe: develop's api has no schema or SQL for the scaffold
+  tables. W7: legacy login is `eq(users.email, email.toLowerCase())`, so after 0011 mixed-case
+  rows match.
+- M2: rollback step 3 is auto-deploy off plus the recorded deployments back; the revert PR is the
+  follow-up.
+- M3: auth domain attached at step 9, before the promotion.
+- M4: web build variables set before step 10.
+- M5: the freeze keeps the PR current.
+
+My addition: staging `auth` runs the PIR #59 code, so its deployment is removed before step 9, and
+step 9 expects 404 or 502 (a 200 means something is live). Docs pins went 53 → 55, and seven
+mutations were each caught. The spec amendment, the review residual and `RELEASE.md` are updated.

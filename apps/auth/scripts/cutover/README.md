@@ -45,14 +45,14 @@ because it is the one place both databases are named.
 **Dry run: `copy.sh --dry-run`.** The same copy, guards and audits, with nothing committed:
 `02`'s transaction ends in `ROLLBACK` after printing the auth-side audit from inside it (another
 session cannot see uncommitted rows). If the auth database has no schema yet (staging and
-production before runbook step 7), the `0000` baseline is applied inside the same transaction and
+production before runbook step 5), the `0000` baseline is applied inside the same transaction and
 rolled back with it, so step 1's empty-database check still holds afterwards. The script then
 checks that the auth database is as it was (no `auth` schema, or zero users and accounts) and
 ends with `copy.sh: dry run audit OK (nothing committed)`. Every operator-environment check still
 runs, because every email and hash still streams through this machine. So a dry run against
 staging or production is never casual: it runs only under the full operator checks and runbook
 step 1's hygiene checklist, in the same session discipline as the real copy. It combines with
-`--allow-local`, in either order. Its timing is a fair preview of step 8's.
+`--allow-local`, in either order. Its timing is a fair preview of step 6's.
 
 **What they print.** Ids, counts and md5 checksums. Never a password hash. The preflight
 also prints the legacy admins' addresses, because the owner approves that list by address.

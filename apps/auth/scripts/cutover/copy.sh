@@ -16,7 +16,7 @@
 #
 # `--dry-run` runs the same copy, guards and audits, and commits nothing: 02's
 # transaction ends in ROLLBACK after printing the auth-side audit from inside
-# it. Against an auth database with no schema yet (the window before step 7),
+# it. Against an auth database with no schema yet (the window before step 5),
 # the 0000 baseline is applied inside that transaction too, so the database is
 # left as found; the script checks that it was. The rows still stream through
 # this machine, so every operator-environment check still applies.
@@ -49,7 +49,7 @@ expected="$(psql_app -At -f "$here/01-count-app.sql")"
 if [ "$dry_run" = 1 ]; then
   echo "copy.sh: DRY RUN: the copy runs in one transaction and is rolled back; nothing is committed" >&2
   # The auth database as found: with the baseline (auth.users exists) or with no
-  # schema at all (before step 7). Anything in between is the guards' to refuse.
+  # schema at all (before step 5). Anything in between is the guards' to refuse.
   baseline_vars=()
   no_schema="$(psql_auth -At -c "select to_regclass('auth.users') is null")"
   if [ "$no_schema" = "t" ]; then

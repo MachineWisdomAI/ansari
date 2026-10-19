@@ -296,8 +296,8 @@ Order proven for migration `0003` on 2026-08-02:
 Migrations must be backward-compatible with the currently-deployed code: the
 SQL is applied while the previous deployment is still serving traffic.
 
-**The Better Auth cutover is the exception** (spec 300): it runs in a maintenance window with
-`apps/api` offline, by its own runbook, [`docs/cutover/better-auth-cutover.md`](docs/cutover/better-auth-cutover.md),
+**The Better Auth cutover is the exception** (spec 300): it runs in a maintenance window, with
+maintenance mode on and web access off while auto-deploy stays on, by its own runbook, [`docs/cutover/better-auth-cutover.md`](docs/cutover/better-auth-cutover.md),
 with its rollback in [`docs/cutover/rollback.md`](docs/cutover/rollback.md). From the merge of
 the cutover PR to the end of the window, **no other migration merges** to `develop`, in either
 journal (schema freeze).

@@ -7,7 +7,7 @@ between the services any more. Both per-IP keys are only sound if Railway's edge
 `X-Real-IP` with the real client address on every domain, and gives different clients different
 addresses. This file holds the method and the recorded observations. The verdict selects no mode
 (`AUTH_RATE_LIMIT_MODE` is removed, H-4); a failure goes to the security architect (window step
-14's abort).
+12's abort).
 
 ## Method
 
@@ -72,8 +72,8 @@ read. The staging verdict is recorded only after **both** paths are measured.
 **Pre-merge passive check of each production domain** (no code deployed): record the `dig` chain
 and the `curl -sI` headers, which show whether Cloudflare is in front.
 
-The **in-window production probe** (G-2, window steps 11 and 14; the auth domain's moved to step
-11 with its attach, spec H-5) runs the same two paths on the production domains and stays the
+The **in-window production probe** (G-2, window steps 11 and 12: the auth domain's in step 11,
+once `auth` is deployed on the domain step 9 attached) runs the same two paths on the production domains and stays the
 final word.
 
 ## Observations (phase 13 and the window)
@@ -85,9 +85,9 @@ final word.
 | `auth-staging.askansari.ai` via Cloudflare (once orange-clouded) | phase 13 | | | | |
 | `auth-staging.askansari.ai` direct to the Railway edge | phase 13 | | | | |
 | staging `*.up.railway.app` (backend, auth) | phase 13 | | | | |
-| `api.askansari.ai` | window step 14 | | | | passive check before the merge (2026-10-17): no CNAME to Railway; A 104.21.29.181, 172.67.149.151, AAAA 2606:4700:3033::6815:1db5, 2606:4700:3031::ac43:9597 (Cloudflare); `curl -sI`: `server: cloudflare`, `cf-ray`, then `x-railway-edge: sin1`. **Cloudflare proxies in front of Railway's edge (measured).** What `X-Real-IP` carries on this path is not yet measured: see the finding below |
-| `api-35.ansari.chat` | window step 14 | | | | passive check before the merge (2026-10-17): CNAME `vyex12qb.up.railway.app.` → 69.46.46.35; `curl -sI`: `server: railway-hikari`, `x-railway-edge: sjc1`, no proxy headers; same edge as staging |
-| `auth.askansari.ai` | window step 11 | | | | passive check before the merge (2026-10-17): no DNS record yet. The record must exist, unattached, before the window (runbook step 1, spec H-5); it is attached in window step 11 |
+| `api.askansari.ai` | window step 12 | | | | passive check before the merge (2026-10-17): no CNAME to Railway; A 104.21.29.181, 172.67.149.151, AAAA 2606:4700:3033::6815:1db5, 2606:4700:3031::ac43:9597 (Cloudflare); `curl -sI`: `server: cloudflare`, `cf-ray`, then `x-railway-edge: sin1`. **Cloudflare proxies in front of Railway's edge (measured).** What `X-Real-IP` carries on this path is not yet measured: see the finding below |
+| `api-35.ansari.chat` | window step 12 | | | | passive check before the merge (2026-10-17): CNAME `vyex12qb.up.railway.app.` → 69.46.46.35; `curl -sI`: `server: railway-hikari`, `x-railway-edge: sjc1`, no proxy headers; same edge as staging |
+| `auth.askansari.ai` | window step 11 | | | | passive check before the merge (2026-10-17): no DNS record yet. The record must exist, unattached, before the window (runbook step 1, spec H-5); it is attached in window step 9 and probed in step 11, once `auth` is deployed |
 
 **Verdict (the per-IP keys rest on it; no mode is selected):** _(recorded by phase 13)_
 

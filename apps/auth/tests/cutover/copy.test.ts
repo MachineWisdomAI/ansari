@@ -428,7 +428,7 @@ describe('copy.sh --dry-run: the same copy, rolled back', () => {
     expect(after.auth).toEqual(expected);
   });
 
-  it('against an auth database with no schema (before step 7): the baseline is applied inside the transaction and rolled back', async () => {
+  it('against an auth database with no schema (before step 5): the baseline is applied inside the transaction and rolled back', async () => {
     await seed(app, legacy());
     const bare = emptyDatabase();
     try {

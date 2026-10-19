@@ -8,7 +8,7 @@
 -- copy.sh --dry-run passes `-v dry_run=1`: everything below runs as written,
 -- guards included, and the transaction ends in ROLLBACK, after printing the
 -- auth-side audit from inside it. Against an auth database with no schema yet
--- (the window before step 7), copy.sh also passes `-v dry_run_baseline=1`, and
+-- (the window before step 5), copy.sh also passes `-v dry_run_baseline=1`, and
 -- the 0000 baseline is applied inside the same transaction, so the rollback
 -- takes it away again.
 \set ON_ERROR_STOP on
