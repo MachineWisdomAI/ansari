@@ -74,6 +74,23 @@ read -rs AUTH_DATABASE_URL && export AUTH_DATABASE_URL
 export API=https://api.askansari.ai AUTH=https://auth.askansari.ai   # staging: api-staging / auth-staging
 ```
 
+**Both database URLs must go through the Tailscale forwarder, or the scripts reject them.**
+Railway's own URLs will not work. The scripts refuse `DATABASE_URL` (`*.railway.internal`, which
+resolves only inside Railway), `DATABASE_PUBLIC_URL` (`*.proxy.rlwy.net`), an IP, and any other
+host. Build each URL from the database's `PGPASSWORD` and `PGDATABASE` (its Variables tab in
+Railway) and the forwarder's name, as `tailscale status` lists it:
+
+```
+postgresql://postgres:<app PGPASSWORD>@<project>-<environment>-tailscale-forwarder:5432/railway?sslmode=require
+postgresql://postgres:<auth PGPASSWORD>@<project>-<environment>-tailscale-forwarder:5433/railway?sslmode=require
+```
+
+- Both URLs use the **same** forwarder host. Port `5432` is the app database and port `5433` is
+  the auth database.
+- `<environment>` must match `CUTOVER_ENV`, so a staging URL is refused in a production run.
+- If Postgres refuses TLS on this path, drop `?sslmode=require`. The scripts then print a warning,
+  which is expected.
+
 Both databases are on Postgres 18, and they are two different clusters. The auth database is empty:
 
 ```bash
