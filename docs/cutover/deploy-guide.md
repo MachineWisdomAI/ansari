@@ -8,12 +8,43 @@ Auto-deploy stays **on** throughout. The merge in step 8 is the deploy.
 
 ## Before the day (Railway dashboard)
 
-- `backend`: `AUTH_URL` and `AUTH_JWT_ISSUER` set to the auth domain; `MAINTENANCE_MODE=false`;
-  the legacy `JWT_SECRET`, `ACCESS_TOKEN_EXPIRY_HOURS`, `REFRESH_TOKEN_EXPIRY_HOURS` and
-  `ADMIN_EMAILS` are still set.
-- `auth`: variables set (`docs/self-hosting.md`), `PORT=3100`, `CORS_ORIGIN` lists the web
-  origins, **no domain and no active deployment** (staging: remove the PIR #59 deployment).
-- The web service: `EXPO_PUBLIC_API_URL` and `EXPO_PUBLIC_AUTH_URL` set.
+All of these are set before step 2. Auto-deploy is on, so the merge in step 8 deploys whatever
+is set at that point. Production values are shown; for staging, use the staging domains.
+
+- **`backend`: add** the four variables below. The new code does not start in production
+  without them.
+
+  | Variable | Value |
+  |---|---|
+  | `AUTH_URL` | `https://auth.askansari.ai` |
+  | `AUTH_JWT_ISSUER` | `https://auth.askansari.ai` (set on its own) |
+  | `AUTH_JWT_AUDIENCE` | `ansari-api` (the same as on `auth`) |
+  | `AUTH_LAYER_ORIGIN` | `https://api.askansari.ai` (the same as on `auth`) |
+
+  Also on `backend`: `MAINTENANCE_MODE=false`. **Keep** `JWT_SECRET`,
+  `ACCESS_TOKEN_EXPIRY_HOURS`, `REFRESH_TOKEN_EXPIRY_HOURS`, `ADMIN_EMAILS`, `RESEND_API_KEY` and
+  `FRONTEND_URL`. The new code ignores them, but the legacy code that serves until step 8 and
+  that a rollback redeploys needs them. They are removed in the contract PR, not now.
+- **`auth`: set**
+
+  | Variable | Value |
+  |---|---|
+  | `DATABASE_URL` | the auth database (Railway reference variable) |
+  | `BETTER_AUTH_SECRET` | a new random secret, at least 32 characters |
+  | `BETTER_AUTH_URL` | `https://auth.askansari.ai` |
+  | `AUTH_JWT_ISSUER` | `https://auth.askansari.ai` |
+  | `AUTH_JWT_AUDIENCE` | `ansari-api` |
+  | `AUTH_LAYER_ORIGIN` | `https://api.askansari.ai` |
+  | `CORS_ORIGIN` | the `apps/frontend` web origins |
+  | `RESEND_API_KEY` | the Resend key (reset emails are now sent by `auth`) |
+  | `FRONTEND_URL` | the web origin (reset links point here) |
+  | `NODE_ENV` | `production` |
+  | `PORT` | `3100` |
+
+  Optional on `auth`: `SENTRY_DSN`, and `MARKETMAKER_URL` (copy `backend`'s value if it has
+  one). Do **not** set `ADMIN_EMAILS` on it. The service has **no domain and no active deployment** (staging: remove the PIR #59 deployment).
+- **The web service: set** `EXPO_PUBLIC_API_URL=https://api.askansari.ai` and
+  `EXPO_PUBLIC_AUTH_URL=https://auth.askansari.ai`.
 - The auth domain's DNS record exists and is not attached to any service.
 - The Tailscale forwarder: port 5432 to the app database, port 5433 to the auth database.
 - In the release record: the current deployment ID and commit of `backend`, the web service and

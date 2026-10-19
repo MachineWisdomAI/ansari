@@ -256,12 +256,17 @@ forward run, `rehearsal-anomalies.ts remove | psql …` deletes the seeded rows.
   removed, its ID recorded above); its own Postgres with snapshots or PITR **on**. The auth
   database is **empty** (no schema yet). Neither `auth` nor `backend` carries
   `AUTH_INTERNAL_SECRET`, `AUTH_INTERNAL_URL` or `INTERNAL_PORT` (spec H-1: there is no internal
-  hop). `backend` has `AUTH_URL=https://auth.askansari.ai` (the public domain, read by the new
-  code from its first deploy in step 10) and `AUTH_JWT_ISSUER=https://auth.askansari.ai`, set
-  separately, and `MAINTENANCE_MODE=false` (step 3 sets it).
+  hop). `backend` has the four variables the new code requires in production (it does not boot
+  without them), read from its first deploy in step 10: `AUTH_URL=https://auth.askansari.ai` (the
+  public domain), `AUTH_JWT_ISSUER=https://auth.askansari.ai` (set separately),
+  `AUTH_JWT_AUDIENCE` and `AUTH_LAYER_ORIGIN=https://api.askansari.ai`, the last two equal to
+  `auth`'s; and `MAINTENANCE_MODE=false` (step 3 sets it). `auth` has every variable
+  `packages/auth/src/env.ts` requires, including `RESEND_API_KEY` and `FRONTEND_URL` (it now
+  sends the reset emails).
 - **`backend` keeps its legacy variables** `JWT_SECRET`, `ACCESS_TOKEN_EXPIRY_HOURS`,
-  `REFRESH_TOKEN_EXPIRY_HOURS` and `ADMIN_EMAILS` until the contract PR: the legacy code serves
-  until step 10, and the rollback redeploys it; it does not boot without them.
+  `REFRESH_TOKEN_EXPIRY_HOURS`, `ADMIN_EMAILS`, `RESEND_API_KEY` and `FRONTEND_URL` until the
+  contract PR: the legacy code serves until step 10, and the rollback redeploys it. It does not
+  boot without `JWT_SECRET`, and its admin access and reset emails need the others.
 - `CORS_ORIGIN` on `auth` lists the **real web origins** (the `apps/frontend` web domains). No CI
   check can see this; if it is wrong, every web sign-in fails.
 - **The web service has both build variables set before step 10**, whose push rebuilds it (#317's

@@ -63,7 +63,8 @@ push in between:
 2. `backend`: Deployments → the deployment whose **ID the release record holds** (window step 1)
    → **Redeploy**. Never pick it by eye: by now the list has new entries. It boots only with its
    legacy variables, which the window's preconditions keep on `backend` until the contract PR
-   (`JWT_SECRET`, `ACCESS_TOKEN_EXPIRY_HOURS`, `REFRESH_TOKEN_EXPIRY_HOURS`, `ADMIN_EMAILS`):
+   (`JWT_SECRET`, `ACCESS_TOKEN_EXPIRY_HOURS`, `REFRESH_TOKEN_EXPIRY_HOURS`, `ADMIN_EMAILS`,
+   `RESEND_API_KEY`, `FRONTEND_URL`):
    confirm they are set first.
 3. The web service: its recorded ID → **Redeploy** (on staging, the staging web service; in
    production, the legacy web service's record is restored in step 4).

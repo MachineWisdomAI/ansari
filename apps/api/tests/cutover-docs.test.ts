@@ -381,3 +381,36 @@ describe('the deployment guide', () => {
     expect([...positions].sort((a, b) => a - b)).toEqual(positions);
   });
 });
+
+describe('the deployment guide names every variable the new code requires', () => {
+  const guide = read(GUIDE);
+  const runbook = read(RUNBOOK);
+  const section = guide.slice(guide.indexOf('## Before the day'), guide.indexOf('## 1. '));
+  const backend = section.slice(section.indexOf('**`backend`'), section.indexOf('**`auth`'));
+  const auth = section.slice(section.indexOf('**`auth`'), section.indexOf('**The web service'));
+
+  const apiVars = [...(read('apps/api/lib/config.ts').match(/AUTH_SERVICE_VARS = \[([\s\S]*?)\]/)?.[1] ?? '').matchAll(/'([A-Z_]+)'/g)].map((m) => m[1] as string);
+  // Every field of apps/auth's env schema that is not `.optional()`.
+  const authSchema = read('packages/auth/src/env.ts');
+  const fields = [...authSchema.matchAll(/^\s+([A-Z_]+): z/gm)];
+  const authVars = fields
+    .filter((m, i) => !authSchema.slice(m.index, fields[i + 1]?.index ?? authSchema.length).split(/\n\s*\/\//)[0]!.includes('.optional()'))
+    .map((m) => m[1] as string);
+
+  it('reads the lists from the code', () => {
+    expect(apiVars).toEqual(['AUTH_URL', 'AUTH_JWT_ISSUER', 'AUTH_JWT_AUDIENCE', 'AUTH_LAYER_ORIGIN']);
+    expect(authVars).toContain('BETTER_AUTH_SECRET');
+    expect(authVars).not.toContain('SENTRY_DSN');
+    expect(authVars).not.toContain('MARKETMAKER_URL');
+  });
+
+  it.each(['AUTH_URL', 'AUTH_JWT_ISSUER', 'AUTH_JWT_AUDIENCE', 'AUTH_LAYER_ORIGIN'])('backend gets %s, in the guide and in runbook step 1', (name) => {
+    expect(apiVars).toContain(name);
+    expect(backend).toContain(`| \`${name}\` |`);
+    expect(runbook.slice(runbook.indexOf('## 1. '), runbook.indexOf('## 2. '))).toContain(`\`${name}`);
+  });
+
+  it('auth gets every required variable of its env schema', () => {
+    for (const name of authVars) expect(auth, name).toContain(`| \`${name}\` |`);
+  });
+});
