@@ -432,11 +432,14 @@ The last step of the session, right after step 9. In production, the fast-forwar
 and deploys `auth`, `backend` and the web service from this commit.
 
 ```bash
+git fetch origin && [ "$(git rev-parse origin/develop)" = "$(git rev-parse "$PROMOTED_COMMIT")" ] && echo develop-unchanged   # production, before the push
 git fetch origin && git push origin origin/develop:main          # production
 git fetch origin && git diff-tree --quiet "$PROMOTED_COMMIT" origin/main && echo same-tree   # origin/develop on staging
 ```
 
-**Check:** in production, `git rev-parse origin/main` equals `PROMOTED_COMMIT`; on both, the
+**Check:** in production, the first line prints `develop-unchanged` **before** the push (a
+`develop` tip that moved during the session is caught before anything deploys: do not push), and
+afterwards `git rev-parse origin/main` equals `PROMOTED_COMMIT`; on both, the
 `diff-tree` line prints `same-tree` (the deployed tree is the one every script ran from), and a
 deployment of that commit has started on `auth`, `backend` and the web service. Record the commit
 and the session's elapsed time from step 3.
@@ -445,8 +448,11 @@ deploys run code the scripts did not run from: follow [`rollback.md`](rollback.m
 
 ## 11. The deploys: `auth`, `backend` and web
 
-Wait for the three deployments. Until `auth` is healthy, the new `apps/api`'s sign-ins and first
-uses fail closed with `503` (never a grant), and maintenance mode covers it.
+Wait for the three deployments. In production this is the `auth` service's **first build and
+deploy**: the staging rehearsal is what proves the image builds. Until `auth` is healthy, the new
+`apps/api`'s sign-ins and first uses fail closed with `503` (never a grant), and maintenance mode
+covers it. If the `auth` build or deploy fails, the new `apps/api` stays up answering `503` under
+maintenance: that is [`rollback.md`](rollback.md) from step 1.
 
 ```bash
 curl -fsS https://auth.askansari.ai/health

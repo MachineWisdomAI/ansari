@@ -115,6 +115,13 @@ describe('the window runbook', () => {
     const step10 = steps[stepOf(/Promote `develop` to `main`/) - 1] as string;
     expect(step10).toContain('git diff-tree --quiet "$PROMOTED_COMMIT" origin/main && echo same-tree');
     expect(step10).toMatch(/prints `same-tree`/);
+    // Production: develop has not moved during the session, checked before the push (security).
+    const before = step10.indexOf('echo develop-unchanged');
+    expect(before).toBeGreaterThan(0);
+    expect(before).toBeLessThan(step10.indexOf('git push origin origin/develop:main'));
+    const step11 = steps[stepOf(/The deploys: `auth`, `backend` and web/) - 1] as string;
+    expect(step11).toMatch(/first build and\s+deploy/);
+    expect(step11).toMatch(/that is \[`rollback\.md`\]\(rollback\.md\) from step 1/);
     expect(doc).toMatch(/cutover\s+PR is brought current with `develop`/);
   });
 
