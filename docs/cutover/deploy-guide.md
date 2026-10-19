@@ -6,6 +6,14 @@ after step 2, stop and follow [`rollback.md`](rollback.md) (valid until `CUTOVER
 
 Auto-deploy stays **on** throughout. The merge in step 8 is the deploy.
 
+The three Railway services, by their dashboard names:
+
+| Service | Runs | Domain (production) |
+|---|---|---|
+| `backend` | the api (`apps/api`) | `api.askansari.ai`, `api-35.ansari.chat` |
+| `auth` | the auth service (`apps/auth`) | `auth.askansari.ai` (attached in step 7) |
+| the web service | the web app (`apps/frontend`) | the web domain |
+
 ## Before the day (Railway dashboard)
 
 All of these are set before step 2. Auto-deploy is on, so the merge in step 8 deploys whatever
