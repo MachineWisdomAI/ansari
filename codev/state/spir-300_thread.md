@@ -553,3 +553,8 @@ so a terminal test with a logging fake psql was added; that test also catches dr
 The owner also asked whether copy.sh could read its variables from a `.env` file. Not done: H-8
 says the URLs are entered with `read -rs` and never written to a file. That change is the owner's
 call and needs security; it is waiting on the owner.
+Security accepted e8b4c2c and bfb2e92, asking for one sentence: a dry run against staging or
+production runs only under the full operator checks and step 1's hygiene checklist. Added to the
+README and the runbook. Security's position on `.env`, recorded for the owner: production and
+staging URLs stay `read -rs` only. A file is acceptable only under `--allow-local`, and
+operator-env.sh should refuse to source one without it. Holding until the owner decides.

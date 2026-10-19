@@ -49,7 +49,9 @@ production before runbook step 7), the `0000` baseline is applied inside the sam
 rolled back with it, so step 1's empty-database check still holds afterwards. The script then
 checks that the auth database is as it was (no `auth` schema, or zero users and accounts) and
 ends with `copy.sh: dry run audit OK (nothing committed)`. Every operator-environment check still
-runs, because every email and hash still streams through this machine. It combines with
+runs, because every email and hash still streams through this machine. So a dry run against
+staging or production is never casual: it runs only under the full operator checks and runbook
+step 1's hygiene checklist, in the same session discipline as the real copy. It combines with
 `--allow-local`, in either order. Its timing is a fair preview of step 8's.
 
 **What they print.** Ids, counts and md5 checksums. Never a password hash. The preflight

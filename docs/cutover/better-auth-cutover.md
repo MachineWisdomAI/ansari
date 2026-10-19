@@ -78,8 +78,9 @@ read -rs AUTH_DATABASE_URL && export AUTH_DATABASE_URL
 `apps/auth/scripts/cutover/copy.sh --dry-run` runs step 8's copy, guards and audits against the
 real databases and commits nothing. An auth database with no schema gets the `0000` baseline inside
 the rolled-back transaction, so step 1's empty-database check still holds, and the script checks
-that it does. It streams every email and hash through this machine like the real copy, so the same
-hygiene applies, and its timing previews step 8's. It is not a step of the window: in the window,
+that it does. It streams every production email and hash through this machine like the real copy, so it
+is never run casually: only under the full operator checks and step 1's hygiene checklist, in the
+same session discipline as the real copy. Its timing previews step 8's. It is not a step of the window: in the window,
 step 8 runs `copy.sh` without the flag.
 
 **`psql`.** Every `psql` that applies a migration is `psql -X -v ON_ERROR_STOP=1 --single-transaction -f <file>`:
