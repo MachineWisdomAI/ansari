@@ -36,7 +36,7 @@ backend in more depth.
 
 This is a **pnpm workspace** (`apps/api/` + `apps/frontend/`) driven by
 **[Turborepo](https://turborepo.com)**: install once at the repo root, then run
-tasks from the root — `pnpm dev` brings up **both** apps at once.
+tasks from the root — `pnpm dev` brings up the whole stack (api, auth, frontend) at once.
 
 ```bash
 corepack enable         # provides pnpm (version pinned in package.json)
@@ -48,14 +48,42 @@ cp .env.example .env    # see docs/self-hosting.md for the full env contract
 pnpm db:migrate         # needs a local Postgres and DATABASE_URL
 cd ../..
 
-# Then, from the repo root: starts BOTH apps together
+# One-time auth setup: a SECOND local database, never the app's
+createdb ansari_auth
+cd apps/auth
+cp .env.example .env    # DATABASE_URL = the ansari_auth owner URL; the service's
+                        # startup error names any variable still missing
+pnpm db:migrate         # applies packages/auth/drizzle/ to that DATABASE_URL
+cd ../..
+
+# Then, from the repo root: starts api (:3000), auth (:3100) and frontend together
 pnpm dev
 ```
 
+`pnpm dev` includes `apps/auth`. Without its `.env`, auth's pane shows the
+env-validation error naming the missing variables and the other apps keep
+running; `pnpm dev:no-auth` starts api + frontend only. The frontend talks to
+**staging** unless `EXPO_PUBLIC_API_URL=http://localhost:3000` and
+`EXPO_PUBLIC_AUTH_URL=http://localhost:3100` are set.
+
+**Two databases.** Development and CI use two: the app database (`apps/api`,
+e.g. `ansari`) and the auth database (`apps/auth`, e.g. `ansari_auth`), each
+with its own owner URL. `apps/api` never reads the auth database; it reaches
+`apps/auth` over HTTP at its origin, like any client, so set its
+`AUTH_URL=http://localhost:3100` (apps/auth serves `:3100`). No secret is
+shared between the two. An auth database you set up earlier by
+applying `0000_auth_schema.sql` with psql has no drizzle journal row, so
+`db:migrate` re-runs `0000` against it and fails (drizzle-kit prints no
+reason); drop and recreate `ansari_auth`
+(local data only) and migrate again. **If you applied the old `packages/auth`
+`0000` migration** (before spec 300), drop and recreate your local auth
+database and apply the new `0000`: the journal was replaced, not extended.
+The test suites need neither database (they run on pglite).
+
 `pnpm dev` needs a real terminal: it runs Turbo's interactive UI so the Expo dev
 server keeps its keypress shortcuts (`i`, `a`, `w`, `r`) while sharing a console
-with the API. To run one app on its own — or in a script or non-TTY shell — use
-`pnpm api dev` or `pnpm frontend start`.
+with the API and auth. To run one app on its own — or in a script or non-TTY shell — use
+`pnpm api dev`, `pnpm auth dev` or `pnpm frontend start`.
 
 **Use pnpm, not npm or yarn.** The single authoritative lockfile is the root
 `pnpm-lock.yaml`; there are deliberately no per-package lockfiles. Shared

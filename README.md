@@ -35,13 +35,14 @@ cp .env.example .env   # fill in — see docs/self-hosting.md for the full contr
 pnpm db:migrate
 cd ../..
 
-# Then, from the repo root: starts BOTH the API and the app
+# Then, from the repo root: starts the API, the auth service and the app
+# (auth needs its own one-time setup: see CONTRIBUTING.md)
 pnpm dev
 ```
 
 `pnpm dev` needs a real terminal (it uses Turbo's interactive UI so the Expo
-keypress shortcuts keep working). For a single app: `pnpm api dev`, or
-`pnpm frontend web` for the web target.
+keypress shortcuts keep working). For a single app: `pnpm api dev`, `pnpm auth dev`, or
+`pnpm frontend web` for the web target; `pnpm dev:no-auth` skips the auth service.
 
 See [`docs/self-hosting.md`](docs/self-hosting.md) for prerequisites, the complete
 environment-variable contract, and deployment notes.
