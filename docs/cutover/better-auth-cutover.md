@@ -69,6 +69,11 @@ read -rs AUTH_DATABASE_URL && export AUTH_DATABASE_URL
 - **The operator scripts** run from the same checkout:
   `(cd apps/auth && DATABASE_URL="$AUTH_DATABASE_URL" pnpm exec tsx scripts/grant-admin.ts …)`
   (and `ban-user.ts`). They need no `psql`, and they also run in the auth image.
+- **The checkout is the `builder-spir-300` worktree** (owner, 2026-10-19). It is **not** cleaned
+  up after #315 merges: it stays until the production cutover is done. If it is gone by then, the
+  fallback is a fresh checkout of `develop` at the commit being promoted.
+- **The builder is idle during each window:** no edits and no git operations in that worktree.
+  Nothing checks the checkout any more, so an edit made mid-window would run unnoticed.
 - **The session ends with the window:** `exit` the shell, which takes the URLs with it. They are
   never set on a service and never written to a file.
 

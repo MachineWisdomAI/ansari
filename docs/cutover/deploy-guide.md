@@ -66,13 +66,17 @@ before, and check that `backend` is healthy afterwards. Production values are sh
 
 ```bash
 tailscale status                                   # the forwarder is listed
-cd <repo>                                          # at the commit being deployed (staging: the cutover PR's head)
+cd <repo>                                          # the builder-spir-300 worktree, at the commit being deployed
 set +o history
 export CUTOVER_ENV=production                      # or staging
 read -rs APP_DATABASE_URL && export APP_DATABASE_URL     # paste at the prompt
 read -rs AUTH_DATABASE_URL && export AUTH_DATABASE_URL
 export API=https://api.askansari.ai AUTH=https://auth.askansari.ai   # staging: api-staging / auth-staging
 ```
+
+Tell the builder before you start: it makes no edits and no git operations in that worktree until
+the window ends. Keep the worktree until the production cutover is done; if it is gone, use a
+fresh checkout of `develop` at the commit being promoted.
 
 **Both database URLs must go through the Tailscale forwarder, or the scripts reject them.**
 Railway's own URLs will not work. The scripts refuse `DATABASE_URL` (`*.railway.internal`, which

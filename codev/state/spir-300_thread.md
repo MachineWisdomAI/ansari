@@ -608,3 +608,9 @@ and rehearsal-anomalies.ts, their tests, the runbook, the guide, rehearsal.md, r
 scripts README. Step 10's develop-unchanged and same-tree checks stay, against the checkout's HEAD.
 Spec carries an owner amendment naming the residual (an uncommitted script edit would run
 unnoticed). Security told.
+
+## 2026-10-19: the window runs from this worktree (main, via security)
+
+This worktree is the operator checkout. It is not cleaned up after #315 merges; it stays until
+the production cutover is done (fallback: a fresh checkout of develop at the promoted commit).
+During each window the builder makes no edits and runs no git operations here.
