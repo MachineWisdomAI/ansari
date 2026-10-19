@@ -65,7 +65,7 @@ the code no longer has them.
 | Window: smoke tests on the private network (step 11), the auth domain attached last (step 15) | The auth domain is attached right after step 10, before `apps/api` deploys, with a DNS precheck and a certificate check (runbook step 11) |
 | A direct call could not delete without the credential | A direct `DELETE /api/account` leaves the app row: the owner-accepted residual H-6, with its operator response in the runbook |
 | `ADMIN_EMAILS`: reservation at sign-up, boot assertion (phase 5) | Gone (H-7); `grant-admin.ts` shows the account, then grants by `--confirm <id>` |
-| The cutover runs inside the auth image (`railway ssh`, the marker, psql from PGDG; phases 11 and 12) | The owner's machine over Tailscale, from the promoted commit's clean checkout (H-8): `operator-env.sh` checks the hosts, psql 18, the checkout and the terminal; the image is the service only |
+| The cutover runs inside the auth image (`railway ssh`, the marker, psql from PGDG; phases 11 and 12) | The owner's machine over Tailscale, (H-8): `operator-env.sh` checks the hosts, psql 18 and the terminal (the checkout check was removed by the owner, 2026-10-19); the image is the service only |
 
 Tests: `apps/auth/tests/account.test.ts` (each `DELETE` branch, live `sid`, forged tokens, planted
 keys, per-user budgets, outage 500), `apps/auth/tests/limits.test.ts` ("the layer's view", R1, shown

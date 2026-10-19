@@ -45,9 +45,9 @@ A clone would have shown two things that staging cannot:
 - Postgres 18 on both the staging app and auth servers. `psql --version` on the owner's machine
   reports 18 (the window's step 1 precondition, rehearsed).
 - **The operator environment is the window's (spec H-8), and the rehearsal proves it, not only
-  the SQL:** the owner's machine, staging's Tailscale forwarder (the runbook's two mappings), the clean
-  checkout of the cutover PR's head as `PROMOTED_COMMIT` (current with `develop`; step 10 checks the
-  merge commit's tree equals it), staging's two URLs entered with
+  the SQL:** the owner's machine, staging's Tailscale forwarder (the runbook's two mappings), a checkout
+  of the cutover PR's head (current with `develop`; step 10 checks the merge commit's tree equals
+  it), staging's two URLs entered with
   `read -rs`, the step 1 hygiene checklist, and the TLS probe recorded. Record the timings of the
   copy and the audits from this machine: the production window's estimate scales from them.
 

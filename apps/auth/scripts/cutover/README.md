@@ -8,8 +8,7 @@ file says what each piece is.
 
 **Where they run (spec 300 amendment H-8).** On **the owner's machine**, over the owner's
 Railway's Tailscale forwarder (a service on the owner's tailnet that relays a port to each
-database's private host; the runbook's operator environment), from a **clean checkout of the promoted commit**
-(the runbook's "operator environment"). The auth image carries no Postgres client. `copy.sh` and
+database's private host; the runbook's operator environment). The auth image carries no Postgres client. `copy.sh` and
 `complete-tombstones.sh` source `operator-env.sh`, which refuses, before any database call:
 - a missing, empty or identical `APP_DATABASE_URL` / `AUTH_DATABASE_URL`;
 - a `CUTOVER_ENV` that is not `production` or `staging` (set at runbook step 1, read back aloud);
@@ -19,11 +18,10 @@ database's private host; the runbook's operator environment), from a **clean che
   (`*.proxy.rlwy.net`), `<name>.railway.internal` (it resolves only inside Railway), IPs, the
   other environment's forwarder and every other host are refused;
 - a `psql` that is not major 18;
-- a dirty checkout, or a HEAD that is not `PROMOTED_COMMIT`;
 - stdout that is not a terminal.
 
 It warns when a URL carries no `sslmode=require`; the runbook records whether TLS is offered on
-the path. `rehearsal-anomalies.ts` makes the same host and checkout checks, and also needs
+the path. `rehearsal-anomalies.ts` makes the same host check, and also needs
 `CUTOVER_ENV=staging` and staging's forwarder (`<project>-staging-tailscale-forwarder`).
 `--allow-local` needs no `CUTOVER_ENV`.
 
@@ -33,8 +31,7 @@ must be loopback (`localhost`, `127.0.0.1`, `::1`). Loopback is not the same as 
 tunnel or port-forward on loopback (`railway connect`, `ssh -L`, a Tailscale forward) would make
 `localhost` reach a Railway database, so **never run `--allow-local` while any tunnel or
 port-forward to a Railway database is open**. It is for throwaway local clusters. Every other
-check still runs (psql 18, a clean checkout at
-`PROMOTED_COMMIT`, a terminal), and the run prints `LOCAL TEST RUN` on stderr. Any other argument
+check still runs (psql 18, a terminal), and the run prints `LOCAL TEST RUN` on stderr. Any other argument
 is refused. Never pass it in the window.
 
 Both URLs are entered with `read -rs` for the session only: never set on a Railway service,

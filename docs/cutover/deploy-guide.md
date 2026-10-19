@@ -66,10 +66,8 @@ before, and check that `backend` is healthy afterwards. Production values are sh
 
 ```bash
 tailscale status                                   # the forwarder is listed
-git -C <repo> fetch origin && git -C <repo> checkout --detach <promoted commit>
-cd <repo> && git status --porcelain                # prints nothing
+cd <repo>                                          # at the commit being deployed (staging: the cutover PR's head)
 set +o history
-export PROMOTED_COMMIT=<promoted commit>           # staging: the cutover PR's head
 export CUTOVER_ENV=production                      # or staging
 read -rs APP_DATABASE_URL && export APP_DATABASE_URL     # paste at the prompt
 read -rs AUTH_DATABASE_URL && export AUTH_DATABASE_URL
@@ -155,9 +153,9 @@ curl -s -o /dev/null -w '%{http_code}' $AUTH/health   # 404 or 502; never 200, n
   PR for everyone but admins, so only an **admin** can run it (as in `RELEASE.md`'s promotion):
 
 ```bash
-git fetch origin && [ "$(git rev-parse origin/develop)" = "$(git rev-parse "$PROMOTED_COMMIT")" ] && echo develop-unchanged   # production, before the push
+git fetch origin && [ "$(git rev-parse origin/develop)" = "$(git rev-parse HEAD)" ] && echo develop-unchanged   # production, before the push
 git fetch origin && git push origin origin/develop:main          # production
-git fetch origin && git diff-tree --quiet "$PROMOTED_COMMIT" origin/main && echo same-tree   # origin/develop on staging
+git fetch origin && git diff-tree --quiet HEAD origin/main && echo same-tree   # origin/develop on staging
 ```
 
 Auto-deploy builds `auth`, `backend` and the web service. Wait until all three are healthy.

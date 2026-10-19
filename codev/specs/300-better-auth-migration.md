@@ -193,6 +193,14 @@ This spec defines WHAT and WHY. The plan defines HOW and WHEN.
 >   its recorded deployment, together. Auto-deploy comes back only when the branch carries a revert
 >   PR or the forward fix.
 >
+> **Owner amendment, 2026-10-19, at the pr gate: the checkout is not checked** (owner decision,
+> "irrelevant complexity"). This amends H-8: the operator scripts no longer require
+> `PROMOTED_COMMIT`, a clean checkout, or a HEAD equal to it, and the runbook no longer asks for a
+> detached clean checkout. The scripts may run from any checkout of the commit being deployed. Step
+> 10 still checks, before the push, that `develop` is the checkout's `HEAD` (production) and,
+> after the merge, that the deployed tree equals the checkout's `HEAD`. Residual: an uncommitted
+> edit to a cutover script or SQL file in that checkout would run unnoticed.
+>
 > **Lineage.** This spec is written for issue #300. Its evidence base is the issue #60 reference
 > spec and plan (`codev/specs/60-better-auth-migration-reference.md`,
 > `codev/plans/60-better-auth-migration-reference.md`), updated in #299 against better-auth 1.7.7.

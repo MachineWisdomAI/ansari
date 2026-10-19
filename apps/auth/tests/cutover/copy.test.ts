@@ -607,13 +607,12 @@ describe('the staging anomaly seed (rehearsal-anomalies.ts), through the rehears
   const ok = {
     cutoverEnv: 'staging',
     appHost: 'ansari-staging-tailscale-forwarder',
-    checkout: 'ok' as const,
     stdoutIsTTY: false,
     command: 'seed',
     password: 'x'.repeat(12),
   };
 
-  it("refuses anything but staging, a host that is not staging's forwarder, a bad checkout, a terminal, an unknown command or a short password", () => {
+  it("refuses anything but staging, a host that is not staging's forwarder, a terminal, an unknown command or a short password", () => {
     expect(refusal(ok)).toBeNull();
     expect(refusal({ ...ok, command: 'remove', password: undefined })).toBeNull();
     expect(refusal({ ...ok, cutoverEnv: 'production' })).toMatch(/anything but staging .*'production'/);
@@ -636,9 +635,6 @@ describe('the staging anomaly seed (rehearsal-anomalies.ts), through the rehears
     for (const host of ['ansari-staging-tailscale-forwarder-2', 'ansari-staging-tailscale-forwarder.tail1234.ts.net']) {
       expect(refusal({ ...ok, appHost: host }), host).toBeNull();
     }
-    expect(refusal({ ...ok, checkout: 'dirty' })).toMatch(/uncommitted/);
-    expect(refusal({ ...ok, checkout: 'not-promoted' })).toMatch(/PROMOTED_COMMIT/);
-    expect(refusal({ ...ok, checkout: 'no-commit' })).toMatch(/PROMOTED_COMMIT is unset/);
     expect(refusal({ ...ok, stdoutIsTTY: true })).toMatch(/terminal/);
     expect(refusal({ ...ok, command: 'drop' })).toMatch(/usage/);
     expect(refusal({ ...ok, password: 'x'.repeat(11) })).toMatch(/REHEARSAL_PASSWORD/);
@@ -846,31 +842,20 @@ describe('rollback: remove post-cutover users (docs/cutover/rollback.md)', () =>
 });
 
 describe('copy.sh and complete-tombstones.sh: the operator-environment check (spec 300 H-8)', () => {
-  // Each script runs from a throwaway clean checkout (the cutover directory
-  // committed in a temp repo) with a fake psql on PATH. The check exits before
+  // Each script runs from a throwaway copy of the cutover directory with a
+  // fake psql on PATH. The check exits before
   // any real database call; the fake psql logs every call that is not
   // --version, so a run that passed the check shows up in the log.
   let repo: string;
   let bin: string;
   let log: string;
-  let commit: string;
   const SCRIPTS = resolve(here, '../../scripts/cutover');
-
-  const git = (...args: string[]) => {
-    const r = spawnSync('git', ['-C', repo, ...args], { encoding: 'utf8' });
-    if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
-    return r.stdout.trim();
-  };
 
   beforeEach(() => {
     repo = mkdtempSync(resolve(tmpdir(), 'cutover-checkout-'));
     bin = mkdtempSync(resolve(tmpdir(), 'cutover-bin-'));
     log = resolve(bin, 'psql.log');
     cpSync(SCRIPTS, resolve(repo, 'cutover'), { recursive: true });
-    git('init', '-q');
-    git('-c', 'user.email=t@example.com', '-c', 'user.name=t', 'add', '.');
-    git('-c', 'user.email=t@example.com', '-c', 'user.name=t', 'commit', '-q', '-m', 'promoted');
-    commit = git('rev-parse', 'HEAD');
     writeFileSync(
       resolve(bin, 'psql'),
       `#!/usr/bin/env bash\nif [ "$1" = "--version" ]; then echo "psql (PostgreSQL) \${FAKE_PSQL_MAJOR:-18}.0"; exit 0; fi\necho "called $#" >> "${log}"\nexit 3\n`
@@ -888,7 +873,6 @@ describe('copy.sh and complete-tombstones.sh: the operator-environment check (sp
     APP_DATABASE_URL: 'postgresql://u:p@ansari-production-tailscale-forwarder:5432/railway?sslmode=require',
     AUTH_DATABASE_URL: 'postgresql://u:p@ansari-production-tailscale-forwarder:5433/railway?sslmode=require',
     CUTOVER_ENV: 'production',
-    PROMOTED_COMMIT: commit,
   });
   const staging = () => ({
     ...good(),
@@ -935,8 +919,6 @@ describe('copy.sh and complete-tombstones.sh: the operator-environment check (sp
       ['the same forwarder, short and full name (still two host names)', { ...good(), AUTH_DATABASE_URL: 'postgresql://u:p@ansari-production-tailscale-forwarder.tail1234.ts.net:5433/railway' }, /name different hosts/],
       ['identical staging URLs', { ...staging(), AUTH_DATABASE_URL: staging().APP_DATABASE_URL }, /same database/],
       ['psql 17', { ...good(), FAKE_PSQL_MAJOR: '17' }, /psql must be major 18 .*17/],
-      ['no PROMOTED_COMMIT', { ...good(), PROMOTED_COMMIT: undefined }, /PROMOTED_COMMIT is unset/],
-      ['HEAD is not the promoted commit', { ...good(), PROMOTED_COMMIT: 'HEAD~0^' }, /HEAD is not PROMOTED_COMMIT/],
       ['stdout not a terminal', good(), /stdout redirected/],
     ];
     for (const [label, env, message] of cases) {
@@ -951,7 +933,6 @@ describe('copy.sh and complete-tombstones.sh: the operator-environment check (sp
   const local = () => ({
     APP_DATABASE_URL: 'postgresql://u:p@localhost:5432/copy_app',
     AUTH_DATABASE_URL: 'postgresql://u:p@127.0.0.1:5432/copy_auth',
-    PROMOTED_COMMIT: commit,
   });
 
   it.each(['copy.sh', 'complete-tombstones.sh'])('%s --allow-local: loopback only, every other check still runs', (name) => {
@@ -962,7 +943,6 @@ describe('copy.sh and complete-tombstones.sh: the operator-environment check (sp
       ['a near-miss host', { ...local(), APP_DATABASE_URL: 'postgresql://u:p@localhost.evil.com/app' }, ['--allow-local'], /not loopback/],
       ['the same database', { ...local(), AUTH_DATABASE_URL: local().APP_DATABASE_URL }, ['--allow-local'], /same database/],
       ['psql 17', { ...local(), FAKE_PSQL_MAJOR: '17' }, ['--allow-local'], /psql must be major 18/],
-      ['no PROMOTED_COMMIT', { ...local(), PROMOTED_COMMIT: undefined }, ['--allow-local'], /PROMOTED_COMMIT is unset/],
       ['stdout not a terminal', local(), ['--allow-local'], /stdout redirected/],
       ['an unknown argument', local(), ['--allow-anything'], /unknown argument/],
       ['a second argument', local(), ['--allow-local', '--allow-local'], /unknown argument/],
@@ -1053,20 +1033,15 @@ describe('copy.sh and complete-tombstones.sh: the operator-environment check (sp
     expect(out).not.toMatch(/refusing|not loopback|PROMOTED_COMMIT|uncommitted|u:p@/);
   });
 
-  it.each(['copy.sh', 'complete-tombstones.sh'])('%s: a dirty checkout is refused', (name) => {
-    writeFileSync(resolve(repo, 'cutover', '02-import-auth.sql'), '-- edited after promotion\n');
-    const result = run(name, good());
-    expect(result.status).toBe(2);
-    expect(result.stderr).toMatch(/uncommitted changes/);
-    expect(psqlCalls()).toBe('');
-  });
-
   it.each([
     ['copy.sh', 'production'],
     ['complete-tombstones.sh', 'production'],
     ['copy.sh', 'staging'],
     ['complete-tombstones.sh', 'staging'],
   ])('%s: in a terminal, with everything right (%s), it passes the check', (name, env) => {
+    // Not a git checkout, with an untracked file: the checkout is not checked
+    // (owner, 2026-10-19), so this still passes.
+    writeFileSync(resolve(repo, 'cutover', 'untracked-notes.md'), 'notes\n');
     const target = resolve(repo, 'cutover', name);
     const [cmd, args] =
       process.platform === 'darwin'

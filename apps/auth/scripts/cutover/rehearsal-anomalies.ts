@@ -10,7 +10,7 @@
  *   CUTOVER_ENV=staging ./node_modules/.bin/tsx scripts/cutover/rehearsal-anomalies.ts seed \
  *     | psql "$APP_DATABASE_URL" -X -q -v ON_ERROR_STOP=1 --single-transaction
  *
- * (REHEARSAL_PASSWORD, APP_DATABASE_URL and PROMOTED_COMMIT are already in the
+ * (REHEARSAL_PASSWORD and APP_DATABASE_URL are already in the
  * session, entered with `read -rs`.)
  *
  * Commands, in the rehearsal's order (docs/cutover/rehearsal.md):
@@ -21,14 +21,13 @@
  *   remove             delete every rehearsal row (threads etc. go with the cascade)
  *
  * Runs on the owner's machine through the Tailscale forwarder (spec 300
- * amendment H-8), from the promoted commit's clean checkout, against STAGING
+ * amendment H-8), against STAGING
  * only, on two counts: CUTOVER_ENV=staging (the same variable copy.sh reads),
  * and the forwarder's machine name, which Railway derives from the
  * environment, must be staging's (`<project>-staging-tailscale-forwarder`).
  * Both are names, not proof (an owner-accepted residual): a forwarder whose
  * mapping points at production's database would still pass.
  */
-import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 
 // apps/auth depends on bcrypt but not on its type package (the library code
@@ -91,7 +90,6 @@ export const MIN_PASSWORD_LENGTH = 12;
 export function refusal(input: {
   cutoverEnv: string | undefined;
   appHost: string | null;
-  checkout: 'ok' | 'dirty' | 'not-promoted' | 'no-commit' | 'no-git';
   stdoutIsTTY: boolean;
   command: string | undefined;
   password: string | undefined;
@@ -103,10 +101,6 @@ export function refusal(input: {
     return "APP_DATABASE_URL points at Railway's public TCP proxy; use staging's Tailscale forwarder (<project>-staging-tailscale-forwarder)";
   if (!isForwarderHost(input.appHost, 'staging'))
     return "APP_DATABASE_URL's host is not staging's Tailscale forwarder (<project>-staging-tailscale-forwarder): the seed runs on staging only";
-  if (input.checkout === 'no-git') return 'not inside a git checkout';
-  if (input.checkout === 'no-commit') return 'PROMOTED_COMMIT is unset (the commit the window recorded)';
-  if (input.checkout === 'dirty') return 'the checkout has uncommitted changes';
-  if (input.checkout === 'not-promoted') return 'HEAD is not PROMOTED_COMMIT';
   if (!input.command || !(COMMANDS as readonly string[]).includes(input.command))
     return `usage: rehearsal-anomalies.ts <${COMMANDS.join('|')}> | psql "$APP_DATABASE_URL" -X -q -v ON_ERROR_STOP=1 --single-transaction`;
   if (input.stdoutIsTTY) return 'refusing to print to a terminal: pipe the output into psql';
@@ -161,32 +155,12 @@ INSERT INTO public.users (id, email, password_hash, first_name, last_name, creat
   }
 }
 
-/** The checkout this runs from must be clean and at PROMOTED_COMMIT, as operator-env.sh checks. */
-export function checkoutState(promoted: string | undefined, cwd: string): 'ok' | 'dirty' | 'not-promoted' | 'no-commit' | 'no-git' {
-  const git = (...args: string[]) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8' }).trim();
-  try {
-    git('rev-parse', '--show-toplevel');
-  } catch {
-    return 'no-git';
-  }
-  if (!promoted) return 'no-commit';
-  if (git('status', '--porcelain') !== '') return 'dirty';
-  let wanted = '';
-  try {
-    wanted = git('rev-parse', '--verify', '--quiet', `${promoted}^{commit}`);
-  } catch {
-    return 'not-promoted';
-  }
-  return git('rev-parse', 'HEAD') === wanted ? 'ok' : 'not-promoted';
-}
-
 async function main(): Promise<void> {
   const command = process.argv[2];
   const password = process.env.REHEARSAL_PASSWORD;
   const refused = refusal({
     cutoverEnv: process.env.CUTOVER_ENV,
     appHost: urlHost(process.env.APP_DATABASE_URL),
-    checkout: checkoutState(process.env.PROMOTED_COMMIT, import.meta.dirname),
     stdoutIsTTY: Boolean(process.stdout.isTTY),
     command,
     password,

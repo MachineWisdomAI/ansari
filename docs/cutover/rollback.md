@@ -17,7 +17,7 @@ with the legacy password. Step 6 checks one such client.
 
 Each step: what to run, the mechanical **check**, and what to do if it fails. Database steps run
 from the window runbook's operator environment (spec H-8): the owner's machine over the Tailscale
-route, the promoted commit's clean checkout, and both URLs entered with `read -rs` for that
+route, a checkout of the deployed commit, and both URLs entered with `read -rs` for that
 session only.
 
 **The mechanism (main, M2).** Auto-deploy is on for `backend`, the web service and `auth`

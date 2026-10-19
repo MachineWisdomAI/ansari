@@ -599,3 +599,12 @@ Main's conditions folded in:
 My addition: staging `auth` runs the PIR #59 code, so its deployment is removed before step 9, and
 step 9 expects 404 or 502 (a 200 means something is live). Docs pins went 53 → 55, and seven
 mutations were each caught. The spec amendment, the review residual and `RELEASE.md` are updated.
+
+## 2026-10-19: checkout checks removed (owner)
+
+Owner: the PROMOTED_COMMIT / clean-checkout checks are "irrelevant complexity"; the owner runs the
+window from the builder worktree, which always has untracked files. Removed from operator-env.sh
+and rehearsal-anomalies.ts, their tests, the runbook, the guide, rehearsal.md, rollback.md and the
+scripts README. Step 10's develop-unchanged and same-tree checks stay, against the checkout's HEAD.
+Spec carries an owner amendment naming the residual (an uncommitted script edit would run
+unnoticed). Security told.

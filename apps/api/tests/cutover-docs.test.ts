@@ -119,9 +119,9 @@ describe('the window runbook', () => {
     expect(doc).toMatch(/\*\*The web service has both build variables set before step 10\*\*/);
   });
 
-  it('step 10 checks the deployed tree is PROMOTED_COMMIT (W5, M5)', () => {
+  it('step 10 checks the deployed tree is the checkout the scripts ran from (W5, M5)', () => {
     const step10 = steps[stepOf(/Promote `develop` to `main`/) - 1] as string;
-    expect(step10).toContain('git diff-tree --quiet "$PROMOTED_COMMIT" origin/main && echo same-tree');
+    expect(step10).toContain('git diff-tree --quiet HEAD origin/main && echo same-tree');
     expect(step10).toMatch(/prints `same-tree`/);
     // Production: develop has not moved during the session, checked before the push (security).
     const before = step10.indexOf('echo develop-unchanged');
@@ -165,9 +165,10 @@ describe('the window runbook', () => {
     expect(admins).not.toMatch(/set `ADMIN_EMAILS`/);
   });
 
-  it("names the operator environment: the owner's machine through the Tailscale forwarder, a clean promoted checkout (H-8)", () => {
+  it("names the operator environment: the owner's machine through the Tailscale forwarder (H-8)", () => {
     expect(doc).toContain('**The operator environment (spec H-8).**');
-    expect(doc).toContain('export PROMOTED_COMMIT=<promoted commit>');
+    // The checkout is not checked (owner, 2026-10-19): no PROMOTED_COMMIT and no clean-checkout gate.
+    expect(doc).not.toMatch(/PROMOTED_COMMIT|git status --porcelain/);
     expect(doc).toContain('read -rs APP_DATABASE_URL && export APP_DATABASE_URL');
     expect(doc).toContain('set +o history');
     expect(doc).toMatch(/`<project>-<environment>-tailscale-forwarder`/);

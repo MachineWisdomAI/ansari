@@ -416,11 +416,10 @@ to 7, and main added a to e. This supersedes the earlier "inside the auth image 
     forwarder): the public proxy `*.proxy.rlwy.net` is refused, and so is `*.railway.internal`,
     any other host, a bare IP, or a near-miss like `…-tailscale-forwarder.evil.com`;
   - a `psql` that is not major 18;
-  - a missing `PROMOTED_COMMIT`, a HEAD other than it, or a dirty checkout;
   - stdout that is not a terminal.
 
   It warns when a URL has no `sslmode=require`. `copy.test.ts` negative-tests each refusal
-  against a throwaway clean checkout with a fake `psql`, and asserts that no URL is echoed and
+  against a throwaway copy of the scripts with a fake `psql`, and asserts that no URL is echoed and
   `psql` is never called. A positive run under a real pseudo-terminal (`script`) gets past the
   check.
 - [x] The rehearsal seed checks the same host and checkout, and needs `CUTOVER_ENV=staging`
@@ -444,7 +443,7 @@ to 7, and main added a to e. This supersedes the earlier "inside the auth image 
     `exit` at the end;
   - step 1 gains the hygiene checklist: full-disk encryption, the route up, TLS recorded, URLs
     via `read -rs` only, history off, no session recording (`script`, asciinema, iTerm2
-    logging), screen sharing off, the checkout clean at `PROMOTED_COMMIT`, the session closed;
+    logging), screen sharing off, the session closed (the clean-checkout item was removed by the owner, 2026-10-19);
   - steps 6, 7, 9 and 10, rollback.md, rehearsal.md (the same machine path, and its timings
     recorded), the scripts README ("01-export is never run by hand") and RELEASE.md are updated.
 - [x] Main's scan: `railway ssh` and `/etc/ansari-auth-image` went from 13 hits in five files to

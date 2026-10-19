@@ -10,7 +10,7 @@ The commands alone, in order, are in [`deploy-guide.md`](deploy-guide.md).
 
 **The operator environment (spec H-8).** Every database step runs on **the owner's machine**, in
 one terminal session, through **Railway's Tailscale forwarder** (docs.railway.com, "Set up a
-Tailscale forwarder"), from a **clean checkout of `PROMOTED_COMMIT`** (step 1 names it).
+Tailscale forwarder"), from a checkout of the commit being deployed (step 10 checks it).
 
 **The forwarder.** A Railway service in the environment being cut over (staging for the
 rehearsal, production for the window) that joins the owner's tailnet and relays ports to the
@@ -38,10 +38,8 @@ and nowhere else.
 
 ```bash
 tailscale status                                   # up, and the environment's forwarder is listed
-git -C <repo> fetch origin && git -C <repo> checkout --detach <promoted commit>
-cd <repo> && git status --porcelain                # prints nothing: a clean checkout
+cd <repo>                                          # at the commit being deployed (staging: the cutover PR's head)
 set +o history                                     # shell history off for this session
-export PROMOTED_COMMIT=<promoted commit>           # the scripts refuse any other HEAD
 export CUTOVER_ENV=production                      # staging in the rehearsal; read it back aloud
 echo "$CUTOVER_ENV"                                # say the word aloud before going on
 read -rs APP_DATABASE_URL && export APP_DATABASE_URL     # pasted at the prompt, never typed as a command
@@ -54,8 +52,7 @@ read -rs AUTH_DATABASE_URL && export AUTH_DATABASE_URL
   rehearsal seed refuse Railway's public TCP proxy (`*.proxy.rlwy.net`), `<name>.railway.internal`
   (it resolves only inside Railway), IPs and every other host. The seed also requires staging's
   forwarder (`<project>-staging-tailscale-forwarder`). They also refuse a `psql` that is not
-  major 18, a dirty checkout, a HEAD that is not `PROMOTED_COMMIT`, and stdout that is not a
-  terminal (`apps/auth/scripts/cutover/operator-env.sh`).
+  major 18, and stdout that is not a terminal (`apps/auth/scripts/cutover/operator-env.sh`).
 - **TLS on the path.** Append `sslmode=require` to both URLs, then
   `psql "$APP_DATABASE_URL" -X -At -c "select ssl from pg_stat_ssl where pid = pg_backend_pid()"`
   (and the same for `$AUTH_DATABASE_URL`) must print `t`. The forwarder relays plain TCP, so TLS,
@@ -96,8 +93,8 @@ commit, every SQL file with the commit it was applied from, `cutover_at`, every 
 **Freeze.** From the merge of the cutover PR to the end of the production window, **nothing**
 merges to `develop` except the staging rehearsal's docs-only evidence PR (owner amendment R-2).
 So the staging rehearsal runs on exactly what production receives. Before its merge, the cutover
-PR is brought current with `develop` and nothing else merges ahead of it: staging's
-`PROMOTED_COMMIT` is the PR head, and step 10 checks that the merge commit's tree equals it.
+PR is brought current with `develop` and nothing else merges ahead of it: on staging the
+scripts run from the PR head, and step 10 checks that the merge commit's tree equals it.
 
 **Auto-deploy stays on (owner decision, 2026-10-19).** Railway deploys `backend`, the web
 service and `auth` from the branch on every push, and nothing turns that off. So the new code's
@@ -128,7 +125,7 @@ promote `develop`. Each step is run as written, except for these differences:
 | Production | Staging rehearsal |
 |---|---|
 | Step 10 promotes `develop` to `main`; Railway auto-deploys `auth`, `backend` and web from `main` | Step 10 **merges the cutover PR** to `develop`; Railway auto-deploys the staging services from `develop` |
-| `PROMOTED_COMMIT` is the `develop` tip about to be promoted | `PROMOTED_COMMIT` is the **cutover PR's head**, current with `develop` (the freeze); step 10 checks that the merge commit's tree equals it |
+| The scripts run from the `develop` tip about to be promoted | The scripts run from the **cutover PR's head**, current with `develop` (the freeze); step 10 checks that the merge commit's tree equals it |
 | The operator environment, with production's URLs | The **same machine, forwarder setup and checkout path**, with staging's forwarder and URLs (the rehearsal proves this environment, not only the SQL); `CUTOVER_ENV=staging`, which the seed also requires |
 | `api.askansari.ai`, `api-35.ansari.chat`; `auth.askansari.ai`; the production web domain | `api-staging.askansari.ai`; `auth-staging.askansari.ai`; the staging web domain. Service names are on main's sheet |
 | The `auth` service is created for the window with no deployment, or found with none | Staging `auth` already exists and runs the PIR #59 code: **remove its active deployment before step 9** (record its ID), so the domain attached in step 9 serves nothing until the merge deploys the new code |
@@ -175,9 +172,9 @@ forward run, `rehearsal-anomalies.ts remove | psql …` deletes the seeded rows.
   service and the `auth` service (`none` if it has no deployment). On staging there is no legacy
   web, so record the staging web service instead. Rollback step 3 returns each service to exactly
   these, never to one picked by eye from a list that by then has new entries.
-- **`PROMOTED_COMMIT` is recorded:** in production, the `develop` tip about to be promoted (the
-  cutover PR's merge, or a later `develop` commit carrying no migration); on the staging run, the
-  cutover PR's head, current with `develop`. Every script and SQL file in steps 3 to 9 runs from
+- **The commit being deployed is recorded:** in production, the `develop` tip about to be
+  promoted (the cutover PR's merge, or a later `develop` commit carrying no migration); on the
+  staging run, the cutover PR's head, current with `develop`. Steps 3 to 9 run from a checkout of
   it, and step 10 checks that what deploys has the same tree.
 - **Production only:** the staging rehearsal (the section above: this runbook, the rollback and
   the second forward run, on staging, from the same commit) passed, the security architect has its
@@ -212,7 +209,6 @@ forward run, `rehearsal-anomalies.ts remove | psql …` deletes the seeded rows.
   - no terminal session recording: no `script`, no asciinema, no iTerm2 (or other terminal)
     session logging;
   - screen sharing is off for the whole window;
-  - the checkout is clean, at `PROMOTED_COMMIT`, with `PROMOTED_COMMIT` exported;
   - the session is closed (`exit`) at the end of the window.
 - The phase 13 image check passed: `docker build -f apps/auth/Dockerfile .`, run as the image's
   `node` user, `./node_modules/.bin/tsx scripts/grant-admin.ts --list` inside it.
@@ -345,8 +341,7 @@ psql "$AUTH_DATABASE_URL" -X -v ON_ERROR_STOP=1 --single-transaction -f packages
 prints `6`, and `psql "$AUTH_DATABASE_URL" -X -At -c "select count(*) from auth.users"` prints `0`.
 Record `auth-journal-applied: 0000_auth_schema` and the commit. Now the auth URL also answers
 for the auth schema: `psql "$AUTH_DATABASE_URL" -X -At -c "select to_regclass('auth.users')"`
-prints `auth.users`. In the operator session, `git rev-parse HEAD` equals `PROMOTED_COMMIT` and
-`git status --porcelain` prints nothing.
+prints `auth.users`.
 **Abort:** `psql "$AUTH_DATABASE_URL" -X -c 'DROP SCHEMA auth CASCADE'`, then step 3's abort.
 
 ## 6. The copy and the audits
@@ -444,14 +439,14 @@ but does not bind admins, so only an **admin** can run that push; on staging, th
 and deploys `auth`, `backend` and the web service from this commit.
 
 ```bash
-git fetch origin && [ "$(git rev-parse origin/develop)" = "$(git rev-parse "$PROMOTED_COMMIT")" ] && echo develop-unchanged   # production, before the push
+git fetch origin && [ "$(git rev-parse origin/develop)" = "$(git rev-parse HEAD)" ] && echo develop-unchanged   # production, before the push
 git fetch origin && git push origin origin/develop:main          # production
-git fetch origin && git diff-tree --quiet "$PROMOTED_COMMIT" origin/main && echo same-tree   # origin/develop on staging
+git fetch origin && git diff-tree --quiet HEAD origin/main && echo same-tree   # origin/develop on staging
 ```
 
 **Check:** in production, the first line prints `develop-unchanged` **before** the push (a
 `develop` tip that moved during the session is caught before anything deploys: do not push), and
-afterwards `git rev-parse origin/main` equals `PROMOTED_COMMIT`; on both, the
+afterwards `git rev-parse origin/main` equals the checkout's `HEAD`; on both, the
 `diff-tree` line prints `same-tree` (the deployed tree is the one every script ran from), and a
 deployment of that commit has started on `auth`, `backend` and the web service. Record the commit
 and the session's elapsed time from step 3.

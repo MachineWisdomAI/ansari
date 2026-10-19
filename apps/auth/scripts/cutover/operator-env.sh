@@ -17,9 +17,7 @@
 #      public TCP proxy (`*.proxy.rlwy.net`), `*.railway.internal` (it
 #      resolves only inside Railway), IPs and every other host are refused;
 #   4. a psql that is not major 18 (the production major);
-#   5. a checkout that is not clean, or whose HEAD is not PROMOTED_COMMIT, the
-#      commit the window recorded: the scripts and SQL run from this tree;
-#   6. stdout that is not a terminal, so the output (counts and checksums
+#   5. stdout that is not a terminal, so the output (counts and checksums
 #      only) cannot be captured to a file by accident.
 #
 # It prints a warning when a URL does not carry sslmode=require (runbook step
@@ -120,15 +118,6 @@ operator_check() {
   version="$(psql --version 2>/dev/null || true)"
   major="$(printf '%s' "$version" | sed -nE 's/^psql \(PostgreSQL\) ([0-9]+).*/\1/p')"
   [ "$major" = "18" ] || operator_die "$name" "psql must be major 18 (found: ${version:-none})"
-
-  local here repo
-  here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  repo="$(git -C "$here" rev-parse --show-toplevel 2>/dev/null)" \
-    || operator_die "$name" "not inside a git checkout"
-  [ -n "${PROMOTED_COMMIT:-}" ] || operator_die "$name" "PROMOTED_COMMIT is unset (the commit the window recorded)"
-  [ -z "$(git -C "$repo" status --porcelain)" ] || operator_die "$name" "the checkout has uncommitted changes"
-  [ "$(git -C "$repo" rev-parse HEAD)" = "$(git -C "$repo" rev-parse --verify --quiet "$PROMOTED_COMMIT^{commit}")" ] \
-    || operator_die "$name" "HEAD is not PROMOTED_COMMIT"
 
   [ -t 1 ] || operator_die "$name" "refusing to run with stdout redirected: run it in the terminal, and read its counts there"
 
