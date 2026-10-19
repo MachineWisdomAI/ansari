@@ -528,3 +528,28 @@ Checked that a missing auth env does not take the run down: `tsx watch` with the
 api and frontend keep running. Turbo dry-run graphs: `dev` schedules ansari-api, ansari-auth and
 ansari-frontend; `dev:no-auth` schedules no ansari-auth. Docs updated: CONTRIBUTING, README,
 arch.md, and the env.ts error comment.
+
+## 2026-10-19: `copy.sh --dry-run` (owner request)
+The owner wanted to see what the copy produces before running it for real. `--dry-run` runs the
+same copy, guards and audits, and commits nothing. `02` takes `dry_run`: it prints the auth-side
+audit from inside its own transaction (another session can't see uncommitted rows), then rolls
+back. Staging and production auth databases have no schema until step 7, so against a bare
+database copy.sh also passes `dry_run_baseline`, which applies `0000` inside the same transaction.
+The rollback removes it, so step 1's empty-database check still holds. copy.sh then checks the
+database is as it was (no `auth` schema, or zero users and accounts). The audit query moved to
+`03-audit-auth-query.sql`, shared by `03-audit-auth.sql` and the dry run, so the two can't drift.
+The psql test harness now supports `\ir`. All operator-environment checks still apply.
+`complete-tombstones.sh` has no dry run and refuses the flag.
+Tests 66/66. Seven mutations were each caught. One survived at first (copy.sh ignoring the flag),
+so a terminal test with a logging fake psql was added; that test also catches dropping
+`-v dry_run=1`. End to end on two throwaway PG18 clusters from a clean detached checkout:
+- dry run on a bare auth DB: audits identical, auth schema count 0 afterwards;
+- dry run with the baseline applied: auth rows 0 afterwards;
+- real copy: audit OK;
+- dry run on a non-empty auth DB: refused, exit 3;
+- NULL-timestamp guard on a bare DB: refused, exit 3, schema count 0;
+- `complete-tombstones.sh --dry-run`: refused, exit 2.
+
+The owner also asked whether copy.sh could read its variables from a `.env` file. Not done: H-8
+says the URLs are entered with `read -rs` and never written to a file. That change is the owner's
+call and needs security; it is waiting on the owner.
