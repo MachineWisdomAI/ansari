@@ -50,7 +50,7 @@ The facilitator (`apps/api/lib/facilitator/agent.ts`) answers via a Gemini tool 
 
 The repo is a pnpm workspace of `apps/*` + `packages/*`, driven by Turborepo.
 
-**Layout & task running.** Root tasks fan out through one cached Turborepo task graph; `pnpm dev` starts both apps. Target a single package with `pnpm api <script>` / `pnpm frontend <script>`, or by running from inside the app directory.
+**Layout & task running.** Root tasks fan out through one cached Turborepo task graph; `pnpm dev` starts api, auth and frontend (`pnpm dev:no-auth` skips auth). Target a single package with `pnpm api <script>` / `pnpm auth <script>` / `pnpm frontend <script>`, or by running from inside the app directory.
 
 **Docker build context.** Both images build from the repo root, never from the app directory — the pnpm workspace needs the root lockfile and both images `COPY packages packages`. The Dockerfile invocation is always `-f apps/<app>/Dockerfile …` with `.` as the build context.
 

@@ -517,3 +517,14 @@ reaches its own database. Mutations caught; copy suite 55, doc tests 71.
   auth.users check moved after step 7. Runbook adds: forwarder has no public networking/domain,
   tagged ACL-scoped key only as TS_AUTHKEY; step 18 removes forwarder + revokes key, with checks.
   Three mutations (env any, env not in host, same-host off) each caught; doc pins mutation-proven.
+
+## 2026-10-19: `pnpm dev` starts apps/auth too (owner request)
+The owner wants the whole stack end to end from one `pnpm dev`. PIR #59 had excluded apps/auth
+(`--filter=!ansari-auth`) so a fresh contributor without auth env would not crash the dev loop.
+Since spec 300 sign-in needs auth, so the exclusion now costs more than it saves. Root `dev` is
+`turbo run dev --ui=tui` again. `dev:no-auth` keeps the old graph, and `dev:auth` is unchanged.
+Checked that a missing auth env does not take the run down: `tsx watch` with the env unset and no
+`.env` printed the validation error and stayed alive until an 8 s alarm killed it (exit 142), so
+api and frontend keep running. Turbo dry-run graphs: `dev` schedules ansari-api, ansari-auth and
+ansari-frontend; `dev:no-auth` schedules no ansari-auth. Docs updated: CONTRIBUTING, README,
+arch.md, and the env.ts error comment.

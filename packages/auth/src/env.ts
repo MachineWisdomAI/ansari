@@ -69,9 +69,10 @@ export function getEnv(): AuthEnv {
   if (!result.success) {
     // Name the offending vars and point at the template — this fires when the
     // auth service is started without its env (e.g. `pnpm auth dev` before
-    // copying apps/auth/.env.example → .env). apps/auth is deliberately NOT in
-    // the default `pnpm dev` graph, so this never breaks a fresh contributor's
-    // `pnpm dev`; it only surfaces when someone runs auth on purpose.
+    // copying apps/auth/.env.example → .env). `pnpm dev` starts apps/auth too:
+    // `tsx watch` stays up after this throws, so a missing auth env shows here
+    // in auth's pane and api + frontend keep running (`pnpm dev:no-auth` skips
+    // auth entirely).
     const vars = [...new Set(result.error.issues.map((i) => String(i.path[0])))].join(', ');
     throw new Error(
       `@ansari/auth env validation failed for: ${vars}. ` +
