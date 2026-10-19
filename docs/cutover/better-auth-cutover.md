@@ -248,7 +248,9 @@ forward run, `rehearsal-anomalies.ts remove | psql …` deletes the seeded rows.
 - **Auto-deploy is ON for `backend`, the web service and `auth`, and stays on** (owner decision,
   2026-10-19). Their next deploy is step 10's, so **every variable the new code reads is set
   before step 3** (below), and nothing is pushed to the deploying branch between step 3 and step
-  10 except step 10 itself.
+  10 except step 10 itself. Applying a variable change in Railway redeploys the service's current
+  deployment, so the `backend` edits restart the legacy api: make them at a quiet hour the day
+  before, and check its health afterwards.
 - Railway (main architect's runbook section): the `auth` service exists (in production it is
   created for this window, or found; in staging it already exists) with its variables set
   (see `docs/self-hosting.md`; `auth` has no `ADMIN_EMAILS`: spec H-7); one port,
@@ -313,6 +315,9 @@ so no legacy write is expected between the copy and the new code. If one happens
 - a sign-up during the window has an app row and no auth account: the user signs up again at
   `apps/auth`, and the orphan-row procedure (below) clears the email conflict;
 - a password change or reset during the window is not in the auth database: the user resets again.
+
+`MAINTENANCE_MODE` takes effect only once that redeploy is healthy: until then the probe below
+prints `false`, which is not a failure; wait and re-run it.
 
 **Check:**
 `curl -s https://api.askansari.ai/api/v2/app-check -H 'Content-Type: application/json' -d '{"platform":"ios","native_application_version":"1.0.0","native_build_version":"1"}' | jq .maintenance_mode`
@@ -434,7 +439,8 @@ abort. Nothing has deployed.
 ## 10. Promote `develop` to `main` (staging: merge the cutover PR)
 
 The last step of the session, right after step 9. In production, the fast-forward of
-`RELEASE.md`'s standard checklist; on staging, the cutover PR's merge. Auto-deploy then builds
+`RELEASE.md`'s standard checklist, pushed straight to `main`: `main`'s protection requires a PR
+but does not bind admins, so only an **admin** can run that push; on staging, the cutover PR's merge. Auto-deploy then builds
 and deploys `auth`, `backend` and the web service from this commit.
 
 ```bash

@@ -9,7 +9,9 @@ Auto-deploy stays **on** throughout. The merge in step 8 is the deploy.
 ## Before the day (Railway dashboard)
 
 All of these are set before step 2. Auto-deploy is on, so the merge in step 8 deploys whatever
-is set at that point. Production values are shown; for staging, use the staging domains.
+is set at that point. In Railway, applying a variable change **redeploys** the service's current
+deployment, so the `backend` edits restart the legacy api: make them at a quiet hour the day
+before, and check that `backend` is healthy afterwards. Production values are shown; for staging, use the staging domains.
 
 - **`backend`: add** the four variables below. The new code does not start in production
   without them.
@@ -87,7 +89,9 @@ echo "$CUTOVER_AT"                                 # into the release record
 curl -s $API/api/v2/app-check -H 'Content-Type: application/json' -d '{"platform":"ios","native_application_version":"1.0.0","native_build_version":"1"}' | jq .maintenance_mode   # true
 ```
 
-In production, also run the probe on `https://api-35.ansari.chat`. Take a Railway snapshot of
+`MAINTENANCE_MODE` takes effect only once Railway's redeploy of `backend` is healthy, so the probe
+prints `false` until then: wait and re-run it, that is not a failure. In production, also run the
+probe on `https://api-35.ansari.chat`. Take a Railway snapshot of
 both databases and record their ids.
 
 ## 3. Auth schema
@@ -139,7 +143,8 @@ curl -s -o /dev/null -w '%{http_code}' $AUTH/health   # 404 or 502; never 200, n
 ## 8. Deploy: merge
 
 - **Staging:** merge the cutover PR into `develop`.
-- **Production:** promote `develop` to `main`:
+- **Production:** promote `develop` to `main`. The push goes straight to `main`, which requires a
+  PR for everyone but admins, so only an **admin** can run it (as in `RELEASE.md`'s promotion):
 
 ```bash
 git fetch origin && [ "$(git rev-parse origin/develop)" = "$(git rev-parse "$PROMOTED_COMMIT")" ] && echo develop-unchanged   # production, before the push
