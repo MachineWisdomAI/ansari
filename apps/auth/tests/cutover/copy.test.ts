@@ -301,7 +301,8 @@ describe('the copy and the audits', () => {
     ]);
     await copy(app, auth);
     const sql = readFileSync(script('02-import-auth.sql'), 'utf8');
-    const backfill = sql.slice(sql.indexOf('INSERT INTO auth.account'), sql.indexOf('COMMIT;', sql.indexOf('INSERT INTO auth.account')));
+    const start = sql.indexOf('INSERT INTO auth.account');
+    const backfill = sql.slice(start, sql.indexOf(';', start) + 1);
     const exported = (await runPsqlFile(app, script('01-export-app.sql'))).stdout.join('');
     await auth.exec(`CREATE TEMP TABLE import_users (id uuid, email text, first_name text, last_name text, password_hash text, registered_via text, created_at timestamptz, updated_at timestamptz)`);
     await auth.query(`COPY import_users FROM '/dev/blob'`, [], { blob: new Blob([exported]) });
@@ -389,6 +390,97 @@ describe('the copy and the audits', () => {
     await copy(app, auth);
     expect(await count(auth, 'auth.session')).toBe(0);
     expect(await count(auth, `pg_class WHERE relname = 'import_users'`)).toBe(0);
+  });
+});
+
+/** 01 | 02 as copy.sh --dry-run runs them: the auth database left as found. */
+async function dryCopy(app: PGlite, auth: PGlite, options: { baseline?: boolean } = {}) {
+  const expected_rows = await expectedRows(app);
+  const exported = await runPsqlFile(app, script('01-export-app.sql'));
+  return runPsqlFile(auth, script('02-import-auth.sql'), {
+    stdin: exported.stdout.join(''),
+    vars: { expected_rows, dry_run: '1', ...(options.baseline ? { dry_run_baseline: '1' } : {}) },
+  });
+}
+
+const authSchemas = (db: PGlite) => count(db, `information_schema.schemata WHERE schema_name = 'auth'`);
+
+describe('copy.sh --dry-run: the same copy, rolled back', () => {
+  const legacy = () => [
+    { id: id(1), email: 'Mixed@Example.com', first: 'Amina', last: 'Yusuf' },
+    { id: id(2), email: 'b@example.com' },
+    { id: id(3), email: 'ai-skill@system.ansari.chat', hash: 'nologin', systemKey: 'ai-skill' },
+  ];
+
+  it('prints the auth audit from inside its transaction, equal to the app audit, and commits nothing', async () => {
+    await seed(app, legacy());
+    const run = await dryCopy(app, auth);
+    const { app: expected } = await audits(app, auth);
+    expect(expected).toContain('rows|2');
+    expect(run.stdout).toEqual(expected);
+    expect(run.echo).not.toContain('cutover copy: committed');
+    expect(await count(auth, 'auth.users')).toBe(0);
+    expect(await count(auth, 'auth.account')).toBe(0);
+    expect(await count(auth, `pg_class WHERE relname IN ('import_users', 'import_expected')`)).toBe(0);
+    // Left as found: the real copy then runs, and its audit matches.
+    await copy(app, auth);
+    const after = await audits(app, auth);
+    expect(after.auth).toEqual(expected);
+  });
+
+  it('against an auth database with no schema (before step 7): the baseline is applied inside the transaction and rolled back', async () => {
+    await seed(app, legacy());
+    const bare = emptyDatabase();
+    try {
+      const run = await dryCopy(app, bare, { baseline: true });
+      expect(run.stdout).toEqual((await audits(app, auth)).app);
+      expect(await authSchemas(bare)).toBe(0);
+      expect(await count(bare, `information_schema.tables WHERE table_schema NOT IN ('pg_catalog', 'information_schema')`)).toBe(0);
+    } finally {
+      await bare.close();
+    }
+  });
+
+  it('the guards still fire, and a refused dry run leaves the database as found', async () => {
+    await seed(app, legacy());
+    await app.exec(`UPDATE users SET updated_at = NULL WHERE id = '${id(2)}'`);
+    await expect(dryCopy(app, auth)).rejects.toThrow(/1 row\(s\) have a NULL created_at or updated_at/);
+    expect(await count(auth, 'auth.users')).toBe(0);
+    const bare = emptyDatabase();
+    try {
+      await expect(dryCopy(app, bare, { baseline: true })).rejects.toThrow(/1 row\(s\) have a NULL created_at or updated_at/);
+      expect(await authSchemas(bare)).toBe(0);
+    } finally {
+      await bare.close();
+    }
+  });
+
+  it('a non-empty auth database is refused in a dry run too', async () => {
+    await seed(app, legacy());
+    await copy(app, auth);
+    await expect(dryCopy(app, auth)).rejects.toThrow(/auth\.users is not empty/);
+  });
+
+  it('dry_run_baseline without dry_run is refused before anything runs', async () => {
+    await seed(app, legacy());
+    const bare = emptyDatabase();
+    try {
+      await expect(
+        runPsqlFile(bare, script('02-import-auth.sql'), { stdin: '', vars: { expected_rows: '2', dry_run_baseline: '1' } })
+      ).rejects.toThrow(/dry_run_baseline is only for copy\.sh --dry-run/);
+      expect(await authSchemas(bare)).toBe(0);
+    } finally {
+      await bare.close();
+    }
+  });
+
+  it('copy.sh: the dry run passes dry_run to 02, never runs the committing audit path, and checks the auth database afterwards', () => {
+    const sh = readFileSync(script('copy.sh'), 'utf8');
+    const dry = sh.slice(sh.indexOf('if [ "$dry_run" = 1 ]; then'), sh.indexOf('\nelse\n'));
+    expect(dry).toMatch(/-v dry_run=1/);
+    expect(dry).toMatch(/DRY RUN LEFT CHANGES/);
+    expect(dry).not.toMatch(/03-audit-auth\.sql/);
+    expect(sh).toMatch(/dry run audit OK \(nothing committed\)/);
   });
 });
 
@@ -881,6 +973,66 @@ describe('copy.sh and complete-tombstones.sh: the operator-environment check (sp
       expect(result.stderr, label).toMatch(message);
       expect(result.stderr, label).not.toMatch(/u:p@/);
     }
+    expect(psqlCalls()).toBe('');
+  });
+
+  it('copy.sh --dry-run: accepted alone or with --allow-local, in either order; every check still runs', () => {
+    const cases: [string, Record<string, string | undefined>, string[], RegExp][] = [
+      ['--dry-run, production', good(), ['--dry-run'], /stdout redirected/],
+      ['--dry-run still needs CUTOVER_ENV', { ...good(), CUTOVER_ENV: undefined }, ['--dry-run'], /CUTOVER_ENV must be production or staging/],
+      ['--dry-run still needs the forwarder', { ...good(), APP_DATABASE_URL: 'postgresql://u:p@db.example.com/railway' }, ['--dry-run'], /not the production Tailscale forwarder/],
+      ['--dry-run --allow-local', local(), ['--dry-run', '--allow-local'], /stdout redirected/],
+      ['--allow-local --dry-run', local(), ['--allow-local', '--dry-run'], /stdout redirected/],
+      ['--dry-run with a non-loopback host under --allow-local', { ...local(), APP_DATABASE_URL: good().APP_DATABASE_URL }, ['--dry-run', '--allow-local'], /not loopback/],
+      ['--dry-run with an unknown argument', good(), ['--dry-run', '--bogus'], /unknown argument/],
+    ];
+    for (const [label, env, args, message] of cases) {
+      const result = run('copy.sh', env, args);
+      expect({ label, status: result.status }).toEqual({ label, status: 2 });
+      expect(result.stderr, label).toMatch(message);
+    }
+    expect(psqlCalls()).toBe('');
+  });
+
+  it('copy.sh --dry-run, in a terminal: 02 gets dry_run, the committing audit never runs', () => {
+    // A fake psql that answers the row count and the schema probe and logs every
+    // call's arguments; the pipe into 02 is where it stops (exit 3).
+    writeFileSync(
+      resolve(bin, 'psql'),
+      [
+        '#!/usr/bin/env bash',
+        'if [ "$1" = "--version" ]; then echo "psql (PostgreSQL) 18.0"; exit 0; fi',
+        `echo "$*" >> "${log}"`,
+        'case "$*" in',
+        '  *01-count-app.sql*) echo 2; exit 0 ;;',
+        "  *to_regclass*) echo f; exit 0 ;;",
+        'esac',
+        'cat >/dev/null; exit 3',
+        '',
+      ].join('\n')
+    );
+    const target = resolve(repo, 'cutover', 'copy.sh');
+    const [cmd, args] =
+      process.platform === 'darwin'
+        ? ['script', ['-q', '/dev/null', 'bash', target, '--dry-run', '--allow-local']]
+        : ['script', ['-qec', `bash ${target} --dry-run --allow-local`, '/dev/null']];
+    const result = spawnSync(cmd, args, {
+      env: { PATH: `${bin}:${process.env.PATH ?? ''}`, HOME: process.env.HOME ?? '', ...local() } as NodeJS.ProcessEnv,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const calls = psqlCalls();
+    expect(`${result.stdout}${result.stderr}`).toMatch(/DRY RUN: the copy runs in one transaction and is rolled back/);
+    expect(calls).toMatch(/-v dry_run=1 .*02-import-auth\.sql/);
+    expect(calls).not.toMatch(/dry_run_baseline/); // the probe said the schema exists
+    expect(calls).not.toMatch(/03-audit-auth\.sql/);
+    expect(`${result.stdout}${result.stderr}`).not.toMatch(/audit OK/);
+  });
+
+  it('complete-tombstones.sh has no --dry-run: it is refused as an unknown argument', () => {
+    const result = run('complete-tombstones.sh', good(), ['--dry-run']);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toMatch(/unknown argument/);
     expect(psqlCalls()).toBe('');
   });
 

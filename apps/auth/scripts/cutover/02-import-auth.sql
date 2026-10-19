@@ -4,7 +4,21 @@
 -- The import table is TEMP: it lives only in this session, so every failure
 -- path (a guard, a constraint, a dropped pipe) leaves no copy of the hashes
 -- behind. The inserts run in one transaction; a failed guard changes nothing.
+--
+-- copy.sh --dry-run passes `-v dry_run=1`: everything below runs as written,
+-- guards included, and the transaction ends in ROLLBACK, after printing the
+-- auth-side audit from inside it. Against an auth database with no schema yet
+-- (the window before step 7), copy.sh also passes `-v dry_run_baseline=1`, and
+-- the 0000 baseline is applied inside the same transaction, so the rollback
+-- takes it away again.
 \set ON_ERROR_STOP on
+
+\if :{?dry_run_baseline}
+\if :{?dry_run}
+\else
+DO $$ BEGIN RAISE EXCEPTION 'cutover copy: dry_run_baseline is only for copy.sh --dry-run'; END $$;
+\endif
+\endif
 
 -- copy.sh passes `-v expected_rows=<n>`, the app's count of the rows 01
 -- exports, taken just before the pipe. A pipe that drops mid-stream ends the
@@ -31,6 +45,10 @@ CREATE TEMP TABLE import_users (
 \copy import_users FROM pstdin
 
 BEGIN;
+
+\if :{?dry_run_baseline}
+\ir ../../../../packages/auth/drizzle/0000_auth_schema.sql
+\endif
 
 -- Guards. Each aborts the whole transaction, naming a count, never an address.
 DO $$
@@ -125,8 +143,18 @@ SELECT
 FROM import_users i
 ON CONFLICT (user_id, provider_id) DO NOTHING;
 
+\if :{?dry_run}
+-- copy.sh --dry-run: the auth-side audit as this transaction sees it (its only
+-- output, which copy.sh diffs against the app's), then nothing is committed.
+\ir 03-audit-auth-query.sql
+ROLLBACK;
+\else
 COMMIT;
+\endif
 
 DROP TABLE import_users;
 DROP TABLE import_expected;
+\if :{?dry_run}
+\else
 \echo 'cutover copy: committed'
+\endif

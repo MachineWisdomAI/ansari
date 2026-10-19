@@ -5,12 +5,15 @@
 // Supported: `\set NAME value`, `\echo`, `\pset` (output is always
 // tuples-only, unaligned, '|'-separated), `\if :{?NAME}` / `\if :NAME` /
 // `\else` / `\endif`, `\copy (…) TO pstdout` and `\copy table FROM pstdin`
-// (through pglite's /dev/blob device), and `:'NAME'` / `:NAME` interpolation.
+// (through pglite's /dev/blob device), `\ir FILE` (inlined, relative to the
+// including file, as psql's \include_relative), and `:'NAME'` / `:NAME`
+// interpolation.
 // ON_ERROR_STOP is always on: the first error throws. psql would then end the
 // session, rolling back an open transaction and dropping TEMP tables; the
 // harness does the same to the pglite instance (`ROLLBACK`, `DISCARD TEMP`),
 // so a failed run leaves exactly what a failed psql session leaves.
 import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 
 import type { PGlite, Results } from '@electric-sql/pglite';
 
@@ -26,6 +29,16 @@ function interpolate(sql: string, vars: Record<string, string>): string {
     .replace(/(?<![:\w]):([A-Za-z_]\w*)/g, (match, name: string) =>
       name in vars ? (vars[name] ?? '') : match
     );
+}
+
+/** The file's lines with every `\ir` replaced by the included file's lines. */
+function linesOf(file: string): string[] {
+  return readFileSync(file, 'utf8')
+    .split('\n')
+    .flatMap((raw) => {
+      const include = /^\s*\\ir\s+(\S+)\s*$/.exec(raw);
+      return include ? linesOf(resolve(dirname(file), include[1] as string)) : [raw];
+    });
 }
 
 function rowsOf(results: Results[]): string[] {
@@ -62,7 +75,7 @@ export async function runPsqlFile(
   };
 
   try {
-    for (const raw of readFileSync(file, 'utf8').split('\n')) {
+    for (const raw of linesOf(file)) {
       const line = raw.trim();
       if (!line.startsWith('\\')) {
         if (active()) buffer += `${raw}\n`;

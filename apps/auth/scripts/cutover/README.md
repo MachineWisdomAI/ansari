@@ -42,6 +42,16 @@ never added to `turbo.json`, never written to a file. The copy's rows pass throu
 machine's memory in a pipe and nowhere else. The source scans exclude this directory by path,
 because it is the one place both databases are named.
 
+**Dry run: `copy.sh --dry-run`.** The same copy, guards and audits, with nothing committed:
+`02`'s transaction ends in `ROLLBACK` after printing the auth-side audit from inside it (another
+session cannot see uncommitted rows). If the auth database has no schema yet (staging and
+production before runbook step 7), the `0000` baseline is applied inside the same transaction and
+rolled back with it, so step 1's empty-database check still holds afterwards. The script then
+checks that the auth database is as it was (no `auth` schema, or zero users and accounts) and
+ends with `copy.sh: dry run audit OK (nothing committed)`. Every operator-environment check still
+runs, because every email and hash still streams through this machine. It combines with
+`--allow-local`, in either order. Its timing is a fair preview of step 8's.
+
 **What they print.** Ids, counts and md5 checksums. Never a password hash. The preflight
 also prints the legacy admins' addresses, because the owner approves that list by address.
 
@@ -50,10 +60,11 @@ also prints the legacy admins' addresses, because the owner approves that list b
 | `00-preflight-app.sql` | app | no | Case audit and collision groups over all rows (ids only), rows with no hash, hash formats (prefix, length and count; never a hash) and rows not bcrypt `$2a$`/`$2b$` of length 60 (must be zero), NULL timestamps (must be zero), guest count, legacy admin inventory, system accounts, rows to copy, baselines B-1 and B-4 |
 | `01-export-app.sql` | app | no | `\copy (…non-system users, email normalized…) TO pstdout`. **Never run by hand:** `copy.sh` pipes it into `02`, so its rows (emails and hashes) never reach a terminal or a file |
 | `01-count-app.sql` | app | no | The number of rows `01` exports (its filter); `copy.sh` passes it to `02` as `expected_rows` |
-| `02-import-auth.sql` | auth | yes, one transaction | A `TEMP` import table filled from `pstdin`; guards (empty `auth.users` and `auth.account`, non-empty import, exactly `expected_rows` rows (from `01-count-app.sql`, passed by `copy.sh`), no normalized-email collision, normalized emails, every row has a hash, every hash is bcrypt `$2a$`/`$2b$` of length 60, no NULL timestamp, no system-domain address); the `auth.users` and credential `auth.account` inserts; `COMMIT` |
+| `02-import-auth.sql` | auth | yes, one transaction (none under `--dry-run`) | A `TEMP` import table filled from `pstdin`; guards (empty `auth.users` and `auth.account`, non-empty import, exactly `expected_rows` rows (from `01-count-app.sql`, passed by `copy.sh`), no normalized-email collision, normalized emails, every row has a hash, every hash is bcrypt `$2a$`/`$2b$` of length 60, no NULL timestamp, no system-domain address); the `auth.users` and credential `auth.account` inserts; `COMMIT`. Under `copy.sh --dry-run` (`-v dry_run=1`): the auth audit from inside the transaction, then `ROLLBACK`; with `-v dry_run_baseline=1` it first applies `packages/auth/drizzle/0000` inside that transaction |
 | `03-audit-app.sql`, `03-audit-auth.sql` | app, auth | no | The same `key\|value` lines on each side: rows, id checksum, email checksum, hash checksum, credential count, system-domain rows |
+| `03-audit-auth-query.sql` | auth | no | The auth-side audit query, included by `03-audit-auth.sql` (in a read-only transaction) and by `02` under `--dry-run`. Never run on its own |
 | `operator-env.sh` | none | no | Sourced by `copy.sh` and `complete-tombstones.sh`: the operator-environment check above |
-| `copy.sh` | both | via `02` | Refuses anything `operator-env.sh` refuses. Runs `01 \| 02`, then both audits, prints them, and exits non-zero on any difference |
+| `copy.sh` | both | via `02` (nothing with `--dry-run`) | Refuses anything `operator-env.sh` refuses. Runs `01 \| 02`, then both audits, prints them, and exits non-zero on any difference. `--dry-run`: see above |
 | `05-audit-admins-auth.sql` | auth | no | The admin set after `grant-admin.ts` (runbook step 8). It must equal the approved list |
 | `04-tombstones-pending-app.sql` | app | no | The ids of deletions whose `apps/auth` step did not finish, as one array literal |
 | `04-tombstones-delete-auth.sql` | auth | yes | `DELETE FROM auth.users WHERE id = ANY(:'ids')`; the cascade removes their sessions and accounts. Never calls the endpoint |
