@@ -6,6 +6,7 @@ a **check** that is mechanical (a command and the output it must show) and the *
 action if the check fails. Rollback, within 24 hours, is [`rollback.md`](rollback.md). The
 operator SQL is described in
 [`apps/auth/scripts/cutover/README.md`](../../apps/auth/scripts/cutover/README.md).
+The commands alone, in order, are in [`deploy-guide.md`](deploy-guide.md).
 
 **The operator environment (spec H-8).** Every database step runs on **the owner's machine**, in
 one terminal session, through **Railway's Tailscale forwarder** (docs.railway.com, "Set up a

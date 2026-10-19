@@ -15,7 +15,8 @@ const RUNBOOK = 'docs/cutover/better-auth-cutover.md';
 const ROLLBACK = 'docs/cutover/rollback.md';
 const SCRIPTS_DIR = 'apps/auth/scripts/cutover';
 const SCRIPTS_README = `${SCRIPTS_DIR}/README.md`;
-const DOCS = [RUNBOOK, ROLLBACK, 'docs/cutover/edge-check.md', 'docs/cutover/baselines.md', 'docs/cutover/rehearsal.md', SCRIPTS_README];
+const GUIDE = 'docs/cutover/deploy-guide.md';
+const DOCS = [RUNBOOK, ROLLBACK, GUIDE, 'docs/cutover/edge-check.md', 'docs/cutover/baselines.md', 'docs/cutover/rehearsal.md', SCRIPTS_README];
 
 /** Repo-relative paths a doc names in backticks or as a command argument. */
 export function namedRepoPaths(doc: string): string[] {
@@ -348,5 +349,35 @@ describe('the rollback runbook', () => {
 
   it('runs its database step from the operator environment (H-8)', () => {
     expect(doc).toContain("from the window runbook's operator environment (spec H-8)");
+  });
+});
+
+describe('the deployment guide', () => {
+  const guide = read(GUIDE);
+  const runbook = read(RUNBOOK);
+  // The guide is the runbook's commands with the domains as $API and $AUTH;
+  // any command that drifts from the runbook fails here.
+  const commands = [...guide.matchAll(/```bash\n([\s\S]*?)```/g)]
+    .flatMap((m) => (m[1] as string).split('\n'))
+    .map((l) => l.replace(/\s+#\s.*$/, '').trim())
+    .filter((l) => l && !l.startsWith('export API='));
+
+  it('names a command for every step', () => {
+    expect(commands.length).toBeGreaterThan(25);
+  });
+
+  it.each(commands)('runs the runbook command: %s', (line) => {
+    const literal = line.replace(/\$API\b/g, 'https://api.askansari.ai').replace(/\$AUTH\b/g, 'https://auth.askansari.ai');
+    // The runbook writes some auth-side checks as "the same for `$AUTH_DATABASE_URL`".
+    const appForm = literal.replace('"$AUTH_DATABASE_URL"', '"$APP_DATABASE_URL"');
+    expect(runbook.includes(literal) || (appForm !== literal && runbook.includes(appForm) && runbook.includes('the same for `$AUTH_DATABASE_URL`'))).toBe(true);
+  });
+
+  it('follows the runbook order: baseline, copy, app migrations, admins, domain, merge', () => {
+    const at = (s: string) => guide.indexOf(s);
+    const order = ['0000_auth_schema.sql', 'cutover/copy.sh', '0011_better_auth_window.sql', 'grant-admin.ts', '/health', 'git push origin', 'MAINTENANCE_MODE=false` on `backend`. Then'];
+    const positions = order.map(at);
+    expect(positions.every((p) => p > 0)).toBe(true);
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
   });
 });
