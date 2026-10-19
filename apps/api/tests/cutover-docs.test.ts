@@ -90,6 +90,13 @@ describe('the window runbook', () => {
     }
   });
 
+  it('the dry-run paragraph names the copy step by its current number', () => {
+    const para = doc.slice(doc.indexOf('**A dry run before the window'), doc.indexOf('**`psql`.**'));
+    const copy = stepOf(/The copy and the audits/);
+    const named = [...para.matchAll(/step (\d+)(?:'s| runs `copy\.sh`)/g)].map((m) => Number(m[1]));
+    expect(named.filter((n) => n !== 1)).toEqual([copy, copy, copy]);
+  });
+
   it('takes cutover_at with maintenance on, before the copy and before anything deploys', () => {
     const taken = steps.findIndex((s) => /select now\(\)/.test(s) && /cutover_at/i.test(s)) + 1;
     expect(taken).toBe(stepOf(/Maintenance mode on, web off/));
