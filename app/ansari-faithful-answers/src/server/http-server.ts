@@ -2,6 +2,7 @@ import {createAdaptorServer} from '@hono/node-server';
 import {hostHeaderValidation, originValidation} from '@modelcontextprotocol/hono';
 import {createMcpHandler} from '@modelcontextprotocol/server';
 import {Hono} from 'hono';
+import type {Server} from 'node:http';
 import {createAnsariHttpCompleter, type AnswerCompleter} from './ansari-client.js';
 import {createAnsariMcpServer} from './create-server.js';
 import {prepareAnswerView} from './view-artifact.js';
@@ -54,13 +55,19 @@ export function createHttpServer(options: ListenOptions = {}) {
     return c.json({error:'internal error'},500);
   });
 
-  const server = createAdaptorServer({fetch:app.fetch});
+  // The adapter's default createServer is Node's HTTP/1 server.
+  const server = createAdaptorServer({fetch:app.fetch}) as Server;
+  let closing: Promise<void> | undefined;
   return {
     server,
-    close: async () => {
-      await mcp.close();
-      await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));
-    },
+    close: () => closing ??= (async () => {
+      // Stop admission before closing transports. The SDK tracks modern calls;
+      // closing Node connections also retires legacy calls and incomplete bodies.
+      const stopped = new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));
+      const handlersClosed = mcp.close();
+      server.closeAllConnections();
+      await Promise.all([handlersClosed,stopped]);
+    })(),
   };
 }
 

@@ -37,10 +37,12 @@ Run from this directory. `build` writes `dist/view.html` and a bundled `dist/ser
 | `ANSARI_CLIENT` | Upstream client label (default `ansari-faithful-answers`). |
 | `MCP_ALLOWED_HOSTS` | Comma-separated additional HTTP Host names, without scheme. Localhost and 127.0.0.1 are allowed by default. Configure the public DEV host when deploying. |
 | `MCP_ALLOWED_ORIGINS` | Comma-separated additional allowed browser origins. |
-| `MCP_RESPONSE_MODE` | `json` for modern MCP JSON responses; otherwise SSE. Older-host compatibility responses may use SSE. |
+| `MCP_RESPONSE_MODE` | `json` for modern MCP final-answer-only responses; otherwise SSE, which supports client-requested progress notifications. Older-host compatibility responses may use SSE. |
 | `ANSARI_RELEASE` | Optional safe release identifier, embedded in served HTML and health/log records. |
 
 `POST /mcp` serves stateless MCP requests through Hono and the official MCP request handler. Modern requests need no initialization; older hosts can use the handler’s stateless compatibility path. No MCP session IDs, session map, expiry timer or replay store are retained. `GET /mcp` and `DELETE /mcp` return 405. `/health` exposes the release. The HTML is read, revision-stamped and fingerprinted once before the listener opens. Each request creates its own lightweight MCP server using that prepared view; resource bytes and identity stay fixed until restart. No demo, font server, alternative renderer or historical resource is served. Tool calls have a fresh 60-second budget; timeout yields a safe error and leaves subsequent calls usable. The budget bounds the MCP reply; it does not promise upstream fetch cancellation.
+
+Closing a request server releases its budget even if it was never connected to a transport. On SIGINT or SIGTERM the listener stops accepting requests, closes MCP handlers and HTTP connections, and exits; unfinished calls are interrupted, including older-host SSE calls. This does not guarantee that upstream work has stopped.
 
 ## Workspace and container
 

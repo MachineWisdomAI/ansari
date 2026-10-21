@@ -126,3 +126,39 @@ test('Hono rejects untrusted Host/Origin and malformed requests before calling A
     assert.equal(calls,1);
   } finally { await service.close(); }
 });
+
+for(const json of [false,true]) test(`modern ${json?'JSON':'SSE'} delivers the answer with a requested progress token`,async()=>{
+  const service=await listen({host:'127.0.0.1',port:0,html:'<html><body>progress</body></html>',enableJsonResponse:json,logger:()=>{},completer:{async complete(){return answer;}}});
+  try {
+    const response=await postRpc(service.port,'tools/call',{name:'ask_ansari',arguments:{question:'synthetic'}}, {},true);
+    assert.ok(!(await response.text()).includes('notifications/progress'),'do not send progress unless requested');
+    const tokenResponse=await fetch(`http://127.0.0.1:${service.port}/mcp`,{
+      method:'POST',headers:{'content-type':'application/json',accept:'application/json, text/event-stream','MCP-Protocol-Version':'2026-07-28','Mcp-Method':'tools/call','Mcp-Name':'ask_ansari'},
+      body:JSON.stringify({jsonrpc:'2.0',id:2,method:'tools/call',params:{name:'ask_ansari',arguments:{question:'synthetic'},_meta:{
+        progressToken:'progress-test',[PROTOCOL_VERSION_META_KEY]:'2026-07-28',[CLIENT_INFO_META_KEY]:{name:'progress-test',version:'1'},[CLIENT_CAPABILITIES_META_KEY]:{},
+      }}}),
+    });
+    assert.equal(tokenResponse.status,200);
+    const text=await tokenResponse.text();
+    if(json){
+      assert.match(tokenResponse.headers.get('content-type')??'',/application\/json/);
+      assert.equal(JSON.parse(text).result.structuredContent.answer,answer);
+      assert.ok(!text.includes('notifications/progress'));
+    } else {
+      const messages=text.split('\n').filter(line=>line.startsWith('data: ')).map(line=>JSON.parse(line.slice(6)));
+      assert.deepEqual(messages.find(message=>message.method==='notifications/progress')?.params,{progressToken:'progress-test',progress:0,total:1});
+      assert.equal(messages.find(message=>message.id===2)?.result.structuredContent.answer,answer);
+    }
+  } finally {await service.close();}
+});
+
+for(const modern of [true,false]) test(`${modern?'modern':'older-host'} refuses a body over the SDK limit before calling Ansari`,async()=>{
+  let calls=0;
+  const service=await listen({host:'127.0.0.1',port:0,html:'<html><body>bounded body</body></html>',logger:()=>{},completer:{async complete(){calls++;return answer;}}});
+  try {
+    const response=await postRpc(service.port,'tools/call',{name:'ask_ansari',arguments:{question:'x'.repeat(4*1024*1024)}},{},modern);
+    assert.equal(response.status,413);
+    assert.match(await response.text(),/Payload Too Large/);
+    assert.equal(calls,0);
+  } finally {await service.close();}
+});

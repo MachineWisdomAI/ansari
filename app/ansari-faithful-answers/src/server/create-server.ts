@@ -1,5 +1,5 @@
 import {McpServer} from '@modelcontextprotocol/server';
-import {createServerBudgets, registerPublicOperation, type OperationView} from '@saga-a2ui/mcp/server';
+import {createServerBudgets, registerPublicOperation, type OperationView, type RequestLifetime} from '@saga-a2ui/mcp/server';
 import {z} from 'zod';
 import type {AnswerCompleter} from './ansari-client.js';
 import {writeOperationLog,type OperationLogger} from './operation-log.js';
@@ -20,13 +20,28 @@ export type CreateMcpServerOptions = {
   requestMs?: number;
 };
 
+class AnsariMcpServer extends McpServer {
+  constructor(private readonly lifetime: RequestLifetime) {
+    super({name:SERVER_NAME,version:APP_VERSION},{capabilities:{tools:{},resources:{}}});
+    this.server.onclose=()=>lifetime.finish();
+  }
+
+  override async close(): Promise<void> {
+    try {await super.close();}
+    finally {
+      // The SDK also disposes products before connecting a transport. In that
+      // case there is no transport onclose event to release our request timer.
+      this.lifetime.finish();
+    }
+  }
+}
+
 export function createAnsariMcpServer(options:CreateMcpServerOptions):McpServer{
   // Without a context the SDK default 10 s request budget would clamp the declared handler bound below. The request
   // budget is the declared bound itself: no new timeout target and no change to the SDK defaults. Each call gets its own.
   const budgets=createServerBudgets({requestMs:options.requestMs??HANDLER_BOUND_MS});
   const lifetime=budgets.startRequest();
-  const server=new McpServer({name:SERVER_NAME,version:APP_VERSION},{capabilities:{tools:{},resources:{}}});
-  server.server.onclose=()=>lifetime.finish();
+  const server=new AnsariMcpServer(lifetime);
   registerPublicOperation(server,{
     name:'ask_ansari',
     title:'Ask Ansari',
