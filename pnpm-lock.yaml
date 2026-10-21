@@ -49,17 +49,17 @@ importers:
         specifier: 2.3.1
         version: 2.3.1
       '@saga-a2ui/components':
-        specifier: 0.5.4-rc.1
-        version: 0.5.4-rc.1
+        specifier: 0.5.6-rc.1
+        version: 0.5.6-rc.1
       '@saga-a2ui/core':
-        specifier: 0.5.4-rc.1
-        version: 0.5.4-rc.1
+        specifier: 0.5.6-rc.1
+        version: 0.5.6-rc.1
       '@saga-a2ui/mcp':
-        specifier: 0.5.4-rc.1
-        version: 0.5.4-rc.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+        specifier: 0.5.6-rc.1
+        version: 0.5.6-rc.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       '@saga-a2ui/react':
-        specifier: 0.5.4-rc.1
-        version: 0.5.4-rc.1(@saga-a2ui/components@0.5.4-rc.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+        specifier: 0.5.6-rc.1
+        version: 0.5.6-rc.1(@saga-a2ui/components@0.5.6-rc.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       hono:
         specifier: 4.13.13
         version: 4.13.13
@@ -2871,23 +2871,23 @@ packages:
   '@rushstack/eslint-patch@1.16.1':
     resolution: {integrity: sha512-TvZbIpeKqGQQ7X0zSCvPH9riMSFQFSggnfBjFZ1mEoILW+UuXCKwOoPcgjMwiUtRqFZ8jWhPJc4um14vC6I4ag==}
 
-  '@saga-a2ui/components@0.5.4-rc.1':
-    resolution: {integrity: sha512-XeYuXj7tJ6FBEajSIwNDKcW9CW3JOe3c7BbCEyvfxzRUU/HDvbpwsx72PEuDFkV5PCi8heA38a2GlWEV3pmJlw==}
+  '@saga-a2ui/components@0.5.6-rc.1':
+    resolution: {integrity: sha512-Xzesbmujn4xoP6yyepbqqeapqf0j2TXtrlg00a3Aq4ahGtmLkm6F4tC8C3pm30zKorwUZ0RQORoIuJCDh3QX3A==}
     engines: {node: '>=22.12.0'}
 
-  '@saga-a2ui/core@0.5.4-rc.1':
-    resolution: {integrity: sha512-irImev3NUFeVg9NPcmWoChJKwQgvoR0FIv3+/ENFnTFz903Y/T/CDo9YUkkk1YK/7qlY5rwozZ/oWcHCh8nOmA==}
+  '@saga-a2ui/core@0.5.6-rc.1':
+    resolution: {integrity: sha512-Zp7jxauUAEwV9CybovTQT4CVXMrT21Fdl7/GNgQuCT1+VmmR3OTJ2sEhjSPeYdFXShmyMvSu6QWcS8w4Wys4qw==}
     engines: {node: '>=22.12.0'}
 
-  '@saga-a2ui/mcp@0.5.4-rc.1':
-    resolution: {integrity: sha512-TFE8vSeRhxogtP+wGyP+RTh0DKiZS85yfCA4IjXfZNDT5tR8Gw2SaEfEVRXeaRL/7HgGrGojZokRueUzlS40YQ==}
+  '@saga-a2ui/mcp@0.5.6-rc.1':
+    resolution: {integrity: sha512-6ebHjYHiajQSpBXQ5n42gy2VQdASNF5RMMC2eFvfxiogG32JYnV7cMShffq4NFtKyyNcxU0iw0rhS6TG3pIgnw==}
     engines: {node: '>=22.12.0'}
 
-  '@saga-a2ui/react@0.5.4-rc.1':
-    resolution: {integrity: sha512-Z/BehMUzGD1s6d1S+F3x/0ceO5GG7z6QehEqSSJhvt5Vkdv6Fj0ZutlBO+jxPgLUD5ZgGtgZH0W57ABQLYju5g==}
+  '@saga-a2ui/react@0.5.6-rc.1':
+    resolution: {integrity: sha512-zrQqR5VwpAzb+/MQ1H5Qu8PXe3kcyBAHMGLAf+Y6ShIMF801iG2n+WkrPXKBavs1Ygretb+iTJgmqAtTP2JWMQ==}
     engines: {node: '>=22.12.0'}
     peerDependencies:
-      '@saga-a2ui/components': 0.5.4-rc.1
+      '@saga-a2ui/components': 0.5.6-rc.1
       react: 19.3.1
       react-dom: 19.3.1
     peerDependenciesMeta:
@@ -11096,19 +11096,19 @@ snapshots:
 
   '@rushstack/eslint-patch@1.16.1': {}
 
-  '@saga-a2ui/components@0.5.4-rc.1':
+  '@saga-a2ui/components@0.5.6-rc.1':
     dependencies:
       '@a2ui/web_core': 0.13.0
-      '@saga-a2ui/core': 0.5.4-rc.1
+      '@saga-a2ui/core': 0.5.6-rc.1
       markdown-it: 15.0.2
       zod: 4.6.7
 
-  '@saga-a2ui/core@0.5.4-rc.1':
+  '@saga-a2ui/core@0.5.6-rc.1':
     dependencies:
       '@a2ui/web_core': 0.13.0
       zod3: zod@3.25.76
 
-  '@saga-a2ui/mcp@0.5.4-rc.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
+  '@saga-a2ui/mcp@0.5.6-rc.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
     dependencies:
       '@modelcontextprotocol/client': 2.3.1
       '@modelcontextprotocol/core': 2.3.1
@@ -11119,16 +11119,16 @@ snapshots:
       - react
       - react-dom
 
-  '@saga-a2ui/react@0.5.4-rc.1(@saga-a2ui/components@0.5.4-rc.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
+  '@saga-a2ui/react@0.5.6-rc.1(@saga-a2ui/components@0.5.6-rc.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
     dependencies:
       '@a2ui/react': 0.13.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(zod@3.25.76)
       '@a2ui/web_core': 0.13.0
-      '@saga-a2ui/core': 0.5.4-rc.1
+      '@saga-a2ui/core': 0.5.6-rc.1
       react: 19.3.1
       react-dom: 19.3.1(react@19.3.1)
       zod: 3.25.76
     optionalDependencies:
-      '@saga-a2ui/components': 0.5.4-rc.1
+      '@saga-a2ui/components': 0.5.6-rc.1
 
   '@selderee/plugin-htmlparser2@0.11.0':
     dependencies:
