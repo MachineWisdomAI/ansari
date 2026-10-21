@@ -2,9 +2,13 @@
 
 A standalone MCP application. `ask_ansari` calls the Ansari API and returns its complete answer and attribution unchanged. SAGA links each result to one content-addressed, self-contained React card. The application owns Ansari branding, floral artwork, theme mapping and HTTP sessions; SAGA owns content interpretation, FaithfulCard rendering, content policy, consent and MCP view linkage.
 
+## How it works
+
+[Explore the interactive walkthrough](docs/show-me-ansari-faithful-answers.html) for the complete question-to-card flow, UI states, code ownership and build process. Download the self-contained HTML and open it in a browser; GitHub displays its source. The walkthrough uses synthetic content and makes no live requests.
+
 ## Dependencies
 
-The four SAGA packages are pinned to the public `0.5.4-rc.1` prerelease. `pnpm check:release` verifies that each exact version exists in the public registry.
+The four SAGA packages use exact public npm versions declared in [`package.json`](package.json). `pnpm check:release` verifies that each exact version exists in the public registry.
 
 The application uses SAGA React’s public `@saga-a2ui/react/a2ui` entry point for surfaces and catalogs. SAGA owns its A2UI and Zod 3 dependency context; the application uses Zod 4 for MCP. Do not add direct `@a2ui/react` or `@a2ui/web_core` dependencies or cast between their schema types. The artwork owner has authorized contribution and redistribution with the application; see `assets/NOTICE.md`.
 
@@ -76,11 +80,3 @@ ChatGPT, Claude and Alexa rendering remain separate integration checks.
 The footer framework credit is controlled by `BRANDING.showSagaCredit` in
 `src/view/branding.ts`. Set it to `false` to remove the credit. Its link uses
 the same content policy as answer links; Strict displays an inert text credit.
-
-## SDK release provenance
-
-The four pinned SDK packages correspond to tag `v0.5.4-rc.1` on
-[`codex/release-0.5.4-rc.1`](https://github.com/MachineWisdomAI/saga-a2ui/tree/codex/release-0.5.4-rc.1),
-source commit `935f15a0fe6cca393c49477d3f6bbf8eb10e969d`. For debugging,
-check out that exact tag or commit; the release branch may advance. Build
-inputs remain exact public npm versions, not a local SDK checkout.
