@@ -1,6 +1,5 @@
 packages:
   - apps/*
-  - app/*
   - packages/*
 
 # Refuse installs on a Node/pnpm outside the `engines` range instead of only

@@ -34,7 +34,7 @@ importers:
         specifier: 2.10.11
         version: 2.10.11
 
-  app/ansari-faithful-answers:
+  apps/ansari-faithful-answers:
     dependencies:
       '@hono/node-server':
         specifier: 1.19.17

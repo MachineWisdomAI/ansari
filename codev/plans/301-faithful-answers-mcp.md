@@ -8,7 +8,7 @@ Protocol: ASPIR; final upstream merge remains a maintainer decision.
 
 ## Transfer
 
-Copy only application source, assets, tests and build scripts from qualified source tag `ansari-public-sdk-qualified-2026-10-21`. Exclude operational records and private deployment adapters. Enroll `app/*`, preserve root overrides and add the supported Markdown adapter pin. Use the TypeScript catalog, one root lockfile and package-local Turbo runtime environment declarations. Keep the new listener opt-in for local development. Document package-relative Docker context and add a public-only standalone CI job.
+Copy only application source, assets, tests and build scripts from qualified source tag `ansari-public-sdk-qualified-2026-10-21`. Exclude operational records and private deployment adapters. Use the existing `apps/*` workspace enrollment, preserve root overrides and add the supported Markdown adapter pin. Use the TypeScript catalog, one root lockfile and package-local Turbo runtime environment declarations. Keep the new listener opt-in for local development. Document package-relative Docker context and add a public-only standalone CI job.
 
 Verify dependency resolution, content/license audit, build/typecheck, server/browser suite and no-network Docker smoke. Consult independently before committing.
 

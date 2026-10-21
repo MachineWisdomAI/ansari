@@ -46,7 +46,7 @@ Closing a request server releases its budget even if it was never connected to a
 
 ## Workspace and container
 
-This package lives at `app/ansari-faithful-answers` and uses the repository's root pnpm lockfile. Install from the repository root with `pnpm install --frozen-lockfile`. Run app commands with `pnpm faithful-answers <script>` or from this directory. Start it explicitly with `pnpm faithful-answers dev`; the existing root development command continues to start only the API, auth and frontend applications.
+This package lives at `apps/ansari-faithful-answers` and uses the repository's root pnpm lockfile. Install from the repository root with `pnpm install --frozen-lockfile`. Run app commands with `pnpm faithful-answers <script>` or from this directory. Start it explicitly with `pnpm faithful-answers dev`; the existing root development command continues to start only the API, auth and frontend applications.
 
 The root workspace pins `@a2ui/markdown-it` to `0.2.1`: A2UI React 0.13 permits adapter 0.2.2, but that adapter requires incompatible web_core 0.14. Keep this override until SAGA's supported dependency combination changes. SAGA's own Markdown parser remains its private dependency. Do not add direct A2UI dependencies to this application.
 
