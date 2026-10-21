@@ -1,6 +1,6 @@
 {
   "name": "ansari-faithful-answers",
-  "version": "0.12.8",
+  "version": "0.12.9",
   "private": true,
   "type": "module",
   "description": "Ansari's MCP application with the SAGA React FaithfulCard",
@@ -19,13 +19,15 @@
     "check:release": "node scripts/check-release.mjs"
   },
   "dependencies": {
+    "@hono/node-server": "1.19.17",
     "@modelcontextprotocol/ext-apps": "2.0.3",
-    "@modelcontextprotocol/node": "2.1.1",
+    "@modelcontextprotocol/hono": "2.0.2",
     "@modelcontextprotocol/server": "2.3.1",
-    "@saga-a2ui/core": "0.5.4-rc.1",
     "@saga-a2ui/components": "0.5.4-rc.1",
+    "@saga-a2ui/core": "0.5.4-rc.1",
     "@saga-a2ui/mcp": "0.5.4-rc.1",
     "@saga-a2ui/react": "0.5.4-rc.1",
+    "hono": "4.13.13",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "zod": "4.6.7"

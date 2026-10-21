@@ -34,3 +34,11 @@ These screenshots establish rendering, not reliable first-load behavior. ChatGPT
 The attribution now uses the answer's supplied separator when present, keeping its own border only when no separator is supplied. Successful link requests remain silent, unavailable-link destinations appear in distinct readable notices, and the framework signature aligns right. The original answer text and link policy are unchanged.
 
 Destination typechecking, build, all 19 server/packaging tests and 55 browser checks passed. Browser checks cover both footer links, supplied/absent separators, 375px and 760px layout, unavailable host capability and light/dark notice contrast. Development deployment and actual-host verification are recorded separately from these local checks.
+
+## Stateless Hono HTTP hosting
+
+The HTTP listener now uses Hono and the official MCP request handler. A separate Hono project was generated with the SAGA CLI (`init --a2ui-stack lit-mcp --server hono`) as the adapter reference; the existing React view and its policy remain in place. The final stamped HTML and its SHA-256 URI are prepared before listening and reused across independent request servers. The old session map, expiry sweeper, replay store and per-call lifetime proxy are removed.
+
+New regressions first failed against the previous listener (session-free discovery returned 400 and HTML had not been prepared at listen time), then passed with the new implementation. App 0.12.9 passes typechecking, build and 18 server/packaging tests. The fresh public-only isolated install passes the same checks and 55 browser checks, then an uncached Node 22 Docker build and no-network/no-mount runtime smoke: modern session-free calls, exact resource hash, unchanged answer/attribution, safe failure/recovery and clean shutdown. The root frozen offline install also passes; unrelated lockfile importers and snapshots are preserved.
+
+This new transport has not been deployed or qualified in actual hosts. Earlier host captures above describe their named historical revision. The pending deployment retry for the older session-based footer build was retired because this migration supersedes it. No upstream merge or package publication is included.

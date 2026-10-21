@@ -25,7 +25,7 @@ async function callOnce(
   try {
     await client.connect(transport);
     const calls: {call: Call; elapsedMs: number}[] = [];
-    // One session, several calls: the budget belongs to each call, not to the session.
+    // Several independent HTTP calls: each receives a fresh request budget.
     for (const question of questions) {
       const started = performance.now();
       const call = await client.callTool({name: 'ask_ansari', arguments: {question}}, {timeout: 120_000}) as Call;
@@ -33,7 +33,7 @@ async function callOnce(
     }
     return {calls};
   } finally {
-    await transport.terminateSession(); await client.close(); await service.close();
+     await client.close(); await service.close();
   }
 }
 
@@ -61,7 +61,7 @@ for (const json of [false, true]) test(`a call that outlasts the request budget 
   assert.deepEqual(late.call.content, [{type: 'text', text: TOOL_UNAVAILABLE_TEXT}]);
   assert.equal(late.call.structuredContent, undefined);
   assert.ok(late.elapsedMs >= requestMs * 0.9 && late.elapsedMs < requestMs * 4, `the failure arrived after ${late.elapsedMs} ms`);
-  // A spent budget is not carried into later calls on the same session, and each later call gets a fresh one.
+  // A spent budget is not carried into later calls from the same client, and each later call gets a fresh one.
   for (const {call} of [first, second]) {
     assert.equal(call.isError, undefined);
     assert.equal((call.structuredContent as {version: string}).version, '0.1.0');

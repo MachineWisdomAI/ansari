@@ -1,6 +1,6 @@
 # Ansari Faithful Answers
 
-A standalone MCP application. `ask_ansari` calls the Ansari API and returns its complete answer and attribution unchanged. SAGA links each result to one content-addressed, self-contained React card. The application owns Ansari branding, floral artwork, theme mapping and HTTP sessions; SAGA owns content interpretation, FaithfulCard rendering, content policy, consent and MCP view linkage.
+A standalone MCP application. `ask_ansari` calls the Ansari API and returns its complete answer and attribution unchanged. SAGA links each result to one content-addressed, self-contained React card. The application owns Ansari branding, floral artwork, theme mapping and Hono HTTP hosting; SAGA owns content interpretation, FaithfulCard rendering, content policy, consent and MCP view linkage.
 
 ## How it works
 
@@ -37,10 +37,10 @@ Run from this directory. `build` writes `dist/view.html` and a bundled `dist/ser
 | `ANSARI_CLIENT` | Upstream client label (default `ansari-faithful-answers`). |
 | `MCP_ALLOWED_HOSTS` | Comma-separated additional HTTP Host names, without scheme. Localhost and 127.0.0.1 are allowed by default. Configure the public DEV host when deploying. |
 | `MCP_ALLOWED_ORIGINS` | Comma-separated additional allowed browser origins. |
-| `MCP_RESPONSE_MODE` | `json` for JSON responses; otherwise SSE. |
+| `MCP_RESPONSE_MODE` | `json` for modern MCP JSON responses; otherwise SSE. Older-host compatibility responses may use SSE. |
 | `ANSARI_RELEASE` | Optional safe release identifier, embedded in served HTML and health/log records. |
 
-`POST /mcp` initializes sessions and serves MCP requests; `GET /mcp` and `DELETE /mcp` use the same session transport. `/health` exposes the release. No demo, font server, alternative renderer or historical resource is served. Tool calls have a fresh 60-second budget; timeout yields a safe error and leaves subsequent calls usable. The budget bounds the MCP reply; it does not promise upstream fetch cancellation.
+`POST /mcp` serves stateless MCP requests through Hono and the official MCP request handler. Modern requests need no initialization; older hosts can use the handler’s stateless compatibility path. No MCP session IDs, session map, expiry timer or replay store are retained. `GET /mcp` and `DELETE /mcp` return 405. `/health` exposes the release. The HTML is read, revision-stamped and fingerprinted once before the listener opens. Each request creates its own lightweight MCP server using that prepared view; resource bytes and identity stay fixed until restart. No demo, font server, alternative renderer or historical resource is served. Tool calls have a fresh 60-second budget; timeout yields a safe error and leaves subsequent calls usable. The budget bounds the MCP reply; it does not promise upstream fetch cancellation.
 
 ## Workspace and container
 
@@ -80,3 +80,5 @@ ChatGPT, Claude and Alexa rendering remain separate integration checks.
 The footer framework credit is controlled by `BRANDING.showSagaCredit` in
 `src/view/branding.ts`. Set it to `false` to remove the credit. Its link uses
 the same content policy as answer links; Strict displays an inert text credit.
+
+The HTTP migration used a separate `saga init --a2ui-stack lit-mcp --server hono` reference project from the SDK CLI. The CLI creates new projects; it does not edit an existing application or require this React app to switch to Lit. Hono runs on Node through `@hono/node-server`; the official `@modelcontextprotocol/hono` middleware validates Host and Origin.

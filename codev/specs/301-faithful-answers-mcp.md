@@ -13,3 +13,5 @@ Import the qualified application with minimal workspace adaptation. Reimplementi
 ## Acceptance
 
 The destination branch installs and passes application typecheck/build/server/browser checks and isolated Docker smoke checks without private package credentials. Runtime assets contain real bytes. The exact destination revision is verified on DEV and captured on ChatGPT, Claude and Alexa before opening the contribution PR. Host reload limitations and unverified mobile behavior remain explicit; desktop checks do not prove mobile reliability.
+
+The HTTP listener uses Hono and stateless MCP by default, including stateless compatibility for older hosts. Prepare and validate the view before listening, reusing one stamped HTML/URI pair across requests. Per-request identity, budgets and cleanup remain isolated; no session map, sweeper or replay store is retained.

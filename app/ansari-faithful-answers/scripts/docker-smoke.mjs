@@ -17,15 +17,15 @@ const upstream=createServer(async(req,res)=>{
   res.writeHead(200,{'content-type':'text/plain; charset=utf-8'});res.end(answer);
 });
 await new Promise(resolve=>upstream.listen(4010,'127.0.0.1',resolve));
-let session; let id=0;
+let id=0;
 async function rpc(method,params={}) {
   const response=await fetch('http://127.0.0.1:3000/mcp',{
     method:'POST',signal:AbortSignal.timeout(15000),
-    headers:{'Content-Type':'application/json',Accept:'application/json, text/event-stream',...(session?{'mcp-session-id':session}:{})},
-    body:JSON.stringify({jsonrpc:'2.0',id:++id,method,params}),
+    headers:{'Content-Type':'application/json',Accept:'application/json, text/event-stream','MCP-Protocol-Version':'2026-07-28','Mcp-Method':method,...(params.name ? {'Mcp-Name':params.name} : params.uri ? {'Mcp-Name':params.uri} : {})},
+    body:JSON.stringify({jsonrpc:'2.0',id:++id,method,params:{...params,_meta:{'io.modelcontextprotocol/protocolVersion':'2026-07-28','io.modelcontextprotocol/clientInfo':{name:'synthetic-container',version:'1'},'io.modelcontextprotocol/clientCapabilities':{}}}}),
   });
   assert.equal(response.status,200);
-  session ||= response.headers.get('mcp-session-id');
+  assert.equal(response.headers.get('mcp-session-id'),null);
   const data=await response.json();assert.equal(data.id,id);assert.equal(data.error,undefined);
   return data.result;
 }
@@ -37,7 +37,6 @@ try {
   }
   assert.equal(health?.ok,true,'container did not become healthy');
   assert.equal(health.release,'ci-public-smoke');
-  await rpc('initialize',{protocolVersion:'2025-11-25',capabilities:{},clientInfo:{name:'synthetic-container',version:'1'}});
   const tools=await rpc('tools/list');assert.deepEqual(tools.tools.map(t=>t.name),['ask_ansari']);
   const resources=await rpc('resources/list');assert.equal(resources.resources.length,1);
   const uri=resources.resources[0].uri;

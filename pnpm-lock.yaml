@@ -36,12 +36,15 @@ importers:
 
   app/ansari-faithful-answers:
     dependencies:
+      '@hono/node-server':
+        specifier: 1.19.17
+        version: 1.19.17(hono@4.13.13)
       '@modelcontextprotocol/ext-apps':
         specifier: 2.0.3
         version: 2.0.3(@modelcontextprotocol/client@2.3.1)(@modelcontextprotocol/core@2.3.1)(@modelcontextprotocol/server@2.3.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(zod@4.6.7)
-      '@modelcontextprotocol/node':
-        specifier: 2.1.1
-        version: 2.1.1(@modelcontextprotocol/server@2.3.1)
+      '@modelcontextprotocol/hono':
+        specifier: 2.0.2
+        version: 2.0.2(@modelcontextprotocol/server@2.3.1)(hono@4.13.13)
       '@modelcontextprotocol/server':
         specifier: 2.3.1
         version: 2.3.1
@@ -57,6 +60,9 @@ importers:
       '@saga-a2ui/react':
         specifier: 0.5.4-rc.1
         version: 0.5.4-rc.1(@saga-a2ui/components@0.5.4-rc.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      hono:
+        specifier: 4.13.13
+        version: 4.13.13
       react:
         specifier: 19.3.1
         version: 19.3.1
@@ -8430,6 +8436,13 @@ packages:
 
   zod@4.6.7:
     resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
+
+  '@modelcontextprotocol/hono@2.0.2':
+    resolution: {integrity: sha512-hXtSVm0S6d0EJWMVoaeAWevATQLzHrHiPuPBLxW5vM5OQJG+SFlm7D9iJT5cG3p84DDahCD4bAuqcCPdgNFAEw==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      '@modelcontextprotocol/server': ^2.3.0
+      hono: ^4.11.4
 
 snapshots:
 
@@ -17541,3 +17554,8 @@ snapshots:
   zod@4.6.5: {}
 
   zod@4.6.7: {}
+
+  '@modelcontextprotocol/hono@2.0.2(@modelcontextprotocol/server@2.3.1)(hono@4.13.13)':
+    dependencies:
+      '@modelcontextprotocol/server': 2.3.1
+      hono: 4.13.13
