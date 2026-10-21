@@ -8,4 +8,23 @@ The destination's esbuild override resolves a newer patch than the source applic
 
 Claude and Gemini consultation were not completed; the three-model ASPIR consultation is incomplete. Independent Codex review is recorded separately and does not represent those missing reviews. Upstream merge remains a maintainer decision.
 
-Fresh public-only isolated installation, build, typecheck, 19 server tests, 47 browser checks, uncached Docker build and no-network/no-mount runtime smoke all passed. The runtime smoke verifies one tool/current resource, complete answer preservation, safe failure and recovery, content-addressed HTML and graceful shutdown. Destination-revision actual-host verification remains pending. Prior host observations are not claimed as destination-branch acceptance. Mobile behavior remains a separate diagnostic: user supplied working RC and Host QA screenshots, while regular DEV failed.
+Fresh public-only isolated installation, build, typecheck, 19 server tests, 47 browser checks, uncached Docker build and no-network/no-mount runtime smoke all passed. The runtime smoke verifies one tool/current resource, complete answer preservation, safe failure and recovery, content-addressed HTML and graceful shutdown.
+## Destination-branch host verification
+
+The app from commit `ef6b9724a8bb8541fecbf37dc5a21449b8e2e920` was built using the four public `@saga-a2ui/*@0.5.4-rc.1` packages and deployed to DEV. On 2026-10-21, representative synthetic greeting answers rendered in ChatGPT, Claude and the Alexa+ simulator. Each rendered document reported the exact destination revision, version `0.12.7`, and loaded Kitab regular and bold fonts. Complete answer text, Ansari attribution and the separate “Built with saga a2ui” footer were present.
+
+Alexa's actual cached HTML matched the served resource byte-for-byte: 1,682,873 bytes, SHA-256 `be4f0c0e1b67ccd37b40770c8247b3d1f3230ff38113a59cd0523ccb73af33c2`.
+
+These screenshots establish rendering, not reliable first-load behavior. ChatGPT initially failed to display the card and recovered with one embedded retry. Claude required reconnecting its existing connector after a discovery failure, then displayed an embed error; it eventually rendered after the retry/native reload sequence. Alexa delivered the correct HTML fragment promptly but rendered several minutes later without another question or deployment. The cause of these startup delays/failures is unproven. The reported regular-DEV mobile failure remains unresolved; working RC and Host QA mobile screenshots do not establish destination-build mobile acceptance.
+
+### ChatGPT
+
+![Destination-build answer in ChatGPT](assets/301-faithful-answers/chatgpt.png)
+
+### Claude
+
+![Destination-build answer in Claude](assets/301-faithful-answers/claude.png)
+
+### Alexa+
+
+![Destination-build answer in Alexa simulator](assets/301-faithful-answers/alexa.png)
