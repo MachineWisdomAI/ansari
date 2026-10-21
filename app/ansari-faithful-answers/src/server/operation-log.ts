@@ -57,16 +57,3 @@ export function writeOperationLog(
   }
   logger(payload);
 }
-
-export function jsonRpcMeta(body: unknown): { method?: string; requestId?: string | number | null } {
-  if (!body || typeof body !== 'object') {
-    return {};
-  }
-  const record = body as { method?: unknown; id?: unknown };
-  const method = typeof record.method === 'string' ? record.method : undefined;
-  const requestId =
-    typeof record.id === 'string' || typeof record.id === 'number' || record.id === null
-      ? record.id
-      : undefined;
-  return { method, requestId };
-}

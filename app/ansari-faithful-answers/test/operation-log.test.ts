@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   DEFAULT_RELEASE,
-  jsonRpcMeta,
   stampHtmlRevision,
   writeOperationLog,
 } from '../src/server/operation-log.ts';
@@ -32,13 +31,6 @@ describe('operation log', () => {
     assert.equal(serialized.includes('raw-session-token'), false);
     assert.match(serialized, /"event":"tool.start"/);
     assert.match(serialized, new RegExp(`"release":"${DEFAULT_RELEASE}"`));
-  });
-
-  it('extracts method and request id without params', () => {
-    assert.deepEqual(
-      jsonRpcMeta({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { question: 'nope' } }),
-      { method: 'tools/call', requestId: 3 },
-    );
   });
 
   it('fingerprints answer bytes without retaining the text', () => {
