@@ -105,11 +105,11 @@ async function main() {
   await page.waitForFunction(() => (window as any).hostProbe);
 
   let counter = 0;
-  async function openView(width = 760, height = 900, document = bytes): Promise<{id: string; frame: Frame}> {
+  async function openView(width = 760, height = 900, document = bytes, openLinks = true): Promise<{id: string; frame: Frame}> {
     const id = `view${++counter}`;
     const path = `/${id}`;
     served.set(path, document);
-    await page.evaluate(({id, url, sandbox}) => (window as any).hostProbe.create(id, url, true, sandbox), {id, url: `http://127.0.0.1:${ports[1]}${path}`, sandbox: SANDBOX});
+    await page.evaluate(({id, url, sandbox, openLinks}) => (window as any).hostProbe.create(id, url, true, sandbox, openLinks), {id, url: `http://127.0.0.1:${ports[1]}${path}`, sandbox: SANDBOX, openLinks});
     await page.evaluate(({id, width, height}) => (window as any).hostProbe.resize(id, width, height), {id, width, height});
     const frame = (await (await page.locator(`#${id}`).elementHandle())!.contentFrame())!;
     await page.waitForFunction(id => (window as any).hostProbe.state(id).initialized, id);
@@ -179,6 +179,26 @@ async function main() {
     for (const part of order) { const next = shownA.cardText.indexOf(part, at + 1); assert.ok(next > at, `${part} follows the previous part`); at = next; }
   });
   check('answer-A:attribution-footer-selected', () => assert.equal(shownA.attribution, true));
+  for (const width of [375, 760]) {
+    await page.evaluate(({id, width}) => (window as any).hostProbe.resize(id, width, 900), {id: first.id, width});
+    await settle(first.frame);
+    const footer = await first.frame.evaluate(() => {
+      const content = document.querySelector('.saga-card-content')!;
+      const paragraph = content.lastElementChild!;
+      const credit = document.querySelector('.saga-credit')!;
+      return {
+        ruleCount: Array.from(content.querySelectorAll('hr')).filter(el => getComputedStyle(el).display !== 'none').length,
+        border: getComputedStyle(paragraph).borderTopWidth,
+        alignment: getComputedStyle(credit).textAlign,
+        overflow: document.documentElement.scrollWidth > window.innerWidth,
+      };
+    });
+    check(`footer:${width}:one-rule-and-right-aligned-signature`, () => {
+      assert.equal(footer.ruleCount + (parseFloat(footer.border) > 0 ? 1 : 0), 1);
+      assert.equal(footer.alignment, 'right');
+      assert.equal(footer.overflow, false);
+    });
+  }
   const numbersA = await displayedNumbers(first.id);
   const listsA = await first.frame.evaluate(() => {
     const content = (el: Element, pseudo: string) => getComputedStyle(el, pseudo).content;
@@ -218,17 +238,67 @@ async function main() {
   });
 
   await first.frame.locator('[data-testid="md-link"]').click();
-  await first.frame.locator('[data-testid="md-link-status"]').filter({hasText: 'The host was asked to open this link.'}).waitFor();
+  await first.frame.locator('[data-testid="md-link-status"][data-outcome="opened"]').waitFor({state: 'attached'});
+  const attributionNoticeVisible = await first.frame.locator('[data-testid="md-link-status"]').isVisible();
+  check('links:successful-attribution-is-silent', () => assert.equal(attributionNoticeVisible, false));
   const opened = await page.evaluate(id => (window as any).hostProbe.state(id).openLinks, first.id);
   check('links:attribution-link-reaches-host-only-through-openLink', () => assert.deepEqual(opened, ['https://ansari.chat/']));
 
   await first.frame.getByRole('button', {name: 'saga a2ui', exact: true}).click();
-  await first.frame.locator('[data-testid="saga-credit"] [role="status"]').filter({hasText: 'The host was asked to open this link.'}).waitFor();
+  await page.waitForFunction(id => (window as any).hostProbe.state(id).openLinks.length === 2, first.id);
+  await settle(first.frame);
+  const creditNotice = await first.frame.locator('[data-testid="saga-credit"] [role="status"]').textContent();
+  check('links:successful-credit-is-silent', () => assert.equal(creditNotice, ''));
   const creditOpened = await page.evaluate(id => (window as any).hostProbe.state(id).openLinks, first.id);
   check('links:saga-credit-follows-unchanged-answer-and-uses-host', () => {
     assert.deepEqual(creditOpened, ['https://ansari.chat/', 'https://github.com/MachineWisdomAI/saga-a2ui']);
     assert.ok(!shownA.cardText.includes('Built with'));
   });
+
+  // Both attribution and signature use visibly separate notices when the host cannot open links.
+  const unavailable = await openView(375, 900, bytes, false);
+  await deliver(unavailable.id, resultA);
+  for (const [button, status, destination] of [
+    ['[data-testid="md-link"]', '[data-testid="md-link-status"]', 'https://ansari.chat/'],
+    ['.saga-credit button', '.saga-credit [role="status"]', 'https://github.com/MachineWisdomAI/saga-a2ui'],
+  ] as const) {
+    await unavailable.frame.locator(button).click();
+    await unavailable.frame.locator(status).filter({hasText: 'This host cannot open links.'}).waitFor();
+    const notice = await unavailable.frame.locator(status).evaluate(el => ({
+      text: el.textContent, border: getComputedStyle(el).borderInlineStartWidth,
+      label: getComputedStyle(el, '::before').content,
+      overflow: document.documentElement.scrollWidth > window.innerWidth,
+    }));
+    check(`links:unavailable-notice:${destination}`, () => {
+      assert.equal(notice.text, `This host cannot open links. Destination: ${destination}`);
+      assert.ok(parseFloat(notice.border) > 0);
+      assert.equal(notice.label, '"Link notice"');
+      assert.equal(notice.overflow, false);
+    });
+  }
+  for (const theme of ['light', 'dark'] as const) {
+    await page.evaluate(({id, theme}) => (window as any).hostProbe.theme(id, theme), {id: unavailable.id, theme});
+    await unavailable.frame.waitForFunction(theme => document.documentElement.getAttribute('data-theme') === theme, theme);
+    const ratios = await unavailable.frame.locator('[role="status"]').evaluateAll(elements => {
+      const luminance = (color: string) => {
+        const rgb = color.match(/[\d.]+/g)!.slice(0, 3).map(Number).map(c => {
+          const s = c / 255;
+          return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+        });
+        return rgb[0]! * 0.2126 + rgb[1]! * 0.7152 + rgb[2]! * 0.0722;
+      };
+      return elements.filter(el => el.textContent).map(el => {
+        const style = getComputedStyle(el);
+        const a = luminance(style.color), b = luminance(style.backgroundColor);
+        return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+      });
+    });
+    check(`links:${theme}:readable-notices`, () => {
+      assert.equal(ratios.length, 2);
+      for (const ratio of ratios) assert.ok(ratio >= 4.5, `contrast ${ratio}`);
+    });
+    await page.locator(`#${unavailable.id}`).screenshot({path: `${out}/footer-link-notices-${theme}.png`});
+  }
 
   await deliver(first.id, resultB);
   await first.frame.getByText('الصبر مفتاح الفرج', {exact: false}).waitFor();
@@ -244,6 +314,7 @@ async function main() {
     itemPad: {left: getComputedStyle(document.querySelector('.saga-card-content ol > li')!).paddingLeft, right: getComputedStyle(document.querySelector('.saga-card-content ol > li')!).paddingRight},
     attribution: document.querySelector('.answer-card')!.hasAttribute('data-attribution'),
     footerDir: getComputedStyle(document.querySelector('.saga-card-content > p:last-child')!).direction,
+    footerBorder: getComputedStyle(document.querySelector('.saga-card-content > p:last-child')!).borderTopWidth,
   }));
   check('two-answers:one-mounted-view-answer-B-replaces-A', () => {
     assert.equal(shownB.same, true);
@@ -259,6 +330,7 @@ async function main() {
     assert.ok(parseFloat(shownB.itemPad.right) > parseFloat(shownB.itemPad.left), 'the disk sits on the inline start (right) side');
     assert.equal(shownB.attribution, true);
     assert.equal(shownB.footerDir, 'ltr');
+    assert.equal(shownB.footerBorder, '1px', 'an answer without a supplied rule keeps the footer border');
   });
 
   // ---- Answer without attribution gets no footer treatment ---------------------------------------
@@ -458,7 +530,7 @@ async function main() {
           assert.equal(g.markerW, '64px');
           assert.equal(g.markerFont, '25px');
           assert.equal(g.footerFont, '14px');
-          assert.equal(g.footerBorder, '1px');
+          assert.equal(g.footerBorder, '0px');
           assert.equal(g.card.w <= 680, true);
         } else {
           assert.equal(m.cardFont, '16px');

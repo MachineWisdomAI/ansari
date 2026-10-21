@@ -1,2 +1,2 @@
 // One application identity, shared by the server and built view.
-export const APP_VERSION = '0.12.7';
+export const APP_VERSION = '0.12.8';

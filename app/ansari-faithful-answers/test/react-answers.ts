@@ -12,6 +12,7 @@ export const ANSWER_A = [
   '4. Fourth point\n   1. nested one\n   2. nested two',
   '- a bullet',
   '> a quoted line',
+  '---',
   ATTRIBUTION,
 ].join('\n\n');
 

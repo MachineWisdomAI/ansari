@@ -320,6 +320,12 @@ body {
   line-height: 1.5;
 }
 
+/* The supplied thematic break already separates the attribution from the answer. */
+.answer-card[data-attribution] .saga-card-content > hr + p:last-child {
+  border-top: 0;
+  margin-block-start: 0;
+}
+
 .answer-card[data-attribution] .saga-card-content > p:last-child strong {
   font-weight: inherit;
 }
@@ -367,7 +373,7 @@ body {
 .answer-card[data-attribution] > .saga-credit {
   display: block;
   margin-block-start: calc(6px * var(--rs));
-  padding-inline-start: calc(36px * var(--rs));
+  text-align: right;
   color: var(--ansari-secondary);
   font-size: calc(14px * var(--rs));
   line-height: 1.5;
@@ -381,4 +387,33 @@ body {
   padding: 0;
   text-decoration: underline;
   cursor: pointer;
+}
+
+/* Link feedback is application UI, visually separate from the supplied answer. Successful
+ * requests stay silent, including with SDK versions that still supply success text. */
+.answer-card .saga-card-link-status:empty,
+.answer-card .saga-card-link-status[data-outcome="opened"],
+.saga-credit [role="status"]:empty { display: none; }
+
+.answer-card .saga-card-link-status:not(:empty):not([data-outcome="opened"]),
+.saga-credit [role="status"]:not(:empty) {
+  display: block;
+  margin-block: calc(8px * var(--rs));
+  padding: calc(8px * var(--rs)) calc(12px * var(--rs));
+  border: 1px solid var(--ansari-line);
+  border-inline-start: 3px solid var(--ansari-link);
+  border-radius: calc(6px * var(--rs));
+  background: var(--ansari-code);
+  color: var(--ansari-ink);
+  font-size: calc(14px * var(--rs));
+  line-height: 1.5;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+
+.answer-card .saga-card-link-status:not(:empty):not([data-outcome="opened"])::before,
+.saga-credit [role="status"]:not(:empty)::before {
+  content: 'Link notice';
+  display: block;
+  font-weight: 600;
 }

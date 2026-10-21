@@ -28,3 +28,9 @@ These screenshots establish rendering, not reliable first-load behavior. ChatGPT
 ### Alexa+
 
 ![Destination-build answer in Alexa simulator](assets/301-faithful-answers/alexa.png)
+
+## Footer repair (0.12.8)
+
+The attribution now uses the answer's supplied separator when present, keeping its own border only when no separator is supplied. Successful link requests remain silent, unavailable-link destinations appear in distinct readable notices, and the framework signature aligns right. The original answer text and link policy are unchanged.
+
+Destination typechecking, build, all 19 server/packaging tests and 55 browser checks passed. Browser checks cover both footer links, supplied/absent separators, 375px and 760px layout, unavailable host capability and light/dark notice contrast. Development deployment and actual-host verification are recorded separately from these local checks.

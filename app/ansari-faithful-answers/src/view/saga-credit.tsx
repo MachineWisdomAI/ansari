@@ -19,7 +19,7 @@ export function SagaCredit({view, enabled}: {readonly view: Pick<FaithfulCardVie
     const current = view.policy.decideLink(REPOSITORY);
     if (!current.allowed) return;
     const outcome = await view.hostLinks.open(current.url);
-    if (active.current) setStatus(describeLinkOutcome(outcome, current.url));
+    if (active.current) setStatus(outcome === 'opened' ? '' : describeLinkOutcome(outcome, current.url));
   }
   return <footer className="saga-credit" data-testid="saga-credit" dir="ltr">
     Built with {decision.allowed
