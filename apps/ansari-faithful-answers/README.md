@@ -8,7 +8,7 @@ A standalone MCP application. `ask_ansari` calls the Ansari API and returns its 
 
 ## Screenshots
 
-English and Arabic answer cards rendered in ChatGPT desktop web through the Dev connection on October 23, 2026. Both rendered on first load with application revision `ee7ea4a78933544c4a96577d7ffd7276df8ae037` and public npm SAGA SDK `0.7.6-rc.1`. Arabic headings, paragraphs and lists use RTL layout and the embedded Kitab fonts. These captures establish desktop web rendering; they do not establish mobile, Claude or Alexa acceptance for this revision.
+English and Arabic answer cards rendered in ChatGPT desktop web through the Dev connection on October 23, 2026. Both rendered on first load with application revision `ee7ea4a78933544c4a96577d7ffd7276df8ae037` and public npm SAGA SDK `0.7.6-rc.1`. Arabic headings, paragraphs and lists use RTL layout and the embedded Kitab fonts. The application owner also supplied the ChatGPT and Claude mobile captures below. Alexa acceptance remains unverified for this revision.
 
 ### English
 
@@ -17,6 +17,18 @@ English and Arabic answer cards rendered in ChatGPT desktop web through the Dev 
 ### Arabic
 
 ![Arabic answer card in ChatGPT Dev, showing RTL text, numbered floral markers and attribution](docs/screenshots/chatgpt-dev-arabic.jpg)
+
+### ChatGPT mobile
+
+User-provided capture of the Dev answer card in ChatGPT, showing English text and floral branding.
+
+![Ansari Faithful Answers Dev card in ChatGPT mobile](docs/screenshots/chatgpt-dev-mobile.jpg)
+
+### Claude mobile
+
+User-provided capture of the Dev answer card in Claude, showing Arabic text, RTL layout and numbered floral markers.
+
+![Ansari Faithful Answers Dev card in Claude mobile with Arabic RTL content](docs/screenshots/claude-dev-mobile.jpg)
 
 ## Dependencies
 
