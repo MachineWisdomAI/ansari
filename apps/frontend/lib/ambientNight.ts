@@ -66,10 +66,10 @@ export type AmbientTreatment =
  * posters, which is what keeps the still and the video from stepping as
  * one fades over the other.
  *
- * The portrait and landscape clips were graded differently — landscape
- * carries barely two thirds of portrait's contrast — so they cannot
- * share one grade. Anchoring each to its own numbers is what makes the
- * desktop layer read like the phone one instead of a paler copy.
+ * The portrait and landscape clips are graded within a level of each
+ * other now, but anchoring each to its own measured numbers — rather
+ * than assuming they match — is what keeps the desktop layer reading
+ * like the phone one if a future re-grade pulls them apart again.
  *
  * Re-exporting the clips invalidates all of this; `ambientNight.test.ts`
  * pins the numbers so that goes noticed rather than shipping.
@@ -78,8 +78,8 @@ export const NIGHT_SOURCE: Record<
   Clip,
   { min: number; frond: number; wall: number }
 > = {
-  portrait: { min: 0.631, frond: 0.659, wall: 0.898 },
-  landscape: { min: 0.635, frond: 0.663, wall: 0.894 },
+  portrait: { min: 0.631, frond: 0.671, wall: 0.898 },
+  landscape: { min: 0.635, frond: 0.671, wall: 0.894 },
 };
 
 /**
