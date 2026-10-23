@@ -6,6 +6,18 @@ A standalone MCP application. `ask_ansari` calls the Ansari API and returns its 
 
 [Explore the interactive walkthrough](docs/show-me-ansari-faithful-answers.html) for the complete question-to-card flow, UI states, code ownership and build process. Its hosted lifecycle addendum compares Alexa+, ChatGPT and Claude from build and deployment through discovery, requests, rendering and teardown. Download the self-contained HTML and open it in a browser; GitHub displays its source. The walkthrough uses synthetic content and makes no live requests.
 
+## Screenshots
+
+English and Arabic answer cards rendered in ChatGPT desktop web through the Dev connection on October 23, 2026. Both rendered on first load with application revision `ee7ea4a78933544c4a96577d7ffd7276df8ae037` and public npm SAGA SDK `0.7.6-rc.1`. Arabic headings, paragraphs and lists use RTL layout and the embedded Kitab fonts. These captures establish desktop web rendering; they do not establish mobile, Claude or Alexa acceptance for this revision.
+
+### English
+
+![English answer card in ChatGPT Dev, showing the complete answer, floral branding, attribution and SAGA credit](docs/screenshots/chatgpt-dev-english.png)
+
+### Arabic
+
+![Arabic answer card in ChatGPT Dev, showing RTL text, numbered floral markers and attribution](docs/screenshots/chatgpt-dev-arabic.png)
+
 ## Dependencies
 
 SAGA is installed from the public npm registry at one exact release, `0.7.6-rc.1` (a prerelease): the stack `@saga-a2ui/react-mcp-stack`
