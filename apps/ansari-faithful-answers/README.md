@@ -12,11 +12,11 @@ English and Arabic answer cards rendered in ChatGPT desktop web through the Dev 
 
 ### English
 
-![English answer card in ChatGPT Dev, showing the complete answer, floral branding, attribution and SAGA credit](docs/screenshots/chatgpt-dev-english.png)
+![English answer card in ChatGPT Dev, showing the complete answer, floral branding, attribution and SAGA credit](docs/screenshots/chatgpt-dev-english.jpg)
 
 ### Arabic
 
-![Arabic answer card in ChatGPT Dev, showing RTL text, numbered floral markers and attribution](docs/screenshots/chatgpt-dev-arabic.png)
+![Arabic answer card in ChatGPT Dev, showing RTL text, numbered floral markers and attribution](docs/screenshots/chatgpt-dev-arabic.jpg)
 
 ## Dependencies
 
