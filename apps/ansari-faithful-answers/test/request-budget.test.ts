@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {Client, StreamableHTTPClientTransport} from '@modelcontextprotocol/client';
 import type {AnswerCompleter} from '../src/server/ansari-client.ts';
-import {listen} from '../src/server/http-server.ts';
+import {listen} from '../src/node/http-server.ts';
 import {TOOL_UNAVAILABLE_TEXT} from '../src/server/create-server.ts';
 
 // The tool declares a 60 s handler wait. The SDK's default 10 s request budget must not clamp it, and a call

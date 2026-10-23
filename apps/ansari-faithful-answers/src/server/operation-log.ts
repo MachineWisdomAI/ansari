@@ -19,21 +19,12 @@ const FORBIDDEN = new Set([
   'body',
 ]);
 
-const SAFE_REVISION = /^[A-Za-z0-9._+-]{1,80}$/;
+export const SAFE_REVISION = /^[A-Za-z0-9._+-]{1,80}$/;
 
 import {APP_VERSION} from '../version.js';
 export const DEFAULT_RELEASE = APP_VERSION;
 
-export function deployedRevision(): string {
-  for (const value of [process.env.ANSARI_RELEASE, process.env.RAILWAY_GIT_COMMIT_SHA]) {
-    if (value && SAFE_REVISION.test(value)) {
-      return value;
-    }
-  }
-  return DEFAULT_RELEASE;
-}
-
-export function stampHtmlRevision(html: string, revision = deployedRevision()): string {
+export function stampHtmlRevision(html: string, revision: string = DEFAULT_RELEASE): string {
   const safe = SAFE_REVISION.test(revision) ? revision : DEFAULT_RELEASE;
   if (/data-revision=/.test(html)) {
     return html.replace(/data-revision="[^"]*"/, `data-revision="${safe}"`);
@@ -41,15 +32,13 @@ export function stampHtmlRevision(html: string, revision = deployedRevision()): 
   return html.replace(/<body([^>]*)>/, `<body$1 data-revision="${safe}">`);
 }
 
-export function defaultOperationLogger(record: OperationRecord): void {
-  process.stdout.write(`${JSON.stringify(record)}\n`);
-}
-
+/** Records go to an explicit logger and release: standard output under Node, the console under Workers. */
 export function writeOperationLog(
   record: OperationRecord,
-  logger: OperationLogger = defaultOperationLogger,
+  logger: OperationLogger,
+  release: string = DEFAULT_RELEASE,
 ): void {
-  const payload: OperationRecord = { release: deployedRevision(), ...record };
+  const payload: OperationRecord = { release, ...record };
   for (const key of Object.keys(payload)) {
     if (FORBIDDEN.has(key)) {
       delete payload[key];

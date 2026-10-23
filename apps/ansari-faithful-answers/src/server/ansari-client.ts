@@ -18,16 +18,17 @@ export type AnsariHttpOptions = {
 
 /**
  * Direct POST /api/v2/mcp-complete. Returns the exact text/plain body,
- * including Ansari attribution. No hosted-MCP forwarding.
+ * including Ansari attribution. No hosted-MCP forwarding. Settings are explicit
+ * options; the hosting adapter reads them from its own environment.
  */
 export function createAnsariHttpCompleter(options: AnsariHttpOptions = {}): AnswerCompleter {
-  const baseUrl = (options.baseUrl ?? process.env.ANSARI_API_BASE_URL ?? DEFAULT_ANSARI_API_BASE).replace(
+  const baseUrl = (options.baseUrl ?? DEFAULT_ANSARI_API_BASE).replace(
     /\/$/,
     '',
   );
-  const clientName = options.clientName ?? process.env.ANSARI_CLIENT ?? DEFAULT_ANSARI_CLIENT;
+  const clientName = options.clientName ?? DEFAULT_ANSARI_CLIENT;
   const fetchImpl = options.fetchImpl ?? fetch;
-  const authorization = options.authorization ?? process.env.ANSARI_API_AUTHORIZATION;
+  const authorization = options.authorization;
 
   return {
     async complete({ question }) {

@@ -2,8 +2,9 @@ FROM node:22-slim AS build
 WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 COPY . .
-RUN printf 'packages: []\ncatalog:\n  typescript: ~6.0.3\noverrides:\n  "@a2ui/markdown-it": "0.2.1"\n' > pnpm-workspace.yaml
-RUN node scripts/check-release.mjs && pnpm install --strict-peer-dependencies && pnpm build
+# pnpm-workspace.yaml carries the adapter override; the committed lockfile fixes every other version, including the exact
+# public SAGA release from the npm registry. No credentials or local packages are needed.
+RUN pnpm install --strict-peer-dependencies --frozen-lockfile && pnpm build
 FROM node:22-slim
 WORKDIR /app
 ENV NODE_ENV=production PORT=3000

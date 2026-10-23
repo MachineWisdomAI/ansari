@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
+import {execFileSync} from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import {Client, StreamableHTTPClientTransport} from '@modelcontextprotocol/client';
-import {viewUriForHtml} from '@saga-a2ui/mcp/server';
+import {createContentPolicy} from '@saga-a2ui/react-mcp-stack/content-policy';
+import {viewUriForHtml} from '@saga-a2ui/react-mcp-stack/server';
 import {chromium, type Frame, type Page} from '@playwright/test';
 import {build, preview} from 'vite';
-import {createHttpServer as createBaseHttpServer} from '../src/server/http-server.ts';
+import {createHttpServer as createBaseHttpServer} from '../src/node/http-server.ts';
 import {stampHtmlRevision} from '../src/server/operation-log.ts';
+import {VIEW_FILENAME} from '../src/server/view-artifact.ts';
 import {ANSWER_A, ANSWER_B, ANSWER_C, ANSWER_HOSTILE, ATTRIBUTION_CASES, QUESTION_A, QUESTION_B} from './react-answers.ts';
 
 const root = new URL('./', import.meta.url).pathname;
@@ -58,11 +61,11 @@ async function main() {
   await client.connect(transport);
 
   // ---- The served resource: exact bytes, identity, resource rules ---------------------------------
-  const viewUri = viewUriForHtml(stampHtmlRevision(html));
+  const viewUri = viewUriForHtml(stampHtmlRevision(html), VIEW_FILENAME);
   const resource = await client.readResource({uri: viewUri});
   const bytes = String((resource.contents[0] as {text: string}).text);
   check('resource:exact-served-bytes', () => assert.equal(bytes, stampHtmlRevision(html)));
-  check('resource:uri-is-sha256-of-served-bytes', () => assert.equal(viewUri, `ui://sha256/${sha(bytes)}.html`));
+  check('resource:uri-is-sha256-fingerprint-of-served-bytes', () => assert.equal(viewUri, `ui://views/${VIEW_FILENAME.replace(/\.html$/, '')}.${sha(bytes).slice(0, 32)}.html`));
   const meta = (resource.contents[0] as any)._meta;
   check('resource:closed-csp-no-origins', () => assert.deepEqual(meta.ui.csp, {connectDomains: [], resourceDomains: [], frameDomains: [], baseUriDomains: []}));
   const callTool = (question: string) => client.callTool({name: 'ask_ansari', arguments: {question}});
@@ -148,8 +151,69 @@ async function main() {
     assert.deepEqual(strictOpens, []);
   });
 
+  // ---- Start failures are worded apart: policy, connection and fonts ---------------------------
+  // A view that did not start says why, in the application's own sentence. The font failure is not a
+  // connection failure: the host connected and the handshake completed before the fonts were refused.
+  const START_FAILURES = {
+    policy: 'This view could not start: its content policy is not valid.',
+    connect: 'The answer card could not connect. Please retry the question.',
+    fonts: 'The answer card could not load its fonts. Please retry the question.',
+  };
+  async function openStartFailure(html: string, connect: true | 'reject'): Promise<{id: string; frame: Frame; body: () => Promise<string>}> {
+    const id = `view${++counter}`;
+    served.set(`/${id}`, html);
+    await page.evaluate(({id, url, sandbox, connect}) => (window as any).hostProbe.create(id, url, connect, sandbox, true), {id, url: `http://127.0.0.1:${ports[1]}/${id}`, sandbox: SANDBOX, connect});
+    const frame = (await (await page.locator(`#${id}`).elementHandle())!.contentFrame())!;
+    return {id, frame, body: async () => (await frame.evaluate(() => document.body.innerText)).trim()};
+  }
+  const seenBy = (id: string) => page.evaluate(id => (window as any).hostProbe.state(id), id);
+  const kitabRegular = fs.readFileSync(new URL('../assets/fonts/Kitab-Regular.ttf', import.meta.url)).toString('base64');
+  assert.ok(bytes.includes(kitabRegular), 'the Regular face is embedded verbatim');
+  const brokenFonts = bytes.replace(kitabRegular, 'A'.repeat(kitabRegular.length));
+  const invalidPolicy = bytes.replace(/(<script[^>]*id="saga-content-policy"[^>]*>)[\s\S]*?(<\/script>)/, '$1{not json$2');
+  assert.notEqual(invalidPolicy, bytes, 'the invalid-policy fixture replaces the embedded policy');
+  const policyFailed = await openStartFailure(invalidPolicy, true);
+  await policyFailed.frame.getByText(START_FAILURES.policy).waitFor();
+  const policyState = await seenBy(policyFailed.id);
+  const policyCards = await policyFailed.frame.evaluate(() => document.querySelectorAll('.answer-card, .saga-card').length);
+  check('start-failure:invalid-policy-shows-its-text-and-never-connects', () => {
+    assert.equal(policyCards, 0);
+    assert.ok(!policyState.seen.includes('ui/initialize'), 'no handshake was started on a guessed policy');
+  });
+  assert.equal(await policyFailed.body(), START_FAILURES.policy);
+  const connectFailed = await openStartFailure(bytes, 'reject');
+  await connectFailed.frame.getByText(START_FAILURES.connect).waitFor();
+  const connectState = await seenBy(connectFailed.id);
+  check('start-failure:host-rejecting-the-handshake-shows-the-connect-text', () => {
+    assert.equal(connectState.rejected, 1);
+    assert.equal(connectState.initialized, false);
+  });
+  assert.equal(await connectFailed.body(), START_FAILURES.connect);
+  const fontsFailed = await openStartFailure(brokenFonts, true);
+  await fontsFailed.frame.getByText(START_FAILURES.fonts).waitFor();
+  const fontsState = await seenBy(fontsFailed.id);
+  const fontsBody = await fontsFailed.body();
+  check('start-failure:font-failure-shows-the-ready-text-and-is-not-a-connect-failure', () => {
+    assert.ok(fontsState.seen.includes('ui/initialize'), 'the host handshake was reached');
+    assert.equal(fontsBody, START_FAILURES.fonts);
+    assert.notEqual(START_FAILURES.fonts, START_FAILURES.connect);
+    assert.equal(new Set(Object.values(START_FAILURES)).size, 3, 'the three start failures read differently');
+  });
+  await deliver(fontsFailed.id, {content: [], structuredContent: {version: '0.1.0', question: 'q', answer: 'never shown'}}).catch(() => {});
+  await settle(fontsFailed.frame);
+  const fontsAfter = await fontsFailed.body();
+  check('start-failure:no-answer-appears-on-a-view-whose-fonts-failed', () => assert.equal(fontsAfter, START_FAILURES.fonts));
+
   // ---- Neutral initial state ------------------------------------------------------------------
   const first = await openView();
+  // The document the host mounted names the SDK artifacts it was built from, beside the application release.
+  const sdkIdentity = JSON.parse(execFileSync(process.execPath, [new URL('../scripts/sdk-identity.mjs', import.meta.url).pathname], {encoding: 'utf8'}));
+  const mounted = await first.frame.evaluate(() => { const data = document.body.dataset; return {release: data.release, sdkKind: data.sdkKind, sdkVersion: data.sdkVersion, sdkSource: data.sdkSource, sdkStackSha256: data.sdkStackSha256, sdkSetSha256: data.sdkSetSha256, meta: document.querySelector('meta[name="ansari-sdk"]')?.getAttribute('content')}; });
+  check('document:sdk-identity-beside-release', () => {
+    assert.deepEqual({kind: mounted.sdkKind, version: mounted.sdkVersion, source: mounted.sdkSource, stackSha256: mounted.sdkStackSha256, setSha256: mounted.sdkSetSha256}, sdkIdentity);
+    assert.equal(mounted.meta, sdkIdentity.version);
+    assert.match(mounted.release ?? '', /^\d+\.\d+\.\d+/);
+  });
   const initial = await first.frame.evaluate(() => ({
     status: document.querySelector('[data-testid="answer-status"]')?.textContent, cards: document.querySelectorAll('.answer-card, .saga-card').length,
     body: document.body.innerText.trim(),
@@ -167,7 +231,7 @@ async function main() {
   await first.frame.evaluate(() => { (document.querySelector('main') as any).__mounted = 'same'; (document.getElementById('root') as any).__mounted = 'same'; });
   const shownA = await first.frame.evaluate(() => ({
     question: document.querySelector('[data-testid="question"]')?.textContent,
-    cardText: (document.querySelector('[data-testid="card-content"]') as HTMLElement).innerText,
+    cardText: (document.querySelector('.saga-card-content') as HTMLElement).innerText,
     attribution: document.querySelector('.answer-card')!.hasAttribute('data-attribution'),
     status: document.querySelector('[data-testid="answer-status"]')?.textContent,
   }));
@@ -228,7 +292,7 @@ async function main() {
     assert.equal(listsA.nestedBox.w, '44px');
     assert.match(listsA.topBox.bg, /url\("data:image\/png;base64,/);
   });
-  const aria = await first.frame.locator('[data-testid="card-content"]').ariaSnapshot();
+  const aria = await first.frame.locator('.saga-card-content').ariaSnapshot();
   evidence.ariaA = aria;
   check('numbering:accessible-list-semantics', () => {
     assert.match(aria, /- list:/);
@@ -237,9 +301,10 @@ async function main() {
     assert.ok(!/"?3"?\s*3/.test(aria));
   });
 
-  await first.frame.locator('[data-testid="md-link"]').click();
-  await first.frame.locator('[data-testid="md-link-status"][data-outcome="opened"]').waitFor({state: 'attached'});
-  const attributionNoticeVisible = await first.frame.locator('[data-testid="md-link-status"]').isVisible();
+  await first.frame.locator('.saga-card-link').click();
+  await page.waitForFunction(id => (window as any).hostProbe.state(id).openLinks.length === 1, first.id);
+  await settle(first.frame);
+  const attributionNoticeVisible = await first.frame.locator('.saga-card-link-status').isVisible();
   check('links:successful-attribution-is-silent', () => assert.equal(attributionNoticeVisible, false));
   const opened = await page.evaluate(id => (window as any).hostProbe.state(id).openLinks, first.id);
   check('links:attribution-link-reaches-host-only-through-openLink', () => assert.deepEqual(opened, ['https://ansari.chat/']));
@@ -259,7 +324,7 @@ async function main() {
   const unavailable = await openView(375, 900, bytes, false);
   await deliver(unavailable.id, resultA);
   for (const [button, status, destination] of [
-    ['[data-testid="md-link"]', '[data-testid="md-link-status"]', 'https://ansari.chat/'],
+    ['.saga-card-link', '.saga-card-link-status', 'https://ansari.chat/'],
     ['.saga-credit button', '.saga-credit [role="status"]', 'https://github.com/MachineWisdomAI/saga-a2ui'],
   ] as const) {
     await unavailable.frame.locator(button).click();
@@ -307,7 +372,7 @@ async function main() {
   const shownB = await first.frame.evaluate(() => ({
     same: (document.querySelector('main') as any).__mounted === 'same' && (document.getElementById('root') as any).__mounted === 'same',
     question: document.querySelector('[data-testid="question"]')?.textContent,
-    cardText: (document.querySelector('[data-testid="card-content"]') as HTMLElement).innerText,
+    cardText: (document.querySelector('.saga-card-content') as HTMLElement).innerText,
     questionDir: getComputedStyle(document.querySelector('[data-testid="question"]')!).direction,
     paragraphDir: getComputedStyle(document.querySelector('.saga-card-content > p')!).direction,
     itemDir: getComputedStyle(document.querySelector('.saga-card-content ol > li')!).direction,
@@ -371,19 +436,81 @@ async function main() {
     assert.equal(afterUnsupported.cards, 0);
     assert.equal(afterUnsupported.body, UNSUPPORTED_TEXT);
   });
+  // A result that carries a structured envelope is read from it alone: text beside a malformed envelope never rescues it.
+  for (const [name, malformed] of [
+    ['array', {content: [{type: 'text', text: 'Fallback text.\n'}], structuredContent: ['x']}],
+    ['not-an-object', {content: [{type: 'text', text: 'Fallback text.\n'}], structuredContent: 'x'}],
+    ['question-missing', {content: [{type: 'text', text: 'Fallback text.\n'}], structuredContent: {version: '0.1.0', answer: 'a'}}],
+    ['empty-answer', {content: [{type: 'text', text: 'Fallback text.\n'}], structuredContent: {version: '0.1.0', question: 'q', answer: ''}}],
+  ] as const) {
+    await deliver(first.id, resultA);
+    await first.frame.locator('[data-testid="answer-card"]').waitFor();
+    await deliver(first.id, malformed);
+    await first.frame.locator('[data-testid="answer-card"]').waitFor({state: 'detached'});
+    const shownMalformed = await first.frame.evaluate(() => ({body: document.body.innerText.trim(), cards: document.querySelectorAll('.answer-card, .saga-card').length}));
+    check(`failure:malformed-structured-${name}-is-unsupported-even-with-text`, () => {
+      assert.equal(shownMalformed.cards, 0);
+      assert.equal(shownMalformed.body, UNSUPPORTED_TEXT);
+    });
+  }
+  // A failed call shows its own first usable text, whatever the structured content says; with none, the unsupported sentence.
+  for (const [name, failed, expected] of [
+    ['server-text', {isError: true, content: [{type: 'text', text: 'Server wrote this.'}]}, 'Server wrote this.'],
+    ['valid-structured-does-not-save-it', {isError: true, content: [{type: 'text', text: 'Server wrote this.'}], structuredContent: {version: '0.1.0', question: 'q', answer: 'never shown'}}, 'Server wrote this.'],
+    ['no-text', {isError: true, content: [{type: 'image', data: 'AAAA', mimeType: 'image/png'}]}, UNSUPPORTED_TEXT],
+    ['empty-first-text-is-not-skipped', {isError: true, content: [{type: 'text', text: ''}, {type: 'text', text: 'Later text.'}]}, UNSUPPORTED_TEXT],
+  ] as const) {
+    await deliver(first.id, resultA);
+    await first.frame.locator('[data-testid="answer-card"]').waitFor();
+    await deliver(first.id, failed);
+    await first.frame.locator('[data-testid="answer-card"]').waitFor({state: 'detached'});
+    const shownFailed = await first.frame.evaluate(() => ({body: document.body.innerText.trim(), cards: document.querySelectorAll('.answer-card, .saga-card').length}));
+    check(`failure:error-result-${name}`, () => {
+      assert.equal(shownFailed.cards, 0);
+      assert.equal(shownFailed.body, expected);
+    });
+  }
+  // A host that delivers only the text result still shows the answer, exactly as sent and without a heading.
+  const TEXT_ONLY = 'Text only answer.\n\nSecond paragraph.\n';
+  await deliver(first.id, resultA);
+  await first.frame.locator('[data-testid="answer-card"]').waitFor();
+  for (const [name, delivered] of [
+    ['absent', {content: [{type: 'text', text: TEXT_ONLY}]}],
+    ['null', {content: [{type: 'text', text: TEXT_ONLY}], structuredContent: null}],
+  ] as const) {
+    await deliver(first.id, failure);
+    await first.frame.locator('[data-testid="answer-card"]').waitFor({state: 'detached'});
+    await deliver(first.id, delivered);
+    await first.frame.getByText('Second paragraph.').waitFor();
+    const shownText = await first.frame.evaluate(() => ({cards: document.querySelectorAll('.answer-card').length, questions: document.querySelectorAll('[data-testid="question"]').length, status: document.querySelector('[data-testid="answer-status"]')?.textContent}));
+    check(`fallback:text-only-${name}-structured-shows-the-text-answer-without-a-heading`, () => {
+      assert.equal(shownText.cards, 1);
+      assert.equal(shownText.questions, 0);
+      assert.equal(shownText.status, '');
+    });
+  }
+  // A later empty first text block does not let a second block stand in.
+  await deliver(first.id, {content: [{type: 'text', text: ''}, {type: 'text', text: 'Later text.'}]});
+  await first.frame.locator('[data-testid="answer-card"]').waitFor({state: 'detached'});
+  await first.frame.getByText(UNSUPPORTED_TEXT).waitFor();
+  const emptyFirst = await first.frame.evaluate(() => ({body: document.body.innerText.trim(), cards: document.querySelectorAll('.answer-card, .saga-card').length}));
+  check('fallback:empty-first-text-block-is-unsupported-not-skipped', () => {
+    assert.equal(emptyFirst.cards, 0);
+    assert.equal(emptyFirst.body, UNSUPPORTED_TEXT);
+  });
   await deliver(first.id, resultA);
   await first.frame.locator('[data-testid="answer-card"]').waitFor();
   await deliver(first.id, {isError: true, content: [{type: 'text', text: 'Ansari could not complete this request.'}]});
   await first.frame.locator('[data-testid="answer-card"]').waitFor({state: 'detached'});
   await deliver(first.id, resultB);
   await first.frame.locator('[data-testid="answer-card"]').waitFor();
-  const recoveredText = await text(first.frame, '[data-testid="card-content"]');
+  const recoveredText = await text(first.frame, '.saga-card-content');
 
   // ---- Complete reload input in a fresh view renders the same answer ----------------------------
   const reload = await openView();
   await deliver(reload.id, resultB);
   await reload.frame.locator('[data-testid="answer-card"]').waitFor();
-  const reloaded = {card: await text(reload.frame, '[data-testid="card-content"]'), question: await text(reload.frame, '[data-testid="question"]')};
+  const reloaded = {card: await text(reload.frame, '.saga-card-content'), question: await text(reload.frame, '[data-testid="question"]')};
   check('reload:complete-result-in-a-fresh-view-renders-the-same-answer', () => {
     assert.equal(reloaded.card, recoveredText);
     assert.equal(reloaded.question, QUESTION_B);
@@ -495,6 +622,26 @@ async function main() {
   const listsDevice = await wide.frame.evaluate(() => { const li = document.querySelector('.saga-card-content > ol > li')!; return getComputedStyle(li, '::before').width; });
   check('typography:device-profile-scales-the-floral-disk', () => assert.ok(Math.abs(parseFloat(listsDevice) - 102.4) < 0.05, listsDevice));
 
+  // The stack decides the profile (`readingProfile`); the adapter only maps it. A mobile platform reads as a device;
+  // a desktop platform on the same wide view does not, and publishes scale 1.
+  const profileOf = (frame: Frame) => frame.evaluate(() => ({profile: document.documentElement.getAttribute('data-reading-profile'), scale: document.documentElement.style.getPropertyValue('--ansari-wide-reading-scale')}));
+  const mobile = await openView(1000, 900);
+  await deliver(mobile.id, resultA);
+  await mobile.frame.locator('[data-testid="answer-card"]').waitFor();
+  await page.evaluate(id => (window as any).hostProbe.hostContext(id, {theme: 'light', platform: 'mobile'}), mobile.id);
+  await mobile.frame.waitForFunction(() => document.documentElement.getAttribute('data-reading-profile') === 'device');
+  const desktopView = await openView(1000, 900);
+  await deliver(desktopView.id, resultA);
+  await desktopView.frame.locator('[data-testid="answer-card"]').waitFor();
+  await page.evaluate(id => (window as any).hostProbe.hostContext(id, {theme: 'light', platform: 'desktop'}), desktopView.id);
+  await desktopView.frame.waitForFunction(() => document.documentElement.getAttribute('data-theme') === 'light');
+  const [mobileProfile, desktopProfile, deviceProfile] = [await profileOf(mobile.frame), await profileOf(desktopView.frame), await profileOf(wide.frame)];
+  check('typography:reading-profile-comes-from-the-stack-for-device-class-mobile-and-desktop', () => {
+    assert.deepEqual(deviceProfile, {profile: 'device', scale: '1.6'});
+    assert.deepEqual(mobileProfile, {profile: 'device', scale: '1.6'});
+    assert.deepEqual(desktopProfile, {profile: 'desktop', scale: '1'});
+  });
+
   // ---- Reference widths: 680px and 375px, both themes -------------------------------------------
   const shots: Record<string, unknown> = {};
   for (const [width, label] of [[680, 'wide'], [375, 'narrow']] as const) {
@@ -566,7 +713,7 @@ async function main() {
     buttons: Array.from(document.querySelectorAll('.saga-card-link')).map(b => b.textContent),
     anchors: document.querySelectorAll('a[href]').length, scripts: document.querySelectorAll('.saga-card script, .saga-card style').length,
     cardVisible: getComputedStyle(document.querySelector('.answer-card')!).display !== 'none',
-    cardText: (document.querySelector('[data-testid="card-content"]') as HTMLElement).innerText,
+    cardText: (document.querySelector('.saga-card-content') as HTMLElement).innerText,
     fontFaces: document.fonts.size,
   }));
   const artAfter = await artwork(guarded.frame);
@@ -596,8 +743,43 @@ async function main() {
     assert.deepEqual(fromView, []);
   });
 
+  // ---- An equal answer is a new selection: image consent does not carry over --------------------
+  // Strict policy with one permitted image host. The document carries exactly the restrictions that
+  // policy derives, so the image controls are live; the fixture host answers with a 1x1 image.
+  const imagePolicy = createContentPolicy({level: 'strict', imageHosts: ['images.example']});
+  assert.ok(imagePolicy.ok);
+  const PIXEL = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+  const imageRequests: string[] = [];
+  await context.route('https://images.example/**', (route: any) => { imageRequests.push(route.request().url()); route.fulfill({status: 200, contentType: 'image/png', body: PIXEL}); });
+  const imageBytes = bytes
+    .replace(/(<meta http-equiv="Content-Security-Policy" content=")[^"]*(">)/, (_m, a, b) => `${a}${imagePolicy.policy.resource.contentSecurityPolicy}${b}`)
+    .replace(/(<script[^>]*id="saga-content-policy"[^>]*>)[\s\S]*?(<\/script>)/, (_m, a, b) => `${a}${JSON.stringify(imagePolicy.policy.configuration).replaceAll('<', '\\u003c')}${b}`);
+  assert.notEqual(imageBytes, bytes, 'the image-policy fixture replaces the embedded policy and its restrictions');
+  const consent = await openView(760, 900, imageBytes);
+  const imageAnswer = {content: [{type: 'text', text: 'ignored'}], structuredContent: {version: '0.1.0', question: 'Q image', answer: 'Image answer.\n\n![synthetic](https://images.example/a.png)\n\nThis information came from ansari.chat.'}};
+  await deliver(consent.id, imageAnswer);
+  const toggle = consent.frame.locator('.saga-card-controls button').filter({hasText: /images$/});
+  await toggle.filter({hasText: 'Show images'}).waitFor();
+  const imagesBefore = await consent.frame.evaluate(() => document.images.length);
+  await toggle.click();
+  await toggle.filter({hasText: 'Hide images'}).waitFor();
+  const granted = await consent.frame.evaluate(() => ({images: document.images.length, status: document.querySelector('.saga-card-controls [role="status"]')?.textContent}));
+  // The same answer again, byte for byte: still a new selection, so the earlier grant ends.
+  await deliver(consent.id, imageAnswer);
+  await toggle.filter({hasText: 'Show images'}).waitFor();
+  await settle(consent.frame);
+  const reset = await consent.frame.evaluate(() => ({images: document.images.length, status: document.querySelector('.saga-card-controls [role="status"]')?.textContent}));
+  check('consent:image-grant-ends-when-an-equal-answer-is-presented-again', () => {
+    assert.equal(imagesBefore, 0, 'nothing loads before the reader consents');
+    assert.equal(granted.images, 1);
+    assert.equal(granted.status, 'Images shown.');
+    assert.equal(reset.images, 0);
+    assert.equal(reset.status, '');
+    assert.ok(imageRequests.length >= 1 && imageRequests.every(url => url === 'https://images.example/a.png'));
+  });
+
   // ---- Teardown disposes the view; a late result reaches nothing -------------------------------
-  const heldLink = await first.frame.locator('[data-testid="md-link"]').elementHandle();
+  const heldLink = await first.frame.locator('.saga-card-link').elementHandle();
   const opensBefore = await page.evaluate(id => (window as any).hostProbe.state(id).openLinks.length, first.id);
   const ack = await page.evaluate(id => (window as any).hostProbe.teardown(id), first.id);
   check('teardown:host-request-acknowledged', () => assert.deepEqual(ack, {}));

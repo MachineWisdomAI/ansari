@@ -47,7 +47,7 @@ try {
   assert.deepEqual(result.content,[{type:'text',text:answer}]);
   assert.equal(result._meta.ui.resourceUri,uri);
   const resource=await rpc('resources/read',{uri});const html=resource.contents[0].text;
-  assert.equal(uri,`ui://sha256/${createHash('sha256').update(html).digest('hex')}.html`);
+  assert.equal(uri,`ui://views/answer-card.${createHash('sha256').update(html).digest('hex').slice(0,32)}.html`);
   assert.ok(html.includes('ci-public-smoke'));
   assert.ok(!html.includes('version https://git-lfs.github.com/spec/v1'));
   const failure=await rpc('tools/call',{name:'ask_ansari',arguments:{question:'fail'}});

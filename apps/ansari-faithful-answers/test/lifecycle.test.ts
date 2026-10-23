@@ -61,3 +61,12 @@ for(const modern of [true,false]) test(`SIGTERM exits with an in-flight ${modern
     const stopped=new Promise<void>(resolve=>upstream.close(()=>resolve()));upstream.closeAllConnections();await stopped;
   }
 });
+
+test('every way a per-request MCP server ends releases its request timer',async()=>{
+  const fixture=fileURLToPath(new URL('./fixtures/server-close.ts',import.meta.url));
+  const result=await new Promise<{error:Error|null;stdout:string;stderr:string}>(resolve=>{
+    execFile(process.execPath,['--import','tsx',fixture],{timeout:2500},(error,stdout,stderr)=>resolve({error,stdout,stderr}));
+  });
+  assert.match(result.stdout,/servers closed/,result.stderr);
+  assert.equal(result.error,null,`a closed server still keeps the process alive: ${result.error?.message}\n${result.stderr}`);
+});

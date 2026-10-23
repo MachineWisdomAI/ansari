@@ -15,6 +15,9 @@
 /** The attribution Ansari's API appends to every answer. The source identifies its public answer service by either domain. */
 const ATTRIBUTION = /^This information came from (?:ansari\.chat|askansari\.ai)\b/i;
 
+/** The card's documented closing seam (docs/faithful-card-styling.md): its final top-level block, when that is a paragraph. */
+const CLOSING_PARAGRAPH = '.saga-card-content > p[data-saga-closing="paragraph"]';
+
 /** The attribute the theme keys the footer treatment on. */
 export const ATTRIBUTION_ATTRIBUTE = 'data-attribution';
 
@@ -24,12 +27,13 @@ export function isAttributionText(text: string): boolean {
 }
 
 /**
- * The card's closing block when it is a top-level paragraph of the rendered card content. A quotation,
- * a list item or a table cell is nested inside another element, so it is never the footer.
+ * The card's closing paragraph: the block the card itself marked `data-saga-closing="paragraph"`,
+ * which is its final top-level block and only when that block is a paragraph. A quotation, a list
+ * item or a table cell is never marked. The marker is structural; whether the marked paragraph is
+ * Ansari's attribution is decided here, from its words.
  */
 function closingParagraph(card: Element): Element | null {
-  const last = card.querySelector('.saga-card-content')?.lastElementChild;
-  return last !== null && last !== undefined && last.tagName === 'P' ? last : null;
+  return card.querySelector(CLOSING_PARAGRAPH);
 }
 
 /** Sets or removes the attribution attribute on `card` from the paragraph the shared card rendered at its end. */

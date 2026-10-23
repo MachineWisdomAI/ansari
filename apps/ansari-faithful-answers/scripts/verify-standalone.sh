@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Public-only transfer rehearsal. Requires Node, pnpm and Docker; no credentials.
+# Standalone rehearsal on the public npm packages. Requires Node, pnpm and Docker; no credentials. Every dependency,
+# including the exact SAGA release, comes from the public npm registry with a fresh store and an empty npm configuration.
 set -euo pipefail
 app_root=$(cd "$(dirname "$0")/.." && pwd)
 verify_root=$(mktemp -d)
@@ -13,15 +14,13 @@ cleanup() {
 trap cleanup EXIT
 mkdir -p "$verify_root/apps/ansari-faithful-answers"
 # Copy only application files. Do not carry an installation, lockfile or credentials.
-tar -C "$app_root" --exclude=node_modules --exclude=dist --exclude=.git --exclude='.env*' --exclude=.npmrc --exclude=pnpm-lock.yaml --exclude=test-results --exclude=playwright-report -cf "$verify_root/app.tar" .
-tar -C "$verify_root/apps/ansari-faithful-answers" -xf "$verify_root/app.tar"
-rm "$verify_root/app.tar"
+bash "$app_root/scripts/copy-app-source.sh" "$app_root" "$verify_root/apps/ansari-faithful-answers"
 app="$verify_root/apps/ansari-faithful-answers"
+# A destination workspace reads only its root file, so the standalone entry is not carried into the install.
+rm "$app/pnpm-workspace.yaml"
 printf '{"private":true,"packageManager":"pnpm@10.33.0"}\n' > "$verify_root/package.json"
 # Exercise the documented destination-root placement of the adapter override.
-printf "packages:\n  - apps/*\ncatalog:
-  typescript: ~6.0.3
-overrides:\n  '@a2ui/markdown-it': '0.2.1'\n" > "$verify_root/pnpm-workspace.yaml"
+printf "packages:\n  - apps/*\noverrides:\n  '@a2ui/markdown-it': '0.2.1'\n" > "$verify_root/pnpm-workspace.yaml"
 : > "$verify_root/npm-user.conf"
 : > "$verify_root/npm-global.conf"
 export NPM_CONFIG_USERCONFIG="$verify_root/npm-user.conf"
@@ -31,10 +30,15 @@ unset NODE_AUTH_TOKEN NPM_TOKEN || true
 cd "$verify_root"
 pnpm install --strict-peer-dependencies --store-dir "$verify_root/store"
 cd "$app"
-pnpm check:release
+# The release gate reads the committed application lockfile and checks the registry, so it runs on the committed folder
+# (the isolated copy deliberately carries no lockfile).
+node "$app_root/scripts/check-release.mjs" --target beta
 pnpm exec playwright install chromium
 pnpm verify
-# The Dockerfile supplies its isolated catalog and dependency override.
+# The normal standalone Docker context is the application folder itself: it needs its own workspace
+# file (adapter override) and its lockfile again, as committed.
+cp "$app_root/pnpm-workspace.yaml" "$app/pnpm-workspace.yaml"
+cp "$app_root/pnpm-lock.yaml" "$app/pnpm-lock.yaml"
 docker build --no-cache -t "$image" "$app"
 container=$(docker run -d --network none -e ANSARI_RELEASE=ci-public-smoke -e ANSARI_API_BASE_URL=http://127.0.0.1:4010 -e MCP_RESPONSE_MODE=json "$image")
 [[ $(docker inspect "$container" --format '{{len .Mounts}}') == 0 ]]

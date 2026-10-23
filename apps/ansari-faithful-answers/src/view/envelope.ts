@@ -1,5 +1,7 @@
-// The app's answer envelope and its mapping to the shared card's two-field contract.
-// Pure and DOM-free, so Node tests can import it. It parses nothing: the answer is passed through unchanged.
+// The app's one answer envelope `{version, question, answer}`: the tool's `structuredContent`. Its
+// validation is here; how a whole delivered result is read (a failed call, a host that delivers only
+// text, a malformed envelope) is `tool-result.ts`, which uses this validation. Pure and DOM-free, so Node
+// tests can import it. The answer is passed through unchanged.
 
 /** Version of the app's answer envelope `{version, question, answer}`; equal to the route's and the MCP tool's. */
 export const ANSWER_ENVELOPE_VERSION = '0.1.0';
@@ -18,15 +20,8 @@ export type AnswerEnvelope = {readonly question: string; readonly answer: string
 /** Validates the app's envelope. Anything else is refused; nothing is repaired or guessed. */
 export function readAnswerEnvelope(value: unknown): AnswerEnvelope | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
-  const fields = value as Record<string, unknown>;
-  const keys = Object.keys(fields);
-  if (keys.length !== 3 || !['version', 'question', 'answer'].every(key => keys.includes(key))) return undefined;
-  if (fields.version !== ANSWER_ENVELOPE_VERSION) return undefined;
-  if (typeof fields.question !== 'string' || typeof fields.answer !== 'string' || fields.answer.length === 0) return undefined;
+  const fields = value as {answer?: unknown; question?: unknown; version?: unknown};
+  if (fields.version !== ANSWER_ENVELOPE_VERSION || typeof fields.question !== 'string') return undefined;
+  if (typeof fields.answer !== 'string' || fields.answer.length === 0) return undefined;
   return {question: fields.question, answer: fields.answer};
-}
-
-/** The shared card's two-field contract. The answer is passed through unchanged. */
-export function cardData(envelope: AnswerEnvelope): {contractVersion: 1; markdown: string} {
-  return {contractVersion: 1, markdown: envelope.answer};
 }

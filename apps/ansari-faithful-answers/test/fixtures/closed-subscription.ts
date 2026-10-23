@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {request} from 'node:http';
-import {listen} from '../../src/server/http-server.ts';
+import {listen} from '../../src/node/http-server.ts';
 
 // This modern path disposes its MCP server before connecting a transport.
 // With no live HTTP sockets, the process must also release the request timer.

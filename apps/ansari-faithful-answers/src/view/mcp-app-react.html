@@ -9,8 +9,9 @@
     -->
     <title>{{brand.name}}</title>
     <meta name="ansari-release" content="{{release}}" />
+    <meta name="ansari-sdk" content="{{sdk.version}}" />
   </head>
-  <body data-release="{{release}}">
+  <body data-release="{{release}}" data-sdk-kind="{{sdk.kind}}" data-sdk-version="{{sdk.version}}" data-sdk-source="{{sdk.source}}" data-sdk-stack-sha256="{{sdk.stackSha256}}" data-sdk-set-sha256="{{sdk.setSha256}}">
     <div id="root"></div>
     <script type="module" src="./main.tsx"></script>
   </body>

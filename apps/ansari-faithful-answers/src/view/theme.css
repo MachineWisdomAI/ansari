@@ -146,55 +146,55 @@ body {
 }
 
 /* ---- Content ------------------------------------------------------------------------------- */
-.answer-card .saga-card p {
+.answer-card .saga-card-content p {
   margin: 0 0 calc(22px * var(--rs));
 }
 
-.answer-card .saga-card strong {
+.answer-card .saga-card-content strong {
   font-weight: 700;
 }
 
-.answer-card .saga-card :is(h3, h4, h5, h6) {
+.answer-card .saga-card-content :is(h3, h4, h5, h6) {
   margin: calc(22px * var(--rs)) 0 calc(12px * var(--rs));
   font-size: calc(20px * var(--rs));
   line-height: 1.35;
 }
 
 /* Kitab has no Arabic italic, so right-to-left emphasis is weight, not a fake slant. */
-.answer-card .saga-card em:dir(rtl) {
+.answer-card .saga-card-content em:dir(rtl) {
   font-style: normal;
   font-weight: 700;
 }
 
-.answer-card .saga-card :is(ul, ol) {
+.answer-card .saga-card-content :is(ul, ol) {
   margin: calc(18px * var(--rs)) 0 calc(24px * var(--rs));
 }
 
-.answer-card .saga-card ul {
+.answer-card .saga-card-content ul {
   padding-inline-start: calc(24px * var(--rs));
 }
 
-.answer-card .saga-card ul > li {
+.answer-card .saga-card-content ul > li {
   margin: calc(12px * var(--rs)) 0;
   padding-inline-start: calc(4px * var(--rs));
 }
 
-.answer-card .saga-card li :is(ul, ol) {
+.answer-card .saga-card-content li :is(ul, ol) {
   margin: calc(12px * var(--rs)) 0;
 }
 
-.answer-card .saga-card blockquote {
+.answer-card .saga-card-content blockquote {
   margin: calc(20px * var(--rs)) 0;
   padding-inline-start: calc(18px * var(--rs));
   border-inline-start: calc(2px * var(--rs)) solid var(--ansari-line);
 }
 
-.answer-card .saga-card pre {
+.answer-card .saga-card-content pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-.answer-card .saga-card code {
+.answer-card .saga-card-content code {
   font-size: 0.9em;
 }
 
@@ -214,23 +214,23 @@ body {
 }
 
 /* ---- Floral numbering and botanical rules -------------------------------------------------- */
-.answer-card .saga-card ol {
+.answer-card .saga-card-content ol {
   padding: 0;
   margin-block: calc(27px * var(--rs)) calc(30px * var(--rs));
 }
 
-.answer-card .saga-card ol > li {
+.answer-card .saga-card-content ol > li {
   position: relative;
   min-height: var(--marker-size);
   padding-inline-start: calc(var(--marker-size) + var(--marker-gap));
 }
 
 /* The native marker is replaced by the disk; the list keeps its list semantics. */
-.answer-card .saga-card ol > li::marker {
+.answer-card .saga-card-content ol > li::marker {
   content: '';
 }
 
-.answer-card .saga-card ol > li::before {
+.answer-card .saga-card-content ol > li::before {
   content: counter(list-item);
   content: counter(list-item) / '';
   position: absolute;
@@ -254,11 +254,11 @@ body {
  * least the disk's height, and the rule sits in room reserved below that, so a short item never
  * lets the disk touch the rule.
  */
-.answer-card .saga-card ol > li:not(:last-child) {
+.answer-card .saga-card-content ol > li:not(:last-child) {
   padding-block-end: calc(51px * var(--rs));
 }
 
-.answer-card .saga-card ol > li:not(:last-child)::after {
+.answer-card .saga-card-content ol > li:not(:last-child)::after {
   content: '';
   position: absolute;
   inset-inline: 0;
@@ -278,27 +278,27 @@ body {
       center / 100% calc(1px * var(--rs)) no-repeat;
 }
 
-.answer-card .saga-card ol > li > p {
+.answer-card .saga-card-content ol > li > p {
   margin: calc(3px * var(--rs)) 0 0;
 }
 
-.answer-card .saga-card ol > li > p + p {
+.answer-card .saga-card-content ol > li > p + p {
   margin-top: calc(12px * var(--rs));
 }
 
 /* A numbered heading group: the section title leads its item. */
-.answer-card .saga-card ol > li > :is(h3, h4, h5, h6):first-child {
+.answer-card .saga-card-content ol > li > :is(h3, h4, h5, h6):first-child {
   margin: calc(3px * var(--rs)) 0 calc(8px * var(--rs));
   font-size: inherit;
   letter-spacing: calc(-0.4px * var(--rs));
 }
 
-.answer-card .saga-card ol > li > :is(h3, h4, h5, h6):first-child:dir(rtl) {
+.answer-card .saga-card-content ol > li > :is(h3, h4, h5, h6):first-child:dir(rtl) {
   letter-spacing: 0;
 }
 
 /* Nested numbering: the smaller disk; the rule and its ornament are the same as the outer list's. */
-.answer-card .saga-card li ol > li {
+.answer-card .saga-card-content li ol > li {
   --marker-size: calc(44px * var(--rs));
   --marker-gap: calc(12px * var(--rs));
   --marker-font: calc(20px * var(--rs));
@@ -307,7 +307,7 @@ body {
 /* ---- Attribution footer --------------------------------------------------------------------
  * The answer's supplied closing attribution paragraph, in place. `data-attribution` is set by the
  * wrapper only when the paragraph the shared card rendered last is Ansari's attribution (attribution.ts). */
-.answer-card[data-attribution] .saga-card-content > p:last-child {
+.answer-card[data-attribution] .saga-card-content > p[data-saga-closing='paragraph'] {
   --footer-mark: calc(26px * var(--rs));
   position: relative;
   margin: calc(23px * var(--rs)) 0 0;
@@ -321,16 +321,16 @@ body {
 }
 
 /* The supplied thematic break already separates the attribution from the answer. */
-.answer-card[data-attribution] .saga-card-content > hr + p:last-child {
+.answer-card[data-attribution] .saga-card-content > hr + p[data-saga-closing='paragraph'] {
   border-top: 0;
   margin-block-start: 0;
 }
 
-.answer-card[data-attribution] .saga-card-content > p:last-child strong {
+.answer-card[data-attribution] .saga-card-content > p[data-saga-closing='paragraph'] strong {
   font-weight: inherit;
 }
 
-.answer-card[data-attribution] .saga-card-content > p:last-child::before {
+.answer-card[data-attribution] .saga-card-content > p[data-saga-closing='paragraph']::before {
   content: '';
   position: absolute;
   inset-block-start: calc(18px * var(--rs));
@@ -389,13 +389,12 @@ body {
   cursor: pointer;
 }
 
-/* Link feedback is application UI, visually separate from the supplied answer. Successful
- * requests stay silent, including with SDK versions that still supply success text. */
+/* Link feedback is application UI, visually separate from the supplied answer. A successful
+ * request has no text, so its status stays silent. */
 .answer-card .saga-card-link-status:empty,
-.answer-card .saga-card-link-status[data-outcome="opened"],
 .saga-credit [role="status"]:empty { display: none; }
 
-.answer-card .saga-card-link-status:not(:empty):not([data-outcome="opened"]),
+.answer-card .saga-card-link-status:not(:empty),
 .saga-credit [role="status"]:not(:empty) {
   display: block;
   margin-block: calc(8px * var(--rs));
@@ -411,7 +410,7 @@ body {
   overflow-wrap: anywhere;
 }
 
-.answer-card .saga-card-link-status:not(:empty):not([data-outcome="opened"])::before,
+.answer-card .saga-card-link-status:not(:empty)::before,
 .saga-credit [role="status"]:not(:empty)::before {
   content: 'Link notice';
   display: block;

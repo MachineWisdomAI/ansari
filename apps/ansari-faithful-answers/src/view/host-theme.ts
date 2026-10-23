@@ -40,7 +40,6 @@ export type ResolvedHostTheme = {
 export type ThemeRoot = {
   setAttribute(name: string, value: string): void;
   removeAttribute(name: string): void;
-  classList: { add(name: string): void; remove(name: string): void };
   style: { setProperty(name: string, value: string): void; removeProperty(name: string): void };
 };
 
@@ -177,19 +176,10 @@ export function resolveHostTheme(context?: HostThemeContext | null): ResolvedHos
 export function applyResolvedTheme(root: ThemeRoot, resolved: ResolvedHostTheme): void {
   if (resolved.appearance === 'system') {
     root.removeAttribute('data-theme');
-    root.classList.remove('a2ui-light');
-    root.classList.remove('a2ui-dark');
     root.style.setProperty('color-scheme', 'light dark');
   } else {
     root.setAttribute('data-theme', resolved.appearance);
     root.style.setProperty('color-scheme', resolved.appearance);
-    if (resolved.appearance === 'dark') {
-      root.classList.add('a2ui-dark');
-      root.classList.remove('a2ui-light');
-    } else {
-      root.classList.add('a2ui-light');
-      root.classList.remove('a2ui-dark');
-    }
   }
 
   if (resolved.appearance === 'system') {
@@ -215,21 +205,19 @@ export function applyResolvedTheme(root: ThemeRoot, resolved: ResolvedHostTheme)
   root.style.setProperty('--ansari-ink', resolved.tokens.ink);
   root.style.setProperty('--ansari-secondary', resolved.tokens.secondary);
   root.style.setProperty('--ansari-line', resolved.tokens.line);
-  root.style.setProperty('--a2ui-color-background', resolved.tokens.backdrop);
-  root.style.setProperty('--a2ui-color-on-background', resolved.tokens.ink);
-  root.style.setProperty('--a2ui-color-surface', resolved.tokens.surface);
-  root.style.setProperty('--a2ui-color-on-surface', resolved.tokens.ink);
-  root.style.setProperty('--a2ui-color-border', resolved.tokens.line);
 }
 
-export function applyHostTheme(root: ThemeRoot, context?: HostThemeContext | null, hostName?: string): ResolvedHostTheme {
+/** How the reader meets the host; the stack decides it (`readingProfile`), the application maps it. */
+export type ReadingProfile = 'device' | 'desktop';
+
+export function applyHostTheme(root: ThemeRoot, context: HostThemeContext | null | undefined, hostName: string | undefined, profile: ReadingProfile): ResolvedHostTheme {
   const resolved = resolveHostTheme(context);
   applyResolvedTheme(root, resolved);
-  // Width alone does not establish viewing distance: Codex can open wide panels.
-  // The Alexa simulator's MCP Apps host advertises HTMLFragmentWrapper.
-  const deviceReading = hostName === 'HTMLFragmentWrapper' || /\balexa\b/i.test(hostName ?? '') || /^echo_show(?:_|$)/i.test(resolved.deviceClass ?? '');
+  // Width alone does not establish viewing distance: Codex can open wide panels, so the stack's
+  // reading profile (a device host, an Echo Show device class or a mobile platform) decides.
+  const deviceReading = profile === 'device';
   root.style.setProperty('--ansari-wide-reading-scale', deviceReading ? '1.6' : '1');
-  root.setAttribute('data-reading-profile', deviceReading ? 'device' : 'desktop');
+  root.setAttribute('data-reading-profile', profile);
   if (hostName) root.setAttribute('data-host-name', hostName);
   else root.removeAttribute('data-host-name');
   const variables = context?.styles?.variables;

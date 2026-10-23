@@ -3,7 +3,7 @@ import {test} from 'node:test';
 import {createHash} from 'node:crypto';
 import {request as httpRequest} from 'node:http';
 import {Client, StreamableHTTPClientTransport} from '@modelcontextprotocol/client';
-import {listen} from '../src/server/http-server.js';
+import {listen} from '../src/node/http-server.js';
 import {PROTOCOL_VERSION_META_KEY, CLIENT_INFO_META_KEY, CLIENT_CAPABILITIES_META_KEY} from '@modelcontextprotocol/server';
 import {createAnsariHttpCompleter} from '../src/server/ansari-client.js';
 
@@ -24,7 +24,7 @@ async function resource(html: string) {
     assert.deepEqual(listed.resources.map(r=>r.uri),[uri]);
     const read = await client.readResource({uri});
     const text = (read.contents[0] as {text:string}).text;
-    assert.equal(uri,`ui://sha256/${createHash('sha256').update(text).digest('hex')}.html`);
+    assert.equal(uri,`ui://views/answer-card.${createHash('sha256').update(text).digest('hex').slice(0,32)}.html`);
     await assert.rejects(client.readResource({uri:'ui://obsolete.html'}));
     for(const path of ['/demo','/demo/answer','/fonts/amiri.ttf']) assert.equal((await fetch(`http://127.0.0.1:${service.port}${path}`)).status,404);
     return uri;

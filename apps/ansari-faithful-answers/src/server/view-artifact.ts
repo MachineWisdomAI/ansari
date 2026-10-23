@@ -1,14 +1,12 @@
-import {readFileSync} from 'node:fs';
-import {viewUriForHtml, type OperationView} from '@saga-a2ui/mcp/server';
+import {operationViewFromHtml, type OperationView} from '@saga-a2ui/react-mcp-stack/server';
 import {stampHtmlRevision} from './operation-log.js';
 
-/** Prepare immutable deployment bytes once, before accepting HTTP requests. */
-export function prepareAnswerView(html = readFileSync(new URL('../../dist/view.html', import.meta.url), 'utf8'), release?: string): OperationView {
+/** The file name the view's content identity keeps: `ui://views/answer-card.<fingerprint>.html`. */
+export const VIEW_FILENAME = 'answer-card.html';
+
+/** Prepare immutable deployment bytes once from the built card the host supplies: no file is read here. */
+export function prepareAnswerView(html: string, release?: string): OperationView {
   const currentHtml = stampHtmlRevision(html, release);
-  return Object.freeze({
-    uri: viewUriForHtml(currentHtml),
-    title: 'Ansari answer card',
-    html: currentHtml,
-    csp: {connectDomains: [], resourceDomains: [], frameDomains: [], baseUriDomains: []},
-  });
+  // The identity is taken from the final bytes, after revision stamping. Declared permissions stay closed.
+  return Object.freeze(operationViewFromHtml({html: currentHtml, filename: VIEW_FILENAME, title: 'Ansari answer card'}));
 }
