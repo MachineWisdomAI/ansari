@@ -138,7 +138,7 @@ describe('local Workers runtime, launched as documented', () => {
   }
 
   const call = (origin: string, host: string, question: string) => new Promise<{status: number | undefined; text: string}>((resolve, reject) => {
-    const body = JSON.stringify({jsonrpc: '2.0', id: 1, method: 'tools/call', params: {name: 'ask_ansari', arguments: {question}}});
+    const body = JSON.stringify({jsonrpc: '2.0', id: 1, method: 'tools/call', params: {name: 'answer_islamic_question', arguments: {question}}});
     const req = httpRequest(`${origin}/mcp`, {method: 'POST', headers: {host, 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'content-length': Buffer.byteLength(body)}}, res => {
       let text = ''; res.setEncoding('utf8'); res.on('data', chunk => text += chunk); res.on('end', () => resolve({status: res.statusCode, text}));
     });

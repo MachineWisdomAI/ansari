@@ -3,6 +3,7 @@ export const DEFAULT_ANSARI_CLIENT = 'ansari-mcp';
 
 export type AnsariCompleteRequest = {
   question: string;
+  signal?: AbortSignal;
 };
 
 export type AnswerCompleter = {
@@ -31,7 +32,7 @@ export function createAnsariHttpCompleter(options: AnsariHttpOptions = {}): Answ
   const authorization = options.authorization;
 
   return {
-    async complete({ question }) {
+    async complete({ question, signal }) {
       const headers: Record<string, string> = {
         'content-type': 'application/json',
         'X-Ansari-Client': clientName,
@@ -42,6 +43,7 @@ export function createAnsariHttpCompleter(options: AnsariHttpOptions = {}): Answ
       const response = await fetchImpl(`${baseUrl}/api/v2/mcp-complete`, {
         method: 'POST',
         headers,
+        signal,
         body: JSON.stringify({
           messages: [{ role: 'user', content: question }],
         }),

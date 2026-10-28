@@ -29,7 +29,7 @@ test('dependencies point inward: the Node and Workers adapters import src/server
 test('the Workers bundle holds the shared application and none of the Node hosting', () => {
   assert.ok(existsSync(new URL('../dist-worker/index.js', import.meta.url)), 'run `pnpm build:worker` first');
   const bundle = read('dist-worker/index.js');
-  assert.match(bundle, /ask_ansari/);
+  assert.match(bundle, /answer_islamic_question/);
   assert.doesNotMatch(bundle, /createAdaptorServer|SIGTERM/, 'no Node listener or signal lifecycle');
 });
 
@@ -58,8 +58,8 @@ test('settings come from the supplied bindings, with the same rules under both h
     ANSARI_RELEASE: 'v1.2.3-rc.1', MCP_ALLOWED_HOSTS: ' app.example , ', MCP_ALLOWED_ORIGINS: 'chat.example', MCP_RESPONSE_MODE: 'json',
     ANSARI_API_BASE_URL: 'https://upstream.example', ANSARI_CLIENT: 'beta', ANSARI_API_AUTHORIZATION: 'Bearer x',
   });
-  assert.deepEqual(configured.allowedHosts, [...DEFAULT_ALLOWED_HOSTS, 'app.example']);
-  assert.deepEqual(configured.allowedOrigins, [...DEFAULT_ALLOWED_HOSTS, 'app.example', 'chat.example']);
+  assert.deepEqual(configured.allowedHosts, ['app.example']);
+  assert.deepEqual(configured.allowedOrigins, ['chat.example']);
   assert.equal(configured.release, 'v1.2.3-rc.1');
   assert.equal(configured.enableJsonResponse, true);
   assert.deepEqual(configured.ansari, {baseUrl: 'https://upstream.example', clientName: 'beta', authorization: 'Bearer x'});

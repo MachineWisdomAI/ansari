@@ -68,7 +68,7 @@ async function main() {
   check('resource:uri-is-sha256-fingerprint-of-served-bytes', () => assert.equal(viewUri, `ui://views/${VIEW_FILENAME.replace(/\.html$/, '')}.${sha(bytes).slice(0, 32)}.html`));
   const meta = (resource.contents[0] as any)._meta;
   check('resource:closed-csp-no-origins', () => assert.deepEqual(meta.ui.csp, {connectDomains: [], resourceDomains: [], frameDomains: [], baseUriDomains: []}));
-  const callTool = (question: string) => client.callTool({name: 'ask_ansari', arguments: {question}});
+  const callTool = (question: string) => client.callTool({name: 'answer_islamic_question', arguments: {question}});
   const resultA = await callTool(QUESTION_A);
   const resultB = await callTool(QUESTION_B);
   const resultC = await callTool('Question C');

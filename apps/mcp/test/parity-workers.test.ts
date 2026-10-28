@@ -17,8 +17,8 @@ describe('Workers lifecycle', () => {
       const controller = new AbortController();
       const abandoned = fetch(`${runtime.origin}/mcp`, {
         method: 'POST', signal: controller.signal,
-        headers: {'content-type': 'application/json', accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': 'tools/call', 'Mcp-Name': 'ask_ansari'},
-        body: JSON.stringify({jsonrpc: '2.0', id: 1, method: 'tools/call', params: {name: 'ask_ansari', arguments: {question: 'hang'}, _meta: {
+        headers: {'content-type': 'application/json', accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': 'tools/call', 'Mcp-Name': 'answer_islamic_question'},
+        body: JSON.stringify({jsonrpc: '2.0', id: 1, method: 'tools/call', params: {name: 'answer_islamic_question', arguments: {question: 'hang'}, _meta: {
           'io.modelcontextprotocol/protocolVersion': '2026-07-28', 'io.modelcontextprotocol/clientInfo': {name: 'abandon', version: '1'}, 'io.modelcontextprotocol/clientCapabilities': {},
         }}}),
       }).then(response => response.text()).catch(() => undefined);
@@ -28,11 +28,15 @@ describe('Workers lifecycle', () => {
       }
       controller.abort();
       await abandoned;
+      for (let waited = 0; !upstream.aborted.includes('hang') && waited < 1000; waited += 20) {
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+      assert.ok(upstream.aborted.includes('hang'), 'caller cancellation closes the actual upstream request');
       // A later request is served normally, and its own work is unaffected by the abandoned one.
       assert.equal((await fetch(`${runtime.origin}/health`)).status, 200);
       const reply = await fetch(`${runtime.origin}/mcp`, {
         method: 'POST', headers: {'content-type': 'application/json', accept: 'application/json, text/event-stream'},
-        body: JSON.stringify({jsonrpc: '2.0', id: 1, method: 'tools/call', params: {name: 'ask_ansari', arguments: {question: 'after abandon'}}}),
+        body: JSON.stringify({jsonrpc: '2.0', id: 1, method: 'tools/call', params: {name: 'answer_islamic_question', arguments: {question: 'after abandon'}}}),
       });
       assert.equal(reply.status, 200);
       assert.match(await reply.text(), new RegExp(answerFor('after abandon').split('\n')[0]!));

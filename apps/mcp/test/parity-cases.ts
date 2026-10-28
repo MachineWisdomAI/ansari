@@ -54,7 +54,7 @@ async function withClient<T>(origin: string, use: (client: Client) => Promise<T>
   await client.connect(new StreamableHTTPClientTransport(new URL(`${origin}/mcp`)));
   try { return await use(client); } finally { await client.close(); }
 }
-const ask = (client: Client, question: string) => client.callTool({name: 'ask_ansari', arguments: {question}}, {timeout: 120_000}) as Promise<Call>;
+const ask = (client: Client, question: string) => client.callTool({name: 'answer_islamic_question', arguments: {question}}, {timeout: 120_000}) as Promise<Call>;
 
 /**
  * The HTTP/MCP behaviour both hosting targets must share. Each case runs against the built artifact of one runtime,
@@ -88,9 +88,30 @@ export function defineParityCases(kind: RuntimeKind): void {
         for (const path of ['/demo', '/demo/answer', '/fonts/amiri.ttf']) assert.equal((await fetch(`${runtime().origin}${path}`)).status, 404);
       });
 
+      it('validates question length before reaching the real upstream', async () => {
+        await withClient(runtime().origin, async client => {
+          const before = upstream.seen.length;
+          for (const question of ['', 'x'.repeat(4001)]) {
+            const result = await ask(client, question).then(value => ({value}), error => ({error}));
+            if ('value' in result) assert.equal(result.value.isError, true);
+            else assert.ok(result.error instanceof Error);
+            assert.equal(upstream.seen.length, before);
+          }
+          for (const question of ['x', 'x'.repeat(4000)]) {
+            assert.equal((await ask(client, question)).isError, undefined);
+          }
+          assert.equal(upstream.seen.length, before + 2);
+        });
+      });
+
       it('returns the complete answer with attribution and the linked HTML resource with its identity', async () => {
         await withClient(runtime().origin, async client => {
-          assert.deepEqual((await client.listTools()).tools.map(tool => tool.name), ['ask_ansari']);
+          const tools = (await client.listTools()).tools;
+          assert.deepEqual(tools.map(tool => tool.name), ['answer_islamic_question']);
+          assert.equal(tools[0].annotations?.readOnlyHint, true);
+          assert.equal(tools[0].annotations?.openWorldHint, true);
+          assert.equal(tools[0].annotations?.destructiveHint, undefined);
+          assert.equal(tools[0].annotations?.idempotentHint, undefined);
           const before = upstream.seen.length;
           const question = `complete ${kind} ${mode}`;
           const result = await ask(client, question);
@@ -123,10 +144,10 @@ export function defineParityCases(kind: RuntimeKind): void {
         const listed = await post(origin, 'tools/list', {}, {modern});
         assert.equal(listed.status, 200);
         assert.equal(listed.headers.get('mcp-session-id'), null);
-        assert.deepEqual((await terminal(listed)).result.tools.map((tool: {name: string}) => tool.name), ['ask_ansari']);
+        assert.deepEqual((await terminal(listed)).result.tools.map((tool: {name: string}) => tool.name), ['answer_islamic_question']);
         const questions = ['isolated one', 'slow:300', 'FAIL', 'isolated two'];
         const replies = await Promise.all(questions.map(async question => {
-          const response = await post(origin, 'tools/call', {name: 'ask_ansari', arguments: {question}}, {modern});
+          const response = await post(origin, 'tools/call', {name: 'answer_islamic_question', arguments: {question}}, {modern});
           assert.equal(response.status, 200);
           assert.equal(response.headers.get('mcp-session-id'), null);
           return (await terminal(response)).result as Call;
@@ -164,7 +185,7 @@ export function defineParityCases(kind: RuntimeKind): void {
       it('rejects an untrusted Host or Origin and a malformed body before calling Ansari, and accepts a configured Origin', async () => {
         const origin = runtime().origin;
         const before = upstream.seen.length;
-        const params = {name: 'ask_ansari', arguments: {question: 'guarded'}};
+        const params = {name: 'answer_islamic_question', arguments: {question: 'guarded'}};
         const hostStatus = await new Promise<number | undefined>((resolve, reject) => {
           const req = httpRequest(`${origin}/mcp`, {method: 'POST', headers: {host: 'other.example'}}, res => { res.resume(); res.on('end', () => resolve(res.statusCode)); });
           req.on('error', reject); req.end();
@@ -183,7 +204,7 @@ export function defineParityCases(kind: RuntimeKind): void {
 
       for (const modern of [true, false]) it(`${modern ? 'modern' : 'older-host'} refuses a body over the SDK limit before calling Ansari`, async () => {
         const before = upstream.seen.length;
-        const response = await post(runtime().origin, 'tools/call', {name: 'ask_ansari', arguments: {question: 'x'.repeat(4 * 1024 * 1024)}}, {modern});
+        const response = await post(runtime().origin, 'tools/call', {name: 'answer_islamic_question', arguments: {question: 'x'.repeat(4 * 1024 * 1024)}}, {modern});
         assert.equal(response.status, 413);
         assert.match(await response.text(), /Payload Too Large/);
         assert.equal(upstream.seen.length, before);
@@ -191,7 +212,7 @@ export function defineParityCases(kind: RuntimeKind): void {
 
       it('delivers the answer, and sends progress only when requested and only over SSE', async () => {
         const origin = runtime().origin;
-        const params = {name: 'ask_ansari', arguments: {question: 'progress'}};
+        const params = {name: 'answer_islamic_question', arguments: {question: 'progress'}};
         const plain = await messages(await post(origin, 'tools/call', params, {modern: true}));
         assert.ok(!JSON.stringify(plain).includes('notifications/progress'), 'no progress unless requested');
         const response = await post(origin, 'tools/call', params, {modern: true, progressToken: 'progress-test', id: 2});

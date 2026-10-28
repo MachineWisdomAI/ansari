@@ -37,11 +37,11 @@ try {
   }
   assert.equal(health?.ok,true,'container did not become healthy');
   assert.equal(health.release,'ci-public-smoke');
-  const tools=await rpc('tools/list');assert.deepEqual(tools.tools.map(t=>t.name),['ask_ansari']);
+  const tools=await rpc('tools/list');assert.deepEqual(tools.tools.map(t=>t.name),['answer_islamic_question']);
   const resources=await rpc('resources/list');assert.equal(resources.resources.length,1);
   const uri=resources.resources[0].uri;
   assert.equal(tools.tools[0]._meta.ui.resourceUri,uri);
-  const result=await rpc('tools/call',{name:'ask_ansari',arguments:{question:'synthetic'}});
+  const result=await rpc('tools/call',{name:'answer_islamic_question',arguments:{question:'synthetic'}});
   assert.notEqual(result.isError,true);
   assert.deepEqual(result.structuredContent,{version:'0.1.0',question:'synthetic',answer});
   assert.deepEqual(result.content,[{type:'text',text:answer}]);
@@ -50,10 +50,10 @@ try {
   assert.equal(uri,`ui://views/answer-card.${createHash('sha256').update(html).digest('hex').slice(0,32)}.html`);
   assert.ok(html.includes('ci-public-smoke'));
   assert.ok(!html.includes('version https://git-lfs.github.com/spec/v1'));
-  const failure=await rpc('tools/call',{name:'ask_ansari',arguments:{question:'fail'}});
+  const failure=await rpc('tools/call',{name:'answer_islamic_question',arguments:{question:'fail'}});
   assert.equal(failure.isError,true);
   assert.ok(!JSON.stringify(failure).includes('private upstream detail'));
-  const next=await rpc('tools/call',{name:'ask_ansari',arguments:{question:'synthetic'}});
+  const next=await rpc('tools/call',{name:'answer_islamic_question',arguments:{question:'synthetic'}});
   assert.equal(next.structuredContent.answer,answer);
   assert.equal(calls,3);
   console.log(JSON.stringify({health,tools:1,resources:1,answerPreserved:true,safeFailureAndRecovery:true,resourceUri:uri}));

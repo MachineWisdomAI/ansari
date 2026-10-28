@@ -29,13 +29,16 @@ export type EnvSettings = {
   ansari: {baseUrl?: string; clientName?: string; authorization?: string};
 };
 
-/**
- * One reading of the settings for both hosting adapters. `allowedHosts` and `allowedOrigins`
- * replace the defaults only when the caller supplies them; the environment lists are always added.
- */
+/** Explicit overrides, then configured lists (including empty), then local defaults. */
+function allowedList(value: unknown, override: string[] | undefined, fallback: string[]): string[] {
+  const selected = override ?? (typeof value === 'string' ? list(value) : fallback);
+  return [...new Set(selected.map(item => item.trim()).filter(Boolean))];
+}
+
+/** One configuration boundary shared by the Node and Workers adapters. */
 export function settingsFromEnv(env: RuntimeEnv, overrides: {allowedHosts?: string[]; allowedOrigins?: string[]; enableJsonResponse?: boolean} = {}): EnvSettings {
-  const allowedHosts = [...new Set([...(overrides.allowedHosts ?? DEFAULT_ALLOWED_HOSTS), ...list(setting(env, 'MCP_ALLOWED_HOSTS'))])];
-  const allowedOrigins = [...new Set([...(overrides.allowedOrigins ?? allowedHosts), ...list(setting(env, 'MCP_ALLOWED_ORIGINS'))])];
+  const allowedHosts = allowedList(env.MCP_ALLOWED_HOSTS, overrides.allowedHosts, DEFAULT_ALLOWED_HOSTS);
+  const allowedOrigins = allowedList(env.MCP_ALLOWED_ORIGINS, overrides.allowedOrigins, allowedHosts);
   return {
     release: releaseFromEnv(env),
     allowedHosts,

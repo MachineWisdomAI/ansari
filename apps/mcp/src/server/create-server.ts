@@ -31,14 +31,14 @@ export function createAnsariMcpServer(options:CreateMcpServerOptions):McpServer{
   // (the handler also disposes a server it never connected). The SDK owns that rule; the application subclasses nothing.
   attachRequestLifetime(server,lifetime);
   registerPublicOperation(server,{
-    name:'ask_ansari',
-    title:'Ask Ansari',
-    description:'Answers a question about Islam and shows the returned answer, with its attribution, in the Ansari answer card.',
-    // No backend-specific hints inferred from the synthetic experiments.
-    annotations:{},
+    name:'answer_islamic_question',
+    title:'Answer Islamic Question',
+    description:'Answers questions about Islam including theology, jurisprudence (fiqh), history, Quranic interpretation (tafsir), Hadith sciences, Islamic law, worship practices, ethics, spirituality, and contemporary issues. Provides comprehensive answers with citations from Quran, authentic Hadith, and classical Islamic scholarship. Can handle questions about specific verses, hadiths, scholarly opinions, historical events, prophets, companions, and modern applications of Islamic principles.',
+    // Preserve the legacy discovery contract; read-only tools need no destructive/idempotent hints.
+    annotations:{readOnlyHint:true,openWorldHint:true},
     // Application handler bound, with a fresh lifetime per call.
     boundMs:HANDLER_BOUND_MS,
-    input:z.object({question:z.string().min(1).describe('The question to send to Ansari')}),
+    input:z.object({question:z.string().min(1).max(4000).describe('The question about Islam to be answered. Include as much context and detail as possible. You can ask about specific Quranic verses, hadiths, Islamic rulings, historical events, theological concepts, or practical applications. The more context provided, the more comprehensive and relevant the answer will be.')}),
     output:z.object({version:z.literal(ANSWER_ENVELOPE_VERSION),question:z.string(),answer:z.string()}).strict(),
     // Discovery, every result's _meta.ui.resourceUri and the resource read all come from this one declaration.
     view:options.view,
@@ -49,7 +49,7 @@ export function createAnsariMcpServer(options:CreateMcpServerOptions):McpServer{
       // Source records do not claim terminal MCP delivery or upstream abortion.
       let answer:string;
       try {
-        answer=await options.completer.complete({question});
+        answer=await options.completer.complete({question,signal:request.signal});
       } catch (error) {
         // Record source failure without inspecting or serializing the exception.
         writeOperationLog({event:'source.error',method:'tools/call'},options.logger,options.release);

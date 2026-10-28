@@ -15,8 +15,8 @@ async function resource(html: string) {
   try {
     await client.connect(transport);
     const tools = await client.listTools();
-    assert.deepEqual(tools.tools.map(t=>t.name), ['ask_ansari']);
-    const result = await client.callTool({name:'ask_ansari',arguments:{question:'synthetic'}});
+    assert.deepEqual(tools.tools.map(t=>t.name), ['answer_islamic_question']);
+    const result = await client.callTool({name:'answer_islamic_question',arguments:{question:'synthetic'}});
     assert.deepEqual(result.structuredContent,{version:'0.1.0',question:'synthetic',answer});
     assert.deepEqual(result.content,[{type:'text',text:answer}]);
     const uri = (result._meta as {ui:{resourceUri:string}}).ui.resourceUri;
@@ -58,9 +58,9 @@ for (const modern of [true,false]) test(`MCP ${modern ? '2026' : 'older-host'} d
     const listed = await postRpc(service.port, 'tools/list',{}, {},modern);
     assert.equal(listed.status,200,await listed.clone().text());
     assert.equal(listed.headers.get('mcp-session-id'),null);
-    assert.deepEqual((await rpcPayload(listed)).result.tools.map((t:{name:string})=>t.name),['ask_ansari']);
+    assert.deepEqual((await rpcPayload(listed)).result.tools.map((t:{name:string})=>t.name),['answer_islamic_question']);
     const replies = await Promise.all(['one','two'].map(async question => {
-      const response = await postRpc(service.port,'tools/call',{name:'ask_ansari', arguments:{question}}, {},modern);
+      const response = await postRpc(service.port,'tools/call',{name:'answer_islamic_question', arguments:{question}}, {},modern);
       assert.equal(response.status,200);
       assert.equal(response.headers.get('mcp-session-id'),null);
       const payload = await rpcPayload(response);
@@ -110,7 +110,7 @@ test('Hono rejects untrusted Host/Origin and malformed requests before calling A
   let calls = 0;
   const service = await listen({host:'127.0.0.1',port:0,html:'<html><body>safe</body></html>',logger:()=>{},completer:{async complete(){calls++;return answer;}}});
   try {
-    const params = {name:'ask_ansari',arguments:{question:'synthetic'}};
+    const params = {name:'answer_islamic_question',arguments:{question:'synthetic'}};
     const hostStatus = await new Promise<number | undefined>((resolve,reject)=>{
       const req = httpRequest(`http://127.0.0.1:${service.port}/mcp`,{method:'POST',headers:{host:'other.example'}},res=>{res.resume();res.on('end',()=>resolve(res.statusCode));});
       req.on('error',reject);req.end();
@@ -130,11 +130,11 @@ test('Hono rejects untrusted Host/Origin and malformed requests before calling A
 for(const json of [false,true]) test(`modern ${json?'JSON':'SSE'} delivers the answer with a requested progress token`,async()=>{
   const service=await listen({host:'127.0.0.1',port:0,html:'<html><body>progress</body></html>',enableJsonResponse:json,logger:()=>{},completer:{async complete(){return answer;}}});
   try {
-    const response=await postRpc(service.port,'tools/call',{name:'ask_ansari',arguments:{question:'synthetic'}}, {},true);
+    const response=await postRpc(service.port,'tools/call',{name:'answer_islamic_question',arguments:{question:'synthetic'}}, {},true);
     assert.ok(!(await response.text()).includes('notifications/progress'),'do not send progress unless requested');
     const tokenResponse=await fetch(`http://127.0.0.1:${service.port}/mcp`,{
-      method:'POST',headers:{'content-type':'application/json',accept:'application/json, text/event-stream','MCP-Protocol-Version':'2026-07-28','Mcp-Method':'tools/call','Mcp-Name':'ask_ansari'},
-      body:JSON.stringify({jsonrpc:'2.0',id:2,method:'tools/call',params:{name:'ask_ansari',arguments:{question:'synthetic'},_meta:{
+      method:'POST',headers:{'content-type':'application/json',accept:'application/json, text/event-stream','MCP-Protocol-Version':'2026-07-28','Mcp-Method':'tools/call','Mcp-Name':'answer_islamic_question'},
+      body:JSON.stringify({jsonrpc:'2.0',id:2,method:'tools/call',params:{name:'answer_islamic_question',arguments:{question:'synthetic'},_meta:{
         progressToken:'progress-test',[PROTOCOL_VERSION_META_KEY]:'2026-07-28',[CLIENT_INFO_META_KEY]:{name:'progress-test',version:'1'},[CLIENT_CAPABILITIES_META_KEY]:{},
       }}}),
     });
@@ -156,7 +156,7 @@ for(const modern of [true,false]) test(`${modern?'modern':'older-host'} refuses 
   let calls=0;
   const service=await listen({host:'127.0.0.1',port:0,html:'<html><body>bounded body</body></html>',logger:()=>{},completer:{async complete(){calls++;return answer;}}});
   try {
-    const response=await postRpc(service.port,'tools/call',{name:'ask_ansari',arguments:{question:'x'.repeat(4*1024*1024)}},{},modern);
+    const response=await postRpc(service.port,'tools/call',{name:'answer_islamic_question',arguments:{question:'x'.repeat(4*1024*1024)}},{},modern);
     assert.equal(response.status,413);
     assert.match(await response.text(),/Payload Too Large/);
     assert.equal(calls,0);

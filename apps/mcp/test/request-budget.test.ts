@@ -28,7 +28,7 @@ async function callOnce(
     // Several independent HTTP calls: each receives a fresh request budget.
     for (const question of questions) {
       const started = performance.now();
-      const call = await client.callTool({name: 'ask_ansari', arguments: {question}}, {timeout: 120_000}) as Call;
+      const call = await client.callTool({name: 'answer_islamic_question', arguments: {question}}, {timeout: 120_000}) as Call;
       calls.push({call, elapsedMs: performance.now() - started});
     }
     return {calls};

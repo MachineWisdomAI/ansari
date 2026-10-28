@@ -30,6 +30,7 @@ export type UpstreamRequest = {headers: IncomingHttpHeaders; question: string};
  */
 export async function startUpstream() {
   const seen: UpstreamRequest[] = [];
+  const aborted: string[] = [];
   const server: Server = createServer((req, res) => {
     let body = '';
     req.setEncoding('utf8');
@@ -37,6 +38,7 @@ export async function startUpstream() {
     req.on('end', () => {
       const question = JSON.parse(body).messages[0].content as string;
       seen.push({headers: req.headers, question});
+      res.once('close', () => { if (!res.writableEnded) aborted.push(question); });
       if (question === 'hang') return;
       const reply = (status: number, text: string) => { res.writeHead(status, {'content-type': 'text/plain; charset=utf-8'}); res.end(text); };
       if (question === 'FAIL') return reply(500, PRIVATE_CANARY);
@@ -49,7 +51,7 @@ export async function startUpstream() {
   const address = server.address();
   if (!address || typeof address !== 'object') throw new Error('upstream did not bind');
   return {
-    url: `http://127.0.0.1:${address.port}`, seen,
+    url: `http://127.0.0.1:${address.port}`, seen, aborted,
     async close() { const closed = new Promise<void>(resolve => server.close(() => resolve())); server.closeAllConnections(); await closed; },
   };
 }
