@@ -54,8 +54,7 @@ test('the manifest pins one exact public version for every SAGA package it impor
   assert.ok(!/"(?:file|link|workspace|git\+?[a-z]*|https?):/.test(JSON.stringify({...manifest.dependencies,overrides:manifest.overrides,pnpm:manifest.pnpm})),'no local, tarball or workspace dependency source');
 });
 
-// Every lockfile that installs this application: the application's own (standalone installation) and, when this folder sits
-// in a monorepo, the workspace root's.
+// The lockfile that installs this application: the workspace root's. The application has none of its own (asserted below).
 const lockfiles:Array<{label:string;text:string;prefix:string}>=[];
 assert.equal(existsSync(join(root,'pnpm-lock.yaml')), false, 'only the root lockfile installs the app');
 assert.equal(existsSync(join(root,'pnpm-workspace.yaml')), false, 'only the root workspace config applies');
