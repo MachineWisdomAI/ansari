@@ -30,7 +30,7 @@
     "@hono/node-server": "1.19.17",
     "@modelcontextprotocol/hono": "2.0.2",
     "@modelcontextprotocol/server": "2.3.1",
-    "@saga-a2ui/react-mcp-stack": "0.7.6-rc.1",
+    "@saga-a2ui/react-mcp-stack": "0.7.6",
     "hono": "4.13.13",
     "react": "19.3.1",
     "react-dom": "19.3.1",
