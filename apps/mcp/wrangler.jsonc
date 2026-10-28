@@ -1,5 +1,5 @@
 {
-  // Cloudflare Workers deployment targets for Ansari Faithful Answers: three named environments, one Worker each
+  // Cloudflare Workers deployment targets for Ansari MCP: three named environments, one Worker each
   // (`dev`, `beta`, `production`). This file is their only declaration; every command selects one with `--env <name>`
   // (the `dev:worker:*` and `deploy:worker:*` package scripts do). See README.md.
   //
@@ -29,44 +29,44 @@
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat"],
   "env": {
-    // The existing, isolated Dev Worker (https://ansari-faithful-answers-dev.younes-b2d.workers.dev). Declared here
+    // The existing, isolated Dev Worker (https://ansari-mcp-dev.younes-b2d.workers.dev). Declared here
     // to keep it reproducible; it is deployed and owned by the app owner, never by a worker or an agent run.
     "dev": {
-      "name": "ansari-faithful-answers-dev",
+      "name": "ansari-mcp-dev",
       "main": "src/worker/index.ts",
       "workers_dev": true,
       "preview_urls": false,
       "vars": {
         "ANSARI_API_BASE_URL": "https://api.askansari.ai",
-        "ANSARI_CLIENT": "machinewisdom-faithful-answers-dev",
-        "MCP_ALLOWED_HOSTS": "ansari-faithful-answers-dev.younes-b2d.workers.dev",
+        "ANSARI_CLIENT": "ansari-mcp-dev",
+        "MCP_ALLOWED_HOSTS": "ansari-mcp-dev.younes-b2d.workers.dev",
         "MCP_ALLOWED_ORIGINS": "",
         "MCP_RESPONSE_MODE": ""
       }
     },
     "beta": {
-      "name": "ansari-faithful-answers-beta",
+      "name": "ansari-mcp-beta",
       "main": "src/worker/index.ts",
       "workers_dev": false,
       "preview_urls": false,
       "routes": [{"pattern": "replace-with-beta-worker-hostname.invalid", "custom_domain": true}],
       "vars": {
         "ANSARI_API_BASE_URL": "https://api.askansari.ai",
-        "ANSARI_CLIENT": "machinewisdom-faithful-answers-beta",
+        "ANSARI_CLIENT": "ansari-mcp-beta",
         "MCP_ALLOWED_HOSTS": "replace-with-beta-worker-hostname.invalid",
         "MCP_ALLOWED_ORIGINS": "",
         "MCP_RESPONSE_MODE": ""
       }
     },
     "production": {
-      "name": "ansari-faithful-answers-production",
+      "name": "ansari-mcp-production",
       "main": "src/worker/index.ts",
       "workers_dev": false,
       "preview_urls": false,
       "routes": [{"pattern": "replace-with-production-worker-hostname.invalid", "custom_domain": true}],
       "vars": {
         "ANSARI_API_BASE_URL": "https://api.askansari.ai",
-        "ANSARI_CLIENT": "machinewisdom-faithful-answers-production",
+        "ANSARI_CLIENT": "ansari-mcp-production",
         "MCP_ALLOWED_HOSTS": "replace-with-production-worker-hostname.invalid",
         "MCP_ALLOWED_ORIGINS": "",
         "MCP_RESPONSE_MODE": ""

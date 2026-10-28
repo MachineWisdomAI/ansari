@@ -31,7 +31,7 @@ const LOCAL_RELEASE = '0.7.6-rc.1';
 const isLocal = (sdk: string) => sdk === LOCAL_RELEASE || sdk.startsWith('0.0.0-candidate.');
 // The committed tree installs managed local inputs while candidates/ exists; an RC or stable release tree has retired it.
 const committedTreeIsLocal = () => existsSync(join(root, 'candidates')) && existsSync(join(root, 'pnpm-lock.yaml'));
-const TAG_PREFIX = 'ansari-faithful-answers-v';
+const TAG_PREFIX = 'ansari-mcp-v';
 const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 type Fixture = {sdk: string; appVersion: string; stackSpec?: string; extraDirect?: Record<string, string>; lockTransform?: (lock: string) => string; keepOverrides?: boolean};
 const SIBLINGS = ['core', 'components', 'mcp', 'react'];
@@ -64,7 +64,7 @@ function syntheticLock(sdk: string, specifier: string): string {
   return [
     "lockfileVersion: '9.0'", '',
     'importers:', '',
-    '  .:', '    dependencies:',
+    '  apps/mcp:', '    dependencies:',
     "      '@saga-a2ui/react-mcp-stack':",
     `        specifier: ${specifierLine}`,
     `        version: ${stack.ref}${PEERS}`, '',
@@ -79,17 +79,17 @@ function syntheticWorkspace(sdk: string, withOverrides: boolean): string {
   }
   return `${lines.join('\n')}\n`;
 }
-/** Writes a repository-shaped fixture (apps/ansari-faithful-answers + plugin) and returns its application folder. */
+/** Writes a repository-shaped fixture (apps/mcp + plugin) and returns its application folder. */
 function writeApp(repo: string, fixture: Fixture): string {
-  const app = join(repo, 'apps/ansari-faithful-answers');
+  const app = join(repo, 'apps/mcp');
   mkdirSync(join(app, 'src'), {recursive: true});
   mkdirSync(join(repo, 'plugin'), {recursive: true});
   const deps = {...manifest.dependencies, '@saga-a2ui/react-mcp-stack': fixture.stackSpec ?? fixture.sdk, ...fixture.extraDirect};
   writeFileSync(join(app, 'package.json'), JSON.stringify({...manifest, version: fixture.appVersion, dependencies: deps}, null, 2));
   writeFileSync(join(app, 'src/version.ts'), `// One application identity, shared by the server and built view.\nexport const APP_VERSION = '${fixture.appVersion}';\n`);
-  writeFileSync(join(repo, 'plugin/plugin.json'), JSON.stringify({name: 'ansari-faithful-answers-dev', version: fixture.appVersion}, null, 2));
-  writeFileSync(join(app, 'pnpm-lock.yaml'), (fixture.lockTransform ?? (text => text))(syntheticLock(fixture.sdk, fixture.stackSpec ?? fixture.sdk)));
-  writeFileSync(join(app, 'pnpm-workspace.yaml'), syntheticWorkspace(fixture.sdk, fixture.keepOverrides === true));
+  writeFileSync(join(repo, 'plugin/plugin.json'), JSON.stringify({name: 'ansari-mcp-dev', version: fixture.appVersion}, null, 2));
+  writeFileSync(join(repo, 'pnpm-lock.yaml'), (fixture.lockTransform ?? (text => text))(syntheticLock(fixture.sdk, fixture.stackSpec ?? fixture.sdk)));
+  writeFileSync(join(repo, 'pnpm-workspace.yaml'), syntheticWorkspace(fixture.sdk, fixture.keepOverrides === true));
   return app;
 }
 function disposableRepo<T>(body: (repo: string) => T): T {
@@ -101,6 +101,11 @@ const RC: Fixture = {sdk: '0.7.0-rc.1', appVersion: '0.15.0-rc.1'};
 const STABLE: Fixture = {sdk: '0.7.0', appVersion: '0.15.0'};
 
 describe('release input validation (fixture inputs, no registry)', () => {
+  it('rejects a stack pin belonging only to an unrelated workspace importer', () => {
+    const wrong = {...STABLE, lockTransform: (lock: string) => lock.replace('  apps/mcp:', '  apps/other:')};
+    assert.match(validate(wrong, 'production').join('\n'), /no direct.*react-mcp-stack/);
+  });
+
   it('requires a named environment', () => {
     assert.throws(() => gate.validateRelease({appRoot: root}), /Name the environment/);
     assert.throws(() => gate.validateRelease({appRoot: root, target: 'staging'}), /Name the environment/);
@@ -250,8 +255,8 @@ for (const layout of LAYOUTS) describe(`tag-based source selection in a disposab
   const env = {...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null', GIT_AUTHOR_NAME: 'rehearsal', GIT_AUTHOR_EMAIL: 'rehearsal@example.invalid', GIT_COMMITTER_NAME: 'rehearsal', GIT_COMMITTER_EMAIL: 'rehearsal@example.invalid'};
   const git = (cwd: string, ...args: string[]) => execFileSync('git', args, {cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']}).trim();
   const commit = (repo: string, message: string) => { git(repo, 'add', '-A'); git(repo, 'commit', '-q', '-m', message); return git(repo, 'rev-parse', 'HEAD'); };
-  const RC_TAG = 'ansari-faithful-answers-v0.15.0-rc.1';
-  const STABLE_TAG = 'ansari-faithful-answers-v0.15.0';
+  const RC_TAG = 'ansari-mcp-v0.15.0-rc.1';
+  const STABLE_TAG = 'ansari-mcp-v0.15.0';
 
   it('builds an RC from its tag, derives stable from that tag alone, and never rewrites a tag', () => {
     disposable(repo => {
@@ -267,7 +272,7 @@ for (const layout of LAYOUTS) describe(`tag-based source selection in a disposab
       // What RC preparation changed: dependency inputs, so the affected checks belong on Dev before tagging.
       const prep = gate.describeChanges({appRoot: app, from: qualified});
       assert.equal(prep.dependenciesChanged, true);
-      assert.ok(prep.files.includes('apps/ansari-faithful-answers/pnpm-lock.yaml'));
+      assert.ok(prep.files.includes('pnpm-lock.yaml'));
 
       // Unrelated work lands on main after the RC was tagged.
       writeFileSync(join(app, 'src/unrelated.ts'), 'export const later = true;\n');
@@ -286,7 +291,7 @@ for (const layout of LAYOUTS) describe(`tag-based source selection in a disposab
       // A tag is immutable: git refuses to re-create it, and a lightweight or misnamed tag does not qualify.
       assert.throws(() => git(repo, 'tag', '-a', RC_TAG, '-m', 'again'), /already exists/);
       git(repo, 'tag', 'lightweight-rc');
-      assert.match(gate.validateTag({appRoot: app, tag: 'lightweight-rc', appVersion: '0.15.0-rc.1'}).join('\n'), /must be ansari-faithful-answers-v0\.15\.0-rc\.1/);
+      assert.match(gate.validateTag({appRoot: app, tag: 'lightweight-rc', appVersion: '0.15.0-rc.1'}).join('\n'), /must be ansari-mcp-v0\.15\.0-rc\.1/);
       git(repo, 'tag', `${TAG_PREFIX}0.15.0-rc.1-light`);
       assert.match(gate.validateTag({appRoot: app, tag: `${TAG_PREFIX}0.15.0-rc.1-light`, appVersion: '0.15.0-rc.1-light'}).join('\n'), /not an annotated tag/);
       writeFileSync(join(app, 'dirty.txt'), 'x');
@@ -302,7 +307,7 @@ for (const layout of LAYOUTS) describe(`tag-based source selection in a disposab
       assert.deepEqual(changes.problems, []);
       assert.deepEqual(changes.outside, []);
       assert.equal(changes.dependenciesChanged, true, 'a changed SDK is an executable dependency change: qualify it on Dev');
-      assert.deepEqual([...changes.files].sort(), ['apps/ansari-faithful-answers/package.json', 'apps/ansari-faithful-answers/pnpm-lock.yaml', 'apps/ansari-faithful-answers/src/version.ts', 'plugin/plugin.json']);
+      assert.deepEqual([...changes.files].sort(), ['apps/mcp/package.json', 'pnpm-lock.yaml', 'apps/mcp/src/version.ts', 'plugin/plugin.json'].sort());
       assert.ok(!existsSync(join(app, 'src/unrelated.ts')), 'the stable branch excludes later main work');
       assert.notEqual(git(repo, 'merge-base', stable, later), stable, 'stable is not on main');
       assert.deepEqual(gate.validateTag({appRoot: app, tag: STABLE_TAG, appVersion: '0.15.0'}), []);
@@ -314,7 +319,7 @@ for (const layout of LAYOUTS) describe(`tag-based source selection in a disposab
       writeFileSync(join(app, 'src/unrelated.ts'), 'export const later = true;\n');
       commit(repo, 'unrelated change on the stable branch');
       const polluted = gate.describeChanges({appRoot: app, from: RC_TAG, releaseFilesOnly: true});
-      assert.match(polluted.problems.join('\n'), /apps\/ansari-faithful-answers\/src\/unrelated\.ts changed since/);
+      assert.match(polluted.problems.join('\n'), /apps\/mcp\/src\/unrelated\.ts changed since/);
     });
   });
 
@@ -334,7 +339,7 @@ for (const layout of LAYOUTS) describe(`tag-based source selection in a disposab
     // Executable code appended to src/version.ts stays inside the allowed path but is refused.
     const code = stableFrom(app => edit(join(app, 'src/version.ts'), text => `${text}export const injected = () => process.env;\n`));
     assert.match(code.problems.join('\n'), /src\/version\.ts changed since .* beyond the release version and the SDK pin/);
-    assert.ok(code.outside.includes('apps/ansari-faithful-answers/src/version.ts'));
+    assert.ok(code.outside.includes('apps/mcp/src/version.ts'));
 
     // A changed package script or an unrelated dependency inside package.json is refused; the SDK pin and version are not.
     const script = stableFrom(app => edit(join(app, 'package.json'), text => { const parsed = JSON.parse(text); parsed.scripts = {...parsed.scripts, postinstall: 'node x.js'}; return JSON.stringify(parsed, null, 2); }));
@@ -345,7 +350,7 @@ for (const layout of LAYOUTS) describe(`tag-based source selection in a disposab
     // Plugin settings other than the version are refused; a workspace-file change is refused as a path outside the release set.
     const plugin = stableFrom((_app, repo) => writeFileSync(join(repo, 'plugin/plugin.json'), JSON.stringify({name: 'other', version: '0.15.0'})));
     assert.match(plugin.problems.join('\n'), /plugin\/plugin\.json changed since .* beyond the release version and the SDK pin/);
-    const workspace = stableFrom(app => edit(join(app, 'pnpm-workspace.yaml'), text => `${text}  'left-pad': '1.0.0'\n`));
+    const workspace = stableFrom(app => edit(join(app, '../../pnpm-workspace.yaml'), text => `${text}  'left-pad': '1.0.0'\n`));
     assert.match(workspace.problems.join('\n'), /pnpm-workspace\.yaml changed since/);
 
     // The legitimate derivation (version mirrors and the SDK pin only) passes the same screen.

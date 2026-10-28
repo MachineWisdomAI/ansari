@@ -33,8 +33,8 @@ describe('Worker environments', () => {
       assert.equal(new Set(workers.map(field)).size, 3, 'name, client label and allowed host all differ');
     }
     // The existing Dev Worker keeps its identity.
-    assert.equal(workers[0]!.name, 'ansari-faithful-answers-dev');
-    assert.equal(workers[0]!.vars?.MCP_ALLOWED_HOSTS, 'ansari-faithful-answers-dev.younes-b2d.workers.dev');
+    assert.equal(workers[0]!.name, 'ansari-mcp-dev');
+    assert.equal(workers[0]!.vars?.MCP_ALLOWED_HOSTS, 'ansari-mcp-dev.younes-b2d.workers.dev');
     assert.equal(workers[0]!.vars?.ANSARI_CLIENT, 'machinewisdom-faithful-answers-dev');
     for (const worker of workers) {
       assert.ok(worker.main, 'every environment declares its entry point');

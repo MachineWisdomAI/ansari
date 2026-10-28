@@ -1,10 +1,10 @@
-# Ansari Faithful Answers
+# Ansari MCP
 
 A standalone MCP application. `ask_ansari` calls the Ansari API and returns its complete answer and attribution unchanged. SAGA links each result to one content-addressed, self-contained React card. The application owns Ansari branding, floral artwork, theme mapping and Hono HTTP hosting; SAGA owns content interpretation, FaithfulCard rendering, content policy, consent and MCP view linkage.
 
 ## How it works
 
-[Explore the interactive walkthrough](docs/show-me-ansari-faithful-answers.html) for the complete question-to-card flow, UI states, code ownership and build process. Its hosted lifecycle addendum compares Alexa+, ChatGPT and Claude from build and deployment through discovery, requests, rendering and teardown. Download the self-contained HTML and open it in a browser; GitHub displays its source. The walkthrough uses synthetic content and makes no live requests.
+[Explore the interactive walkthrough](docs/show-me-ansari-mcp.html) for the complete question-to-card flow, UI states, code ownership and build process. Its hosted lifecycle addendum compares Alexa+, ChatGPT and Claude from build and deployment through discovery, requests, rendering and teardown. Download the self-contained HTML and open it in a browser; GitHub displays its source. The walkthrough uses synthetic content and makes no live requests.
 
 ## Screenshots
 
@@ -22,13 +22,13 @@ English and Arabic answer cards rendered in ChatGPT desktop web through the Dev 
 
 User-provided capture of the Dev answer card in ChatGPT, showing English text and floral branding.
 
-![Ansari Faithful Answers Dev card in ChatGPT mobile](docs/screenshots/chatgpt-dev-mobile.jpg)
+![Ansari MCP Dev card in ChatGPT mobile](docs/screenshots/chatgpt-dev-mobile.jpg)
 
 ### Claude mobile
 
 User-provided capture of the Dev answer card in Claude, showing Arabic text, RTL layout and numbered floral markers.
 
-![Ansari Faithful Answers Dev card in Claude mobile with Arabic RTL content](docs/screenshots/claude-dev-mobile.jpg)
+![Ansari MCP Dev card in Claude mobile with Arabic RTL content](docs/screenshots/claude-dev-mobile.jpg)
 
 ## Dependencies
 
@@ -49,17 +49,17 @@ schema types. The artwork owner has authorized contribution and redistribution w
 
 ## Development
 
-Requires Node 22.18 or later and pnpm 10.33. This folder installs on its own (it carries a `pnpm-workspace.yaml` and `pnpm-lock.yaml`), and it is also a package of the
-repository's pnpm workspace, whose root lockfile installs the same versions. From this folder:
+Requires Node 22.18 or later and pnpm 10.33. Install once from the repository root using its authoritative lockfile. Run the app explicitly; root build, test, typecheck and coverage retain their existing scope, while root lint includes this application.
 
 ```sh
-pnpm install --frozen-lockfile --strict-peer-dependencies
-pnpm build
-pnpm typecheck
-pnpm test
-pnpm exec playwright install chromium
-pnpm test:browser
-pnpm start
+pnpm install --frozen-lockfile --strict-peer-dependencies --filter ansari-mcp...
+pnpm mcp build
+pnpm mcp typecheck
+pnpm mcp lint
+pnpm mcp test
+pnpm mcp exec playwright install chromium
+pnpm mcp test:browser
+pnpm mcp start
 ```
 
 `build` writes `dist/view.html` and a bundled `dist/server/index.js`; no parent build or source checkout is needed. `dev` runs the Node entry source (`src/node/index.ts`) after `build`. The synthetic browser harness is test-only and uses no credentials or live answers.
@@ -75,8 +75,8 @@ The same Hono application and official MCP handler (`src/server/fetch-app.ts`) r
 
 ```sh
 # Clean frozen installation, then both artifacts and every check (Node, Workers and browser):
-pnpm install --frozen-lockfile --strict-peer-dependencies
-pnpm verify          # typecheck, build, build:worker, test, test:browser
+pnpm install --frozen-lockfile --strict-peer-dependencies --filter ansari-mcp...
+pnpm mcp verify          # typecheck, build, build:worker, test, test:browser
 
 # Run the Worker in Wrangler's local runtime under one declared environment (dev, beta or production). Its local secrets are `.dev.vars.<env>` only (git-ignored, and excluded from the Docker build context and the standalone verification copy, together with `.wrangler/` and `dist-worker/`). The script refuses a generic `.dev.vars`, which Wrangler would read for every environment, and turns off Wrangler's `.env` fallback.
 pnpm dev:worker:dev --var ANSARI_RELEASE:local-1
@@ -90,7 +90,7 @@ The Worker takes the variables in the table below as Wrangler `vars` or secrets,
 | `PORT` | HTTP port (default 3000). |
 | `ANSARI_API_BASE_URL` | Ansari API origin (default `https://api.askansari.ai`). |
 | `ANSARI_API_AUTHORIZATION` | Optional upstream Authorization header. Supply through the environment; never commit it. |
-| `ANSARI_CLIENT` | Upstream client label (default `ansari-faithful-answers`). |
+| `ANSARI_CLIENT` | Upstream client label (default `ansari-mcp`). |
 | `MCP_ALLOWED_HOSTS` | Comma-separated additional HTTP Host names, without scheme. Localhost and 127.0.0.1 are allowed by default. Configure the public host when deploying. |
 | `MCP_ALLOWED_ORIGINS` | Comma-separated additional allowed browser origins. |
 | `MCP_RESPONSE_MODE` | `json` for modern MCP final-answer-only responses; otherwise SSE, which supports client-requested progress notifications. Older-host compatibility responses may use SSE. |
@@ -102,20 +102,17 @@ Closing a request server releases its budget even if it was never connected to a
 
 ## Workspace and container
 
-In the repository this package lives at `apps/ansari-faithful-answers`. The repository's root `pnpm-lock.yaml` is authoritative for workspace installs
-(`pnpm install --frozen-lockfile` at the root; `pnpm faithful-answers <script>` runs a script here). This folder's own
-[`pnpm-workspace.yaml`](pnpm-workspace.yaml) and committed `pnpm-lock.yaml` are the standalone entry point, so the application also installs outside
-the repository from a copy of this folder alone. Both lockfiles record the same exact public versions.
+This package lives at `apps/mcp` and is named `ansari-mcp`. The root `pnpm-lock.yaml` and `pnpm-workspace.yaml` are the only install inputs. `pnpm mcp <script>` targets this app. Shared TypeScript and lint tools use the workspace catalog; no application-local lockfile or standalone workspace is maintained.
 
 The pnpm override pins `@a2ui/markdown-it` to `0.2.1`: A2UI React 0.13 permits adapter 0.2.2, but that adapter requires
-incompatible web_core 0.14. The repository root file carries the same override. Keep it until SAGA's supported dependency combination changes. SAGA's own Markdown parser
+incompatible web_core 0.14. The root workspace scopes this compatibility pin to `@a2ui/react@0.13.0>@a2ui/markdown-it`. Keep it until SAGA's supported dependency combination changes. SAGA's own Markdown parser
 remains its private dependency. Do not add direct A2UI dependencies to this application.
 
-The Docker build context is this folder (`pnpm-lock.yaml` is part of it):
+The Docker build context is the repository root, including its lockfile and the shared configuration packages:
 
 ```sh
-docker build -t ansari-faithful-answers .
-docker run --rm -p 3000:3000 --env-file .env ansari-faithful-answers
+docker build -f apps/mcp/Dockerfile -t ansari-mcp .
+docker run --rm -p 3000:3000 --env-file apps/mcp/.env ansari-mcp
 ```
 
 The built card document names the SDK it was built from beside the application release: `<meta name="ansari-sdk">` and
@@ -132,15 +129,7 @@ Artwork is embedded as actual SVG/PNG data in application-local TypeScript modul
 
 ## Continuous verification
 
-The `Standalone public packages` GitHub Actions job runs on every PR and develop/main
-push, separately from the API, auth and frontend jobs. It installs the root lockfile frozen and runs `verify` for this application, then runs
-`bash scripts/verify-standalone.sh` (Node 22, pnpm 10.33, Docker and Chromium
-system dependencies required), which you can also run locally. That script copies only this app into a temporary pnpm
-workspace, applies the Markdown adapter override at that workspace's root, installs everything from public npm with a fresh store and an empty npm
-configuration, and runs the registry release check, typechecking, the build, the Worker build, server tests and browser tests. It then builds the normal Dockerfile with `--no-cache` from the committed application lockfile and checks
-health, synthetic tool calls, complete attribution, safe failure/recovery and
-resource identity in a container with no external network or mounted files.
-The temporary workspace, container and image are removed on exit.
+The `MCP application` workflow runs for app, lockfile, workspace, root manifest/ignore, workflow and shared lint configuration changes on PRs and develop/main pushes. It installs the root lockfile frozen, then runs app lint, typechecking, both builds, tests and browser checks. `bash apps/mcp/scripts/verify-container.sh` performs one uncached root-context Docker build and verifies health, synthetic tool calls, full attribution, safe failure/recovery and resource identity in a container with no external network or mounted files. It removes its container and image on exit. Node 22, pnpm 10.33, Docker and Chromium system dependencies are required.
 
 This job needs no host credentials. Deployment and actual
 ChatGPT, Claude and Alexa rendering remain separate integration checks.

@@ -1,5 +1,5 @@
 export const DEFAULT_ANSARI_API_BASE = 'https://api.askansari.ai';
-export const DEFAULT_ANSARI_CLIENT = 'ansari-faithful-answers';
+export const DEFAULT_ANSARI_CLIENT = 'ansari-mcp';
 
 export type AnsariCompleteRequest = {
   question: string;

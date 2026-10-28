@@ -6,7 +6,7 @@
 //   --target       required; there is no default environment.
 //   --no-registry  skip the npm registry lookups. The report then says the registry was NOT checked, so a
 //                  structural pass is never mistaken for a verified public release.
-//   --tag TAG      the source tag being built: it must be the annotated app tag `ansari-faithful-answers-v<version>`,
+//   --tag TAG      the source tag being built: it must be the annotated app tag `ansari-mcp-v<version>`,
 //                  point at HEAD, and the tree must be clean.
 //   --from REF     report what changed from REF (the qualified source, or the accepted RC tag) to HEAD, and whether any
 //                  executable dependency input changed (which then needs the Dev checks before a deployment).
@@ -25,12 +25,12 @@ import {fileURLToPath} from 'node:url';
 
 export const STACK = '@saga-a2ui/react-mcp-stack';
 export const TARGETS = ['dev', 'beta', 'production'];
-export const TAG_PREFIX = 'ansari-faithful-answers-v';
+export const TAG_PREFIX = 'ansari-mcp-v';
 /** Files a stable derivation from an accepted RC may change: version mirrors, the SDK pin and the lockfile. */
 export const RELEASE_FILES = [
-  'apps/ansari-faithful-answers/package.json',
-  'apps/ansari-faithful-answers/pnpm-lock.yaml',
-  'apps/ansari-faithful-answers/src/version.ts',
+  'apps/mcp/package.json',
+  'pnpm-lock.yaml',
+  'apps/mcp/src/version.ts',
   'plugin/plugin.json',
 ];
 const canonical = value => JSON.stringify(value, (_key, item) => (item && typeof item === 'object' && !Array.isArray(item) ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => (a < b ? -1 : 1))) : item));
@@ -40,12 +40,12 @@ const withoutVersion = text => { const parsed = JSON.parse(text); parsed.version
  * revisions compare equal exactly when they differ in nothing else. The lockfile is not here: its content is not diffed.
  */
 const RELEASE_CONTENT = {
-  'apps/ansari-faithful-answers/package.json': text => {
+  'apps/mcp/package.json': text => {
     const parsed = withoutVersion(text);
     if (parsed.dependencies?.[STACK] !== undefined) parsed.dependencies[STACK] = null;
     return canonical(parsed);
   },
-  'apps/ansari-faithful-answers/src/version.ts': text => text.replace(/(export const APP_VERSION = )'[^']*'/, "$1'<version>'"),
+  'apps/mcp/src/version.ts': text => text.replace(/(export const APP_VERSION = )'[^']*'/, "$1'<version>'"),
   'plugin/plugin.json': text => canonical(withoutVersion(text)),
 };
 
@@ -69,10 +69,12 @@ function section(lock, name) {
 }
 
 /** Direct SAGA dependencies of the application as the lockfile recorded them. */
-function lockedDirect(lock) {
+function lockedDirect(lock, importerName) {
   const found = [];
   const pattern = /^ {6}'?(@saga-a2ui\/[^':]+)'?:\n {8}specifier: (.+)\n {8}version: (.+)$/gm;
-  for (const [, name, specifier, version] of section(lock, 'importers').matchAll(pattern)) {
+  const escaped = importerName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const importer = new RegExp(`^ {2}['"']?${escaped}['"']?:\\n((?:(?: {4}.*)?\\n)*)`, 'm').exec(section(lock, 'importers'))?.[1] ?? '';
+  for (const [, name, specifier, version] of importer.matchAll(pattern)) {
     found.push({name, specifier: specifier.replace(/^'|'$/g, ''), version: version.replace(/^'|'$/g, '').replace(/\(.*$/, '')});
   }
   return found;
@@ -113,8 +115,10 @@ export function validateRelease({appRoot = defaultRoot, target} = {}) {
   if (!TARGETS.includes(target)) throw new Error(`Name the environment: --target ${TARGETS.join('|')} (got ${target ?? 'none'}).`);
   const problems = [];
   const manifest = JSON.parse(readFileSync(path.join(appRoot, 'package.json'), 'utf8'));
-  const lock = read(path.join(appRoot, 'pnpm-lock.yaml'));
-  const workspace = read(path.join(appRoot, 'pnpm-workspace.yaml'));
+  const workspaceRoot = path.resolve(realpathSync(appRoot), '../..');
+  const importerName = path.relative(workspaceRoot, realpathSync(appRoot)).split(path.sep).join('/');
+  const lock = read(path.join(workspaceRoot, 'pnpm-lock.yaml'));
+  const workspace = read(path.join(workspaceRoot, 'pnpm-workspace.yaml'));
   const release = target !== 'dev';
 
   // 1. The direct stack dependency: present, exact, public (Beta/Production), and the only direct SAGA dependency.
@@ -140,7 +144,7 @@ export function validateRelease({appRoot = defaultRoot, target} = {}) {
   let packages = [];
   if (lock === undefined) problems.push('pnpm-lock.yaml is missing: commit the resolved graph.');
   else {
-    const locked = lockedDirect(lock);
+    const locked = lockedDirect(lock, importerName);
     const lockedStack = locked.filter(entry => entry.name === STACK);
     if (lockedStack.length !== 1) problems.push(`pnpm-lock.yaml records no direct ${STACK} dependency.`);
     else {
@@ -229,7 +233,7 @@ export function describeChanges({appRoot = defaultRoot, from, releaseFilesOnly =
     const manifest = JSON.parse(git(top, 'show', `${ref}:${rel('package.json')}`));
     return JSON.stringify([manifest.dependencies, manifest.devDependencies, manifest.overrides, manifest.pnpm]);
   };
-  const dependenciesChanged = files.includes(rel('pnpm-lock.yaml')) || files.includes(rel('pnpm-workspace.yaml')) || dependencyInputs(from) !== dependencyInputs('HEAD');
+  const dependenciesChanged = files.includes('pnpm-lock.yaml') || files.includes('pnpm-workspace.yaml') || dependencyInputs(from) !== dependencyInputs('HEAD');
   const outside = files.filter(file => !RELEASE_FILES.includes(file));
   // The three small release files may change only their version fields and the SDK pin. Anything else inside them
   // (code in src/version.ts, package scripts, other dependencies or plugin settings) counts as changed code.

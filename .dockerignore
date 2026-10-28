@@ -14,8 +14,16 @@
 **/.env.local
 **/.env.*.local
 apps/frontend/google-service-account
-# Cloudflare Worker local state and secrets (apps/ansari-faithful-answers)
+# Cloudflare Worker local state and secrets (apps/mcp)
 **/.dev.vars
 **/.dev.vars.*
 **/.wrangler
 **/dist-worker
+
+# Credentials and private environment files; committed public examples remain available.
+**/.npmrc
+**/.env.*
+!**/.env.ci
+!**/.env.example
+**/test-results
+**/playwright-report

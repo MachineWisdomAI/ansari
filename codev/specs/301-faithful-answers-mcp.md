@@ -4,7 +4,7 @@ Contribute the independently reviewed standalone Ansari application to this repo
 
 ## Constraints
 
-Use `apps/ansari-faithful-answers` within the established application workspace. React only, MCP only, no SDUI or private source dependencies. Use the public saga a2ui dependencies declared in `package.json` and preserve the SAGA-owned A2UI dependency boundary. Retain Kitab fonts and their OFL notices, contributed artwork, complete answers, content policy and optional lowercase framework credit. Keep the existing API/auth/frontend development experience unchanged. No production deployment or upstream merge is included.
+Use `apps/mcp` within the established application workspace. React only, MCP only, no SDUI or private source dependencies. Use the public saga a2ui dependencies declared in `package.json` and preserve the SAGA-owned A2UI dependency boundary. Retain Kitab fonts and their OFL notices, contributed artwork, complete answers, content policy and optional lowercase framework credit. Keep the existing API/auth/frontend development experience unchanged. No production deployment or upstream merge is included.
 
 ## Approach
 

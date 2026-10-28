@@ -66,4 +66,4 @@ issues for vulnerabilities.
 
 ## Faithful Answers MCP application
 
-[`apps/ansari-faithful-answers`](apps/ansari-faithful-answers/README.md) exposes Ansari answers through MCP with a self-contained React card for assistant hosts. It uses public saga a2ui packages, embedded Kitab fonts and local artwork. Start it separately with `pnpm faithful-answers build` then `pnpm faithful-answers start`; see its README for environment variables and its standalone Docker build.
+[`apps/mcp`](apps/mcp/README.md) exposes Ansari answers through MCP with a self-contained React card for assistant hosts. It uses public saga a2ui packages, embedded Kitab fonts and local artwork. Start it separately with `pnpm mcp build` then `pnpm mcp start`; see its README for environment variables and its standalone Docker build.

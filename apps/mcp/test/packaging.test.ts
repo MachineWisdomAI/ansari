@@ -48,16 +48,19 @@ test('the manifest pins one exact public version for every SAGA package it impor
     assert.match(version,/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/,`${name} is an exact version, never a tag or range`);
     assert.equal(version,SDK_VERSION,name);
   }
-  assert.ok(!JSON.stringify(manifest).includes('catalog:'),'no monorepo-only catalog reference');
-  assert.ok(!/"(?:file|link|workspace|git\+?[a-z]*|https?):/.test(JSON.stringify({...manifest.dependencies,...manifest.devDependencies,overrides:manifest.overrides,pnpm:manifest.pnpm})),'no local, tarball or workspace dependency source');
+  assert.equal(manifest.devDependencies.typescript, 'catalog:');
+  assert.equal(manifest.devDependencies.eslint, 'catalog:');
+  assert.equal(manifest.devDependencies['@ansari/eslint-config'], 'workspace:*');
+  assert.ok(!/"(?:file|link|workspace|git\+?[a-z]*|https?):/.test(JSON.stringify({...manifest.dependencies,overrides:manifest.overrides,pnpm:manifest.pnpm})),'no local, tarball or workspace dependency source');
 });
 
 // Every lockfile that installs this application: the application's own (standalone installation) and, when this folder sits
 // in a monorepo, the workspace root's.
 const lockfiles:Array<{label:string;text:string;prefix:string}>=[];
-if(existsSync(join(root,'pnpm-lock.yaml'))) lockfiles.push({label:'application',text:readFileSync(join(root,'pnpm-lock.yaml'),'utf8'),prefix:''});
+assert.equal(existsSync(join(root,'pnpm-lock.yaml')), false, 'only the root lockfile installs the app');
+assert.equal(existsSync(join(root,'pnpm-workspace.yaml')), false, 'only the root workspace config applies');
 const workspaceLock=join(root,'../../pnpm-lock.yaml');
-if(existsSync(workspaceLock)&&existsSync(join(root,'../../pnpm-workspace.yaml'))) lockfiles.push({label:'workspace root',text:readFileSync(workspaceLock,'utf8'),prefix:'apps/ansari-faithful-answers'});
+if(existsSync(workspaceLock)&&existsSync(join(root,'../../pnpm-workspace.yaml'))) lockfiles.push({label:'workspace root',text:readFileSync(workspaceLock,'utf8'),prefix:'apps/mcp'});
 
 test('every lockfile resolves the five SAGA packages to the public registry with the registry integrity',()=>{
   assert.ok(lockfiles.length>0,'at least one lockfile installs this application');
@@ -81,7 +84,7 @@ test('no workspace file overrides a SAGA package',()=>{
     const workspace=readFileSync(file,'utf8');
     assert.doesNotMatch(workspace,/@saga-a2ui/,`${file} does not override or mention a SAGA package`);
     assert.doesNotMatch(workspace,/file:|link:/,`${file} has no local-file dependency source`);
-    assert.match(workspace,/'?"?@a2ui\/markdown-it"?'?\s*:\s*['"]0\.2\.1['"]/,`${file} pins the A2UI Markdown adapter`);
+    assert.match(workspace,/['"]@a2ui\/react@0\.13\.0>@a2ui\/markdown-it['"]\s*:\s*['"]0\.2\.1['"]/,`${file} pins the A2UI Markdown adapter`);
   }
   assert.equal(existsSync(join(root,'candidates')),false,'no local SAGA inputs are committed');
 });

@@ -9,7 +9,7 @@ import {ANSWER_ENVELOPE_VERSION} from '../view/envelope.js';
 
 
 // Existing application identity and text, not a new release declaration.
-export const SERVER_NAME='ansari-faithful-answers';
+export const SERVER_NAME='ansari-mcp';
 export const TOOL_UNAVAILABLE_TEXT='Ansari could not complete this request.';
 /** The handler wait the tool declares; the request budget of each call below is the same, never the SDK default. */
 export const HANDLER_BOUND_MS=60_000;

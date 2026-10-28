@@ -2,7 +2,7 @@
 
 `answer-assets.ts` contains the selected Ansari floral artwork, as embedded PNG data.
 `brand-mark.ts` contains the Ansari attribution mark. These are application assets,
-not part of the SAGA SDK. They were supplied by the Ansari Faithful Answers project
+not part of the SAGA SDK. They were supplied by the Ansari MCP project
 and are carried over unchanged from its qualified floral card.
 
 On 2026-10-20, the artwork owner confirmed that this artwork is their own and is

@@ -1,7 +1,7 @@
 export const BRANDING = {
   // Set false to omit the framework credit from the answer footer.
   showSagaCredit: true,
-  name: 'Ansari Faithful Answers',
+  name: 'Ansari MCP',
   // Every sentence shown around the card. Each is the application's; the card decides none of them.
   waitingText: 'Waiting for Ansari answer…',
   // The definition's default sentence for a rejection that carries no wording of its own (tool-result.ts words every
