@@ -316,7 +316,7 @@ async function main() {
   check('links:successful-credit-is-silent', () => assert.equal(creditNotice, ''));
   const creditOpened = await page.evaluate(id => (window as any).hostProbe.state(id).openLinks, first.id);
   check('links:saga-credit-follows-unchanged-answer-and-uses-host', () => {
-    assert.deepEqual(creditOpened, ['https://ansari.chat/', 'https://github.com/MachineWisdomAI/saga-a2ui']);
+    assert.deepEqual(creditOpened, ['https://ansari.chat/', 'https://github.com/MachineWisdomAI/saga-a2ui/tree/codex/release-0.7.6']);
     assert.ok(!shownA.cardText.includes('Built with'));
   });
 
@@ -325,7 +325,7 @@ async function main() {
   await deliver(unavailable.id, resultA);
   for (const [button, status, destination] of [
     ['.saga-card-link', '.saga-card-link-status', 'https://ansari.chat/'],
-    ['.saga-credit button', '.saga-credit [role="status"]', 'https://github.com/MachineWisdomAI/saga-a2ui'],
+    ['.saga-credit button', '.saga-credit [role="status"]', 'https://github.com/MachineWisdomAI/saga-a2ui/tree/codex/release-0.7.6'],
   ] as const) {
     await unavailable.frame.locator(button).click();
     await unavailable.frame.locator(status).filter({hasText: 'This host cannot open links.'}).waitFor();

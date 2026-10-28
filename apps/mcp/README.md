@@ -32,7 +32,7 @@ User-provided capture of the Dev answer card in Claude, showing Arabic text, RTL
 
 ## Dependencies
 
-SAGA is installed from the public npm registry at one exact release, `0.7.6` (stable): the stack `@saga-a2ui/react-mcp-stack`
+SAGA is installed from the public npm registry at one exact release, `0.7.6` (stable), from the [0.7.6 release branch](https://github.com/MachineWisdomAI/saga-a2ui/tree/codex/release-0.7.6): the stack `@saga-a2ui/react-mcp-stack`
 plus its exact-version siblings `@saga-a2ui/core`, `@saga-a2ui/components`, `@saga-a2ui/mcp` and `@saga-a2ui/react`. No private registry,
 credential, SDK tarball, SDK workspace link or SDK-package override is involved, and the manifest pins an exact version rather than a tag or range.
 `pnpm check:release --target beta` checks the pinned release against the registry and the lockfile; `--target production` additionally refuses a
