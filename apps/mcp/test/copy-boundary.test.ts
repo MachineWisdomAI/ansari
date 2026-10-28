@@ -4,7 +4,7 @@ import {existsSync, readFileSync, statSync} from 'node:fs';
 import {join, relative} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-// The copy boundaries (Docker build context and the standalone verification copy) must not carry
+// The Docker build context (the repository root) must not carry
 // credentials or local runtime state. Everything here is a synthetic marker; no real secret file is read.
 const root=fileURLToPath(new URL('../',import.meta.url));
 const NEVER_COPIED=['.env','.env.local','.dev.vars','.dev.vars.staging','.dev.vars.production','.wrangler/state/v3/cache.sqlite','dist-worker/index.js','node_modules/x/index.js','dist/view.html','.npmrc'];

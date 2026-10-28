@@ -78,7 +78,7 @@ The same Hono application and official MCP handler (`src/server/fetch-app.ts`) r
 pnpm install --frozen-lockfile --strict-peer-dependencies --filter ansari-mcp...
 pnpm mcp verify          # typecheck, build, build:worker, test, test:browser
 
-# Run the Worker in Wrangler's local runtime under one declared environment (dev, beta or production). Its local secrets are `.dev.vars.<env>` only (git-ignored, and excluded from the Docker build context and the standalone verification copy, together with `.wrangler/` and `dist-worker/`). The script refuses a generic `.dev.vars`, which Wrangler would read for every environment, and turns off Wrangler's `.env` fallback.
+# Run the Worker in Wrangler's local runtime under one declared environment (dev, beta or production). Its local secrets are `.dev.vars.<env>` only (git-ignored, and excluded from the Docker build context, together with `.wrangler/` and `dist-worker/`). The script refuses a generic `.dev.vars`, which Wrangler would read for every environment, and turns off Wrangler's `.env` fallback.
 pnpm dev:worker:dev --var ANSARI_RELEASE:local-1
 curl http://127.0.0.1:8787/health
 ```
