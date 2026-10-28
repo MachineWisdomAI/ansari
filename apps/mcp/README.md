@@ -34,7 +34,7 @@ User-provided capture of the Dev answer card in Claude, showing Arabic text, RTL
 
 SAGA is installed from the public npm registry at one exact release, `0.7.6` (stable): the stack `@saga-a2ui/react-mcp-stack`
 plus its exact-version siblings `@saga-a2ui/core`, `@saga-a2ui/components`, `@saga-a2ui/mcp` and `@saga-a2ui/react`. No private registry,
-credential, tarball, workspace link or package-manager override is involved, and the manifest pins an exact version rather than a tag or range.
+credential, SDK tarball, SDK workspace link or SDK-package override is involved, and the manifest pins an exact version rather than a tag or range.
 `pnpm check:release --target beta` checks the pinned release against the registry and the lockfile; `--target production` additionally refuses a
 prerelease. The Beta and Production deploy scripts run the corresponding gate before any build or deployment.
 
@@ -62,7 +62,7 @@ pnpm mcp test:browser
 pnpm mcp start
 ```
 
-`build` writes `dist/view.html` and a bundled `dist/server/index.js`; no parent build or source checkout is needed. `dev` runs the Node entry source (`src/node/index.ts`) after `build`. The synthetic browser harness is test-only and uses no credentials or live answers.
+`build` writes `dist/view.html` and a bundled `dist/server/index.js`. No API/auth/frontend build or SDK source checkout is needed. `dev` runs the Node entry source (`src/node/index.ts`) after `build`. The synthetic browser harness is test-only and uses no credentials or live answers.
 
 ### Two hosting targets, one application
 
@@ -98,7 +98,7 @@ The Worker takes the variables in the table below as Wrangler `vars` or secrets,
 
 `POST /mcp` serves stateless MCP requests through Hono and the official MCP request handler. Modern requests need no initialization; older hosts can use the handler’s stateless compatibility path. No MCP session IDs, session map, expiry timer or replay store are retained. `GET /mcp` and `DELETE /mcp` return 405. `/health` exposes the release. The HTML is supplied by the hosting target (read from `dist/` at Node start, bundled into the Worker), revision-stamped and fingerprinted once before the first request is served: the release is stamped first, so equal final bytes have equal identities and a release change legitimately changes the hash. Each request creates its own lightweight MCP server using that prepared view; resource bytes and identity stay fixed until restart. No demo, font server, alternative renderer or historical resource is served. Tool calls have a fresh 60-second budget; timeout yields a safe error and leaves subsequent calls usable. The same lifetime signal aborts the upstream fetch and response-body read when the request ends or the budget expires.
 
-Closing a request server releases its budget even if it was never connected to a transport. On SIGINT or SIGTERM the listener stops accepting requests, closes MCP handlers and HTTP connections, and exits; unfinished calls are interrupted, including older-host SSE calls. Fetch cancellation does not guarantee that the remote backend has stopped processing.
+Closing a request server releases its budget even if it was never connected to a transport. On SIGINT or SIGTERM the listener stops accepting requests, closes MCP handlers and HTTP connections, and exits; unfinished calls are interrupted, including older-host SSE calls. Fetch cancellation does not guarantee that the remote backend has stopped processing. Caller-disconnect propagation depends on the host transport; the local Workers runtime does not establish immediate upstream cancellation from a client disconnect. Actual fetch cancellation at the request deadline is covered on both hosting targets.
 
 ## Workspace and container
 

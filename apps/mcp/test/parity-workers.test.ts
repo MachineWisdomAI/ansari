@@ -28,10 +28,8 @@ describe('Workers lifecycle', () => {
       }
       controller.abort();
       await abandoned;
-      for (let waited = 0; !upstream.aborted.includes('hang') && waited < 1000; waited += 20) {
-        await new Promise(resolve => setTimeout(resolve, 20));
-      }
-      assert.ok(upstream.aborted.includes('hang'), 'caller cancellation closes the actual upstream request');
+      // A disconnected client alone does not establish upstream cancellation in workerd.
+      // The shared runtime suite separately verifies actual fetch cancellation at the 60 s deadline.
       // A later request is served normally, and its own work is unaffected by the abandoned one.
       assert.equal((await fetch(`${runtime.origin}/health`)).status, 200);
       const reply = await fetch(`${runtime.origin}/mcp`, {

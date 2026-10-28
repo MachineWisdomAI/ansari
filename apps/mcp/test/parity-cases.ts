@@ -195,7 +195,9 @@ export function defineParityCases(kind: RuntimeKind): void {
         const malformed = await fetch(`${origin}/mcp`, {method: 'POST', headers: {'content-type': 'application/json', accept: 'application/json, text/event-stream'}, body: '{'});
         assert.equal(malformed.status, 400);
         assert.equal(upstream.seen.length, before, 'no rejected request reached Ansari');
-        for (const trusted of [TRUSTED_ORIGIN, 'http://localhost:1234']) {
+        assert.equal((await post(origin, 'tools/call', params, {headers: {origin: 'http://localhost:1234'}})).status, 403, 'configured origins do not inherit localhost');
+        assert.equal(upstream.seen.length, before);
+        for (const trusted of [TRUSTED_ORIGIN]) {
           const accepted = await post(origin, 'tools/call', params, {headers: {origin: trusted}});
           assert.equal(accepted.status, 200, trusted);
           assert.equal((await terminal(accepted)).result.structuredContent.answer, answerFor('guarded'));
@@ -246,6 +248,10 @@ export function defineParityCases(kind: RuntimeKind): void {
         assert.equal(call.isError, true);
         assert.deepEqual(call.content, [{type: 'text', text: TOOL_UNAVAILABLE_TEXT}]);
         assert.ok(elapsed >= 58_000 && elapsed < 80_000, `the failure arrived after ${Math.round(elapsed)} ms`);
+        for (let waited = 0; !upstream.aborted.includes('hang') && waited < 1000; waited += 20) {
+          await new Promise(resolve => setTimeout(resolve, 20));
+        }
+        assert.ok(upstream.aborted.includes('hang'), 'the request deadline cancels the actual upstream fetch');
         const next = await ask(client, 'fresh budget');
         assert.equal(next.isError, undefined);
       });
