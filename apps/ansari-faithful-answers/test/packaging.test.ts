@@ -26,15 +26,15 @@ test('packaged HTML is self-contained and assets contain bytes',()=>{
 });
 
 // ---- The SAGA packages: one exact public npm release, never a tag, range, tarball or local file.
-// The expected values below were read from the public npm registry (`npm view @saga-a2ui/<name>@0.7.6-rc.1 dist.integrity`),
+// The expected values below were read from the public npm registry (`npm view @saga-a2ui/<name>@0.7.6 dist.integrity`),
 // not from the files they are compared with.
-const SDK_VERSION='0.7.6-rc.1';
+const SDK_VERSION='0.7.6';
 const SDK_INTEGRITY:Record<string,string>={
-  core:'sha512-G32+/oIWhm53bNNUfRZBFrRAHhgYYrIAbSjZssw9L4oWfe0vktW+SHi8xKegUCTV8h8HXqa0dtzorkhPh6dHhg==',
-  components:'sha512-nNEINbHUpvnpK7HoYkF5lsdjAH7SZ7VkhxNQBH3rCe4ZeuPrSY19QdaN6c7PpG+PNU/PDi42mc2Nkn9h1mRXgQ==',
-  mcp:'sha512-faDfWQVW7yDmZ9EeogaUb2CReyZ6aEvPjAeE3u8vcjnwJ84m5Rd5h5ddbXDXQCUqXQRpoxfTiSgG6lpxsZSPaA==',
-  react:'sha512-rx6uVKDHsTWcY5JlUXr22OYh4nvdiQ83xEOd5Fl3qEIPxRQQZKgGbZnoeO0YbUvyEokINcGciNg/T+JRkp2jew==',
-  'react-mcp-stack':'sha512-Lg+Ev6rXya1zccpYaZRoJcdfLj70DDnA/S+dFo0CKo0mhDwnED2cMkAtluPJy+UQ2GlfHduCULiGhMKVszD/Bg==',
+  core:'sha512-m+ynUS2+f36exYwqimAnnjxtVKJ1+Xm2Zscja+kWI9iFoDxVtT6C2lYxO6exSSXyi4LreJMgFhQsKh0hsaMVDg==',
+  components:'sha512-Gpm2uc2VbXNrxfWNy2uHfdJYdzNf5ewZKTpsaO5nsLSF0ymDjwzJ45h0BiVD77zyO4KXmDb2QipuCraTbqFApQ==',
+  mcp:'sha512-LBBOUhhagKZszb+Y6ooZSNDvJs3GZ6EE+Ysk8gsSVkxWrGRdcg5j3GgY/jcYF8K1NzEFQw75rm1KhM+C210ZAA==',
+  react:'sha512-6oz4GAWZzLjsysHSPKw6zOqYFF5D+bAcp9CtGJ5Exc/9Z+x2OM4Sn7oHMdul47iDMEJi9WNbrI5+DSGvii1a3g==',
+  'react-mcp-stack':'sha512-ZYv9uL9FAjVRrfboabT6YRu6zHO8JOQKXc9D2pYskpacCRpezsVrQpNtjbh2TUDOdaY+SYEDIAl8+Js1U0oJqQ==',
 };
 const SIBLINGS=Object.keys(SDK_INTEGRITY);
 const pinned:string=JSON.parse(readFileSync(join(root,'package.json'),'utf8')).dependencies['@saga-a2ui/react-mcp-stack'];
