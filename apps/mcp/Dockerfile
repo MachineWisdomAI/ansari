@@ -2,7 +2,7 @@
 FROM node:22-slim AS build
 WORKDIR /repo
 RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml LICENSE ./
 COPY packages packages
 COPY apps/mcp/package.json apps/mcp/
 RUN pnpm install --strict-peer-dependencies --frozen-lockfile --filter ansari-mcp...

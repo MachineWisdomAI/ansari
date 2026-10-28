@@ -135,3 +135,16 @@ test('the emitted card document carries the registry SDK identity beside the app
   assert.ok(html.includes(`<meta name="ansari-sdk" content="${SDK_VERSION}"`));
   assert.deepEqual(JSON.parse(node('scripts/sdk-identity.mjs')),{kind:'registry',version:SDK_VERSION,source:'none',stackSha256:'none',setSha256:'none'});
 });
+
+test('distributed HTML retains complete installed SAGA and font licence notices', () => {
+  const html = readFileSync(join(root, 'dist/view.html'), 'utf8');
+  const comment = /<!--\nBEGIN THIRD-PARTY LICENCES\n([\s\S]*?)\nEND THIRD-PARTY LICENCES\n-->/.exec(html)?.[1];
+  assert.ok(comment, 'the distributed card carries the licence comment');
+  const notices = comment.replaceAll('-&#45;', '--');
+  const stack = realpathSync(join(root, 'node_modules/@saga-a2ui/react-mcp-stack'));
+  assert.ok(notices.includes(readFileSync(join(stack, 'LICENSE'), 'utf8').trim()));
+  assert.ok(notices.includes(readFileSync(join(dirname(stack), 'components/THIRD_PARTY_NOTICES.md'), 'utf8').trim()));
+  assert.ok(notices.includes(readFileSync(join(root, 'assets/fonts/OFL.txt'), 'utf8').trim()));
+  assert.ok(notices.includes(readFileSync(join(root, 'assets/NOTICE.md'), 'utf8').trim()));
+  for (const name of SIBLINGS) assert.ok(notices.includes(`@saga-a2ui/${name}@${SDK_VERSION}`));
+});

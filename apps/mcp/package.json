@@ -1,6 +1,6 @@
 {
   "name": "ansari-mcp",
-  "version": "0.16.5",
+  "version": "0.16.6",
   "private": true,
   "type": "module",
   "description": "Ansari's MCP application",
@@ -23,8 +23,8 @@
     "dev:worker:beta": "pnpm guard:dev-vars && pnpm build:worker && CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV=false wrangler dev --env beta",
     "dev:worker:production": "pnpm guard:dev-vars && pnpm build:worker && CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV=false wrangler dev --env production",
     "deploy:worker:dev": "pnpm build:worker && wrangler deploy --env dev --var ANSARI_RELEASE:$(git rev-parse HEAD)",
-    "deploy:worker:beta": "pnpm build:worker && wrangler deploy --env beta --var ANSARI_RELEASE:$(git rev-parse HEAD)",
-    "deploy:worker:production": "pnpm build:worker && wrangler deploy --env production --var ANSARI_RELEASE:$(git rev-parse HEAD)",
+    "deploy:worker:beta": "pnpm check:release --target beta && pnpm build:worker && wrangler deploy --env beta --var ANSARI_RELEASE:$(git rev-parse HEAD)",
+    "deploy:worker:production": "pnpm check:release --target production && pnpm build:worker && wrangler deploy --env production --var ANSARI_RELEASE:$(git rev-parse HEAD)",
     "lint": "eslint ."
   },
   "dependencies": {

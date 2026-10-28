@@ -6,6 +6,7 @@ on:
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
       - 'package.json'
+      - 'LICENSE'
       - '.dockerignore'
       - '.github/workflows/mcp.yml'
       - 'packages/eslint-config/**'

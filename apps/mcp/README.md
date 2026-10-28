@@ -8,7 +8,7 @@ A standalone MCP application. `answer_islamic_question` calls the Ansari API and
 
 ## Screenshots
 
-English and Arabic answer cards rendered in ChatGPT desktop web through the Dev connection on October 23, 2026. Both rendered on first load with application revision `ee7ea4a78933544c4a96577d7ffd7276df8ae037` and public npm SAGA SDK `0.7.6-rc.1`. Arabic headings, paragraphs and lists use RTL layout and the embedded Kitab fonts. The application owner also supplied the ChatGPT and Claude mobile captures below. Alexa acceptance remains unverified for this revision.
+English and Arabic answer cards rendered in ChatGPT desktop web through the Dev connection on October 23, 2026. Both rendered on first load with application revision `ee7ea4a78933544c4a96577d7ffd7276df8ae037` and public npm SAGA SDK `0.7.6-rc.1`. Arabic headings, paragraphs and lists use RTL layout and the embedded Kitab fonts. The application owner also supplied the ChatGPT and Claude mobile captures below. These captures retain their original revision identity. The application owner accepts the existing ChatGPT, Claude and earlier Alexa baseline; the [consolidated host and release evidence](https://github.com/MachineWisdomAI/saga-a2ui/pull/321) records each observation and its limits. Earlier Alexa evidence is not presented as a fresh stable-version run, and the 239 successful RC HTTP requests measure transport activity rather than rendered answers.
 
 ### English
 
@@ -32,11 +32,11 @@ User-provided capture of the Dev answer card in Claude, showing Arabic text, RTL
 
 ## Dependencies
 
-SAGA is installed from the public npm registry at one exact release, `0.7.6-rc.1` (a prerelease): the stack `@saga-a2ui/react-mcp-stack`
+SAGA is installed from the public npm registry at one exact release, `0.7.6` (stable): the stack `@saga-a2ui/react-mcp-stack`
 plus its exact-version siblings `@saga-a2ui/core`, `@saga-a2ui/components`, `@saga-a2ui/mcp` and `@saga-a2ui/react`. No private registry,
 credential, tarball, workspace link or package-manager override is involved, and the manifest pins an exact version rather than a tag or range.
 `pnpm check:release --target beta` checks the pinned release against the registry and the lockfile; `--target production` additionally refuses a
-prerelease, so it fails until a stable SAGA release is pinned.
+prerelease. The Beta and Production deploy scripts run the corresponding gate before any build or deployment.
 
 The application depends on one SAGA package, the stack `@saga-a2ui/react-mcp-stack`, plus React and React DOM, and imports
 only its subpaths: `/faithful-card` (`FaithfulCardApp`, `startFaithfulCardApp`, and the definition's one `.result(...)` reader that reads the whole delivered result,
@@ -121,7 +121,7 @@ The built card document names the SDK it was built from beside the application r
 `data-sdk-kind` is `registry` and `data-sdk-version` is the pinned stack version; the registry integrity of every SAGA package is in the lockfile, so the
 source and digest fields read `none`. An older cached card shows a different version.
 
-The runtime contains only the compiled server and HTML. The build installs everything from the public registry with the committed lockfile; it needs no private registry credentials.
+The runtime contains only the compiled server and self-contained HTML. The HTML retains complete applicable SAGA Apache-2.0, third-party, application MIT, artwork and font notices in an inert comment. The build installs everything from the public registry with the committed lockfile; it needs no private registry credentials.
 
 ## Assets
 

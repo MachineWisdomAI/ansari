@@ -5,12 +5,13 @@
 not part of the SAGA SDK. They were supplied by the Ansari MCP project
 and are carried over unchanged from its qualified floral card.
 
-On 2026-10-20, the artwork owner confirmed that this artwork is their own and is
-contributed to Ansari with the same openness and freedom as their contributed
-application code. This authorizes its inclusion and redistribution with the
-Ansari application. The artwork follows the application's contribution terms;
-it does not acquire Apache-2.0 from the separate SAGA SDK dependency. Preserve
-this notice when copying the application.
+Copyright (c) 2026 Younes Abouelnagah.
+
+The contributed floral artwork in `answer-assets.ts` and attribution mark in
+`brand-mark.ts` are licensed under the MIT License, the same licence as the
+application code. The creator confirmed this explicit MIT grant on 2026-10-28.
+See the repository's [MIT licence](../../../LICENSE). Preserve this copyright
+and licence notice when copying or redistributing the artwork.
 
 The view bundles unmodified Kitab Regular and Bold from https://github.com/nuqayah/kitab-font, licensed under the SIL Open Font License 1.1. The license, authors and contributors are retained in `fonts/`. These are the filenames selected by https://nuqayah.com/tools/font-compare/.
-SAGA is a separate dependency licensed Apache-2.0; its package notices remain with it.
+SAGA is a separate Apache-2.0 dependency. Its applicable licence and third-party notices, together with these artwork and OFL notices, are retained in the distributed card HTML.

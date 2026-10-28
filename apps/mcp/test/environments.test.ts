@@ -35,7 +35,7 @@ describe('Worker environments', () => {
     // The existing Dev Worker keeps its identity.
     assert.equal(workers[0]!.name, 'ansari-mcp-dev');
     assert.equal(workers[0]!.vars?.MCP_ALLOWED_HOSTS, 'ansari-mcp-dev.younes-b2d.workers.dev');
-    assert.equal(workers[0]!.vars?.ANSARI_CLIENT, 'machinewisdom-faithful-answers-dev');
+    assert.equal(workers[0]!.vars?.ANSARI_CLIENT, 'ansari-mcp-dev');
     for (const worker of workers) {
       assert.ok(worker.main, 'every environment declares its entry point');
       assert.equal(worker.vars?.ANSARI_API_AUTHORIZATION, undefined, 'a secret is never a plain var');

@@ -8,6 +8,7 @@ import {viteSingleFile} from 'vite-plugin-singlefile';
 import {createContentPolicy, embedContentPolicy} from '@saga-a2ui/react-mcp-stack/content-policy';
 import {APP_VERSION} from '../src/version.js';
 import {BRANDING} from '../src/view/branding.js';
+import {thirdPartyLicenceComment} from './third-party-licences.js';
 
 // `tsx scripts/build.ts [node|worker]`: both targets build the same card; each then bundles its own entry.
 const target = process.argv[2] ?? 'node';
@@ -44,7 +45,8 @@ await viteBuild({
 const policy = createContentPolicy({level: 'standard', imageHosts: [], fontOrigins: []});
 if (!policy.ok) throw new Error(policy.failure.message);
 const built = path.join(dist, 'mcp-app-react.html');
-writeFileSync(path.join(dist, 'view.html'), embedContentPolicy(readFileSync(built, 'utf8'), policy.policy));
+const document = embedContentPolicy(readFileSync(built, 'utf8'), policy.policy);
+writeFileSync(path.join(dist, 'view.html'), document.replace('</head>', `${thirdPartyLicenceComment(root)}</head>`));
 rmSync(built);
 if (target === 'node') {
   await esbuild({
