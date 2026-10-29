@@ -1,0 +1,37 @@
+{
+  "format": "saga-publication/1",
+  "name": "ansari-mcp",
+  "version": "0.16.6",
+  "description": "Answers questions about Islam and shows Ansari's complete, attributed answer in an inline Ansari answer card.",
+  "publisher": {
+    "name": "IASER",
+    "url": "https://iaser.ai",
+    "email": "feedback@ansari.chat"
+  },
+  "homepage": "https://ansari.chat",
+  "repository": "https://github.com/iaser-ai/ansari",
+  "license": "MIT",
+  "keywords": ["ansari", "islam", "mcp-apps"],
+  "listing": {
+    "displayName": "Ansari",
+    "shortDescription": "Answers questions about Islam",
+    "longDescription": "Ask a question about Islam, and Ansari answers in a card inside the conversation. Ansari searches the Quran, Hadith collections, the Kuwaiti Encyclopedia of Islamic Jurisprudence and Quranic exegesis, then gives a cited answer. The card shows the complete answer with its attribution.",
+    "category": "Education",
+    "capabilities": ["Answer questions about Islam"],
+    "websiteURL": "https://ansari.chat",
+    "supportURL": "https://github.com/iaser-ai/ansari/issues",
+    "privacyPolicyURL": "https://docs.ansari.chat/privacy/",
+    "termsOfServiceURL": "https://docs.ansari.chat/terms/",
+    "defaultPrompt": ["What are the pillars of Islam?"],
+    "brandColor": "#15583e"
+  },
+  "assets": {
+    "logo": "assets/ansari-plugin-icon.svg",
+    "composerIcon": "assets/ansari-plugin-icon.svg"
+  },
+  "build": { "directory": "dist", "views": ["view.html"] },
+  "endpoint": {
+    "url": "https://ansari-mcp-development.up.railway.app/mcp",
+    "expectedServer": { "name": "ansari-mcp", "version": "0.16.6" }
+  }
+}

@@ -79,15 +79,16 @@ function syntheticWorkspace(sdk: string, withOverrides: boolean): string {
   }
   return `${lines.join('\n')}\n`;
 }
-/** Writes a repository-shaped fixture (apps/mcp + plugin) and returns its application folder. */
+/** A minimal release input whose two version fields follow the application version. */
+const publication = (version: string) => ({format: 'saga-publication/1', name: 'ansari-mcp', version, endpoint: {url: 'https://mcp.example.test/mcp', expectedServer: {name: 'ansari-mcp', version}}});
+/** Writes a repository-shaped fixture (apps/mcp with its release input) and returns its application folder. */
 function writeApp(repo: string, fixture: Fixture): string {
   const app = join(repo, 'apps/mcp');
   mkdirSync(join(app, 'src'), {recursive: true});
-  mkdirSync(join(repo, 'plugin'), {recursive: true});
   const deps = {...manifest.dependencies, '@saga-a2ui/react-mcp-stack': fixture.stackSpec ?? fixture.sdk, ...fixture.extraDirect};
   writeFileSync(join(app, 'package.json'), JSON.stringify({...manifest, version: fixture.appVersion, dependencies: deps}, null, 2));
   writeFileSync(join(app, 'src/version.ts'), `// One application identity, shared by the server and built view.\nexport const APP_VERSION = '${fixture.appVersion}';\n`);
-  writeFileSync(join(repo, 'plugin/plugin.json'), JSON.stringify({name: 'ansari-mcp-dev', version: fixture.appVersion}, null, 2));
+  writeFileSync(join(app, 'saga-publication.json'), JSON.stringify(publication(fixture.appVersion), null, 2));
   writeFileSync(join(repo, 'pnpm-lock.yaml'), (fixture.lockTransform ?? (text => text))(syntheticLock(fixture.sdk, fixture.stackSpec ?? fixture.sdk)));
   writeFileSync(join(repo, 'pnpm-workspace.yaml'), syntheticWorkspace(fixture.sdk, fixture.keepOverrides === true));
   return app;
@@ -207,15 +208,16 @@ describe('release input validation (fixture inputs, no registry)', () => {
     assert.match(validate({...STABLE, stackSpec: 'next'}, 'dev').join('\n'), /not an exact version/);
   });
 
-  it('requires one release version across package.json, src/version.ts and the plugin manifest', () => {
+  it('requires one release version across package.json, src/version.ts and the release input', () => {
     const problems = disposableRepo(repo => {
       const app = writeApp(repo, STABLE);
       writeFileSync(join(app, 'src/version.ts'), "export const APP_VERSION = '0.15.1';\n");
-      writeFileSync(join(repo, 'plugin/plugin.json'), JSON.stringify({version: '0.14.0'}));
+      writeFileSync(join(app, 'saga-publication.json'), JSON.stringify({...publication('0.14.0'), endpoint: {url: 'https://mcp.example.test/mcp', expectedServer: {name: 'ansari-mcp', version: '0.13.0'}}}));
       return gate.validateRelease({appRoot: app, target: 'production'}).problems.join('\n');
     });
     assert.match(problems, /APP_VERSION \(0\.15\.1\) differs/);
-    assert.match(problems, /plugin\/plugin\.json version \(0\.14\.0\) differs/);
+    assert.match(problems, /saga-publication\.json version \(0\.14\.0\) differs/);
+    assert.match(problems, /saga-publication\.json endpoint\.expectedServer\.version \(0\.13\.0\) differs/);
   });
 });
 
@@ -307,7 +309,7 @@ for (const layout of LAYOUTS) describe(`tag-based source selection in a disposab
       assert.deepEqual(changes.problems, []);
       assert.deepEqual(changes.outside, []);
       assert.equal(changes.dependenciesChanged, true, 'a changed SDK is an executable dependency change: qualify it on Dev');
-      assert.deepEqual([...changes.files].sort(), ['apps/mcp/package.json', 'pnpm-lock.yaml', 'apps/mcp/src/version.ts', 'plugin/plugin.json'].sort());
+      assert.deepEqual([...changes.files].sort(), ['apps/mcp/package.json', 'pnpm-lock.yaml', 'apps/mcp/src/version.ts', 'apps/mcp/saga-publication.json'].sort());
       assert.ok(!existsSync(join(app, 'src/unrelated.ts')), 'the stable branch excludes later main work');
       assert.notEqual(git(repo, 'merge-base', stable, later), stable, 'stable is not on main');
       assert.deepEqual(gate.validateTag({appRoot: app, tag: STABLE_TAG, appVersion: '0.15.0'}), []);
@@ -347,9 +349,9 @@ for (const layout of LAYOUTS) describe(`tag-based source selection in a disposab
     const extra = stableFrom(app => edit(join(app, 'package.json'), text => { const parsed = JSON.parse(text); parsed.dependencies.leftpad = '1.0.0'; return JSON.stringify(parsed, null, 2); }));
     assert.match(extra.problems.join('\n'), /package\.json changed since .* beyond the release version and the SDK pin/);
 
-    // Plugin settings other than the version are refused; a workspace-file change is refused as a path outside the release set.
-    const plugin = stableFrom((_app, repo) => writeFileSync(join(repo, 'plugin/plugin.json'), JSON.stringify({name: 'other', version: '0.15.0'})));
-    assert.match(plugin.problems.join('\n'), /plugin\/plugin\.json changed since .* beyond the release version and the SDK pin/);
+    // Publication settings other than the versions are refused; a workspace-file change is refused as a path outside the release set.
+    const publicationChange = stableFrom(app => writeFileSync(join(app, 'saga-publication.json'), JSON.stringify({...publication('0.15.0'), name: 'other'})));
+    assert.match(publicationChange.problems.join('\n'), /saga-publication\.json changed since .* beyond the release version and the SDK pin/);
     const workspace = stableFrom(app => edit(join(app, '../../pnpm-workspace.yaml'), text => `${text}  'left-pad': '1.0.0'\n`));
     assert.match(workspace.problems.join('\n'), /pnpm-workspace\.yaml changed since/);
 

@@ -143,3 +143,15 @@ Hono runs on Node through `@hono/node-server`; the official `@modelcontextprotoc
 ## MCP compatibility
 
 The tool retains the legacy server's `answer_islamic_question` name, detailed description and input help, and `readOnlyHint: true` / `openWorldHint: true` annotations. It accepts 1–4,000 characters, matching the Ansari API. The earlier experimental RC exposed `ask_ansari`; a deployment owner must refresh host discovery when adopting this tool name. The endpoint remains `/mcp`. Replacing the existing `mcp.ansari.chat` service and changing its DNS are separate rollout actions.
+
+## ChatGPT plugin
+
+`saga-publication.json` is the release input from which SAGA's `saga publish` tool prepares the ChatGPT plugin package. It names the listing, the Dev endpoint and the build to check. Its `assets.logo` and `assets.composerIcon` both point to `assets/ansari-plugin-icon.svg`: the floral mark from `assets/brand-mark.ts`, unchanged, on the card's `#15583e` green (see `assets/NOTICE.md`). Supplying both keeps SAGA's default artwork out of Ansari's package. The release gate requires the input's `version` and `endpoint.expectedServer.version` to match `package.json`.
+
+The tool is not on npm yet, so it runs from a [saga-a2ui](https://github.com/MachineWisdomAI/saga-a2ui) checkout with this build in `dist/`:
+
+```sh
+npx tsx scripts/saga.ts publish prepare --target chatgpt --release <path to apps/mcp>/saga-publication.json --out ./publication
+```
+
+It always writes `findings.json`, and writes `chatgpt-plugin.zip` only when every check passes, including that the endpoint serves this exact build. It deploys, uploads and submits nothing.
