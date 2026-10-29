@@ -1,5 +1,7 @@
 # 301: Review and verification
 
+## Original contribution
+
 Destination build, typechecking, 19 server/packaging tests and 47 Chromium checks passed. Frozen installation of the application dependency closure passed. All seven existing lockfile importers are preserved byte-for-byte, and existing dependency snapshots are retained; new entries are additive. Public CI verifies both the destination lockfile and a fresh standalone resolution.
 
 Independent Codex static consultation found no blocking integration defects. It verified runtime Turbo environment declarations, package-relative container paths and preserved existing development services. Its observation that isolated CI alone did not exercise the root lockfile was addressed by adding explicit frozen-lockfile application verification.
@@ -9,6 +11,7 @@ The destination's esbuild override resolves a newer patch than the source applic
 Claude and Gemini consultation were not completed; the three-model ASPIR consultation is incomplete. Independent Codex review is recorded separately and does not represent those missing reviews. Upstream merge remains a maintainer decision.
 
 Fresh public-only isolated installation, build, typecheck, 19 server tests, 47 browser checks, uncached Docker build and no-network/no-mount runtime smoke all passed. The runtime smoke verifies one tool/current resource, complete answer preservation, safe failure and recovery, content-addressed HTML and graceful shutdown.
+
 ## Destination-branch host verification
 
 The app from commit `ef6b9724a8bb8541fecbf37dc5a21449b8e2e920` was built using the four public `@saga-a2ui/*@0.5.4-rc.1` packages and deployed to DEV. On 2026-10-21, representative synthetic greeting answers rendered in ChatGPT, Claude and the Alexa+ simulator. Each rendered document reported the exact destination revision, version `0.12.7`, and loaded Kitab regular and bold fonts. Complete answer text, Ansari attribution and the separate “Built with saga a2ui” footer were present.
@@ -58,5 +61,7 @@ The application now lives at `apps/mcp` as `ansari-mcp`, with one root lockfile,
 Discovery restores the existing `answer_islamic_question` name and detailed descriptions, adds read-only/open-world annotations, and limits questions to 1–4000 UTF-16 code units. The SDK request signal reaches the upstream fetch. Explicit host/origin configuration replaces development defaults. The beta and production aliases invoke the release checker before building or deploying. Distributed HTML retains the installed SAGA licences and notices, the application MIT licence, artwork MIT notice and font notices.
 
 Validation passed: application lint and typecheck, Node and Worker builds, all 142 server/packaging tests, 73 browser checks, an uncached Node 22 container build with a no-network/no-mount smoke test, and the production release check against the public npm registry. The tests exercise both JSON and SSE deadline cancellation, the actual 60-second Node/Worker deadline, configured localhost rejection, input boundaries, deployment-command ordering and built-artifact notices. Gitleaks found no leaks in the repair commits.
+
+The walkthrough's source links now point at `apps/mcp` at `822c1cf`, whose files match the sources the walkthrough embeds, replacing the earlier links to the 0.16.5 revision. Its licence notice carries the MIT artwork grant from `assets/NOTICE.md`.
 
 Caller disconnection in the local Worker runtime does not immediately close the upstream socket; the verified request deadline does. No SDK lifecycle change is included. These source repairs have not been deployed. Existing host acceptance is recorded in the application README with its original revisions and dates; no fresh stable-version Alexa acceptance is claimed. Independent review and CI for this repair are recorded on its fork pull request. Upstream merge remains a maintainer decision.

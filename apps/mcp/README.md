@@ -4,7 +4,7 @@ A standalone MCP application. `answer_islamic_question` calls the Ansari API and
 
 ## How it works
 
-[Explore the interactive walkthrough](docs/show-me-ansari-mcp.html) for the complete question-to-card flow, UI states, code ownership and build process. Its hosted lifecycle addendum compares Alexa+, ChatGPT and Claude from build and deployment through discovery, requests, rendering and teardown. Download the self-contained HTML and open it in a browser; GitHub displays its source. The walkthrough uses synthetic content and makes no live requests.
+[Explore the interactive walkthrough](docs/show-me-ansari-mcp.html) for the complete question-to-card flow, UI states, code ownership, build process and why it builds on SAGA. Download the self-contained HTML and open it in a browser; GitHub displays its source. The walkthrough uses synthetic content and makes no live requests.
 
 ## Screenshots
 
