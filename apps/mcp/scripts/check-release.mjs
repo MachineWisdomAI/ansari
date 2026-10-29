@@ -11,7 +11,7 @@
 //   --from REF     report what changed from REF (the qualified source, or the accepted RC tag) to HEAD, and whether any
 //                  executable dependency input changed (which then needs the Dev checks before a deployment).
 //   --release-files-only  with --from: a screen, not a proof. It fails when a file other than package.json,
-//                  src/version.ts, plugin/plugin.json or pnpm-lock.yaml changed, when those three small files changed
+//                  src/version.ts, saga-publication.json or pnpm-lock.yaml changed, when those three small files changed
 //                  beyond their version fields and the SDK pin, or when REF is not an ancestor of HEAD. The CONTENT of
 //                  pnpm-lock.yaml is not diffed (validateRelease checks only that the graph is consistent registry
 //                  releases), so the full `git diff REF HEAD` must still be reviewed before qualification and tagging.
@@ -31,7 +31,7 @@ export const RELEASE_FILES = [
   'apps/mcp/package.json',
   'pnpm-lock.yaml',
   'apps/mcp/src/version.ts',
-  'plugin/plugin.json',
+  'apps/mcp/saga-publication.json',
 ];
 const canonical = value => JSON.stringify(value, (_key, item) => (item && typeof item === 'object' && !Array.isArray(item) ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => (a < b ? -1 : 1))) : item));
 const withoutVersion = text => { const parsed = JSON.parse(text); parsed.version = null; return parsed; };
@@ -46,7 +46,11 @@ const RELEASE_CONTENT = {
     return canonical(parsed);
   },
   'apps/mcp/src/version.ts': text => text.replace(/(export const APP_VERSION = )'[^']*'/, "$1'<version>'"),
-  'plugin/plugin.json': text => canonical(withoutVersion(text)),
+  'apps/mcp/saga-publication.json': text => {
+    const parsed = withoutVersion(text);
+    if (parsed.endpoint?.expectedServer !== undefined) parsed.endpoint.expectedServer.version = null;
+    return canonical(parsed);
+  },
 };
 
 const EXACT = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
@@ -172,11 +176,13 @@ export function validateRelease({appRoot = defaultRoot, target} = {}) {
   // 4. One release version in every mirror; Production accepts no prerelease app version.
   const appVersion = manifest.version;
   const mirror = /export const APP_VERSION = '([^']+)';/.exec(read(path.join(appRoot, 'src/version.ts')) ?? '')?.[1];
-  const pluginFile = path.join(appRoot, '../../plugin/plugin.json');
-  const plugin = read(pluginFile) === undefined ? undefined : JSON.parse(read(pluginFile)).version;
+  const publicationText = read(path.join(appRoot, 'saga-publication.json'));
+  const publication = publicationText === undefined ? undefined : JSON.parse(publicationText);
   if (!EXACT.test(appVersion ?? '')) problems.push(`package.json version "${appVersion}" is not an exact version.`);
   if (mirror !== appVersion) problems.push(`src/version.ts APP_VERSION (${mirror}) differs from package.json (${appVersion}).`);
-  if (plugin !== undefined && plugin !== appVersion) problems.push(`plugin/plugin.json version (${plugin}) differs from package.json (${appVersion}).`);
+  if (publication !== undefined && publication.version !== appVersion) problems.push(`saga-publication.json version (${publication.version}) differs from package.json (${appVersion}).`);
+  const expectedServer = publication?.endpoint?.expectedServer?.version;
+  if (expectedServer !== undefined && expectedServer !== appVersion) problems.push(`saga-publication.json endpoint.expectedServer.version (${expectedServer}) differs from package.json (${appVersion}).`);
   if (target === 'production' && isPrerelease(appVersion ?? '')) problems.push(`Production releases a stable app version; ${appVersion} is a prerelease. Derive stable from the accepted RC.`);
 
   return {problems, packages, facts: {target, appVersion, stack, siblings: [...new Set(packages.map(entry => `${entry.name}@${entry.version}`))]}};
@@ -236,7 +242,7 @@ export function describeChanges({appRoot = defaultRoot, from, releaseFilesOnly =
   const dependenciesChanged = files.includes('pnpm-lock.yaml') || files.includes('pnpm-workspace.yaml') || dependencyInputs(from) !== dependencyInputs('HEAD');
   const outside = files.filter(file => !RELEASE_FILES.includes(file));
   // The three small release files may change only their version fields and the SDK pin. Anything else inside them
-  // (code in src/version.ts, package scripts, other dependencies or plugin settings) counts as changed code.
+  // (code in src/version.ts, package scripts, other dependencies or publication settings) counts as changed code.
   const beyondRelease = [];
   for (const file of files.filter(entry => entry in RELEASE_CONTENT)) {
     try {
