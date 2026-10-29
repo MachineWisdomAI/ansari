@@ -95,10 +95,53 @@ The Worker takes the variables in the table below as Wrangler `vars` or secrets,
 | `MCP_ALLOWED_ORIGINS` | Comma-separated allowed browser origin hostnames. A configured list replaces defaults; an explicitly empty list permits no Origin header value. Requests without Origin remain supported. |
 | `MCP_RESPONSE_MODE` | `json` for modern MCP final-answer-only responses; otherwise SSE, which supports client-requested progress notifications. Older-host compatibility responses may use SSE. |
 | `ANSARI_RELEASE` | Optional safe release identifier, embedded in served HTML and health/log records. |
+| `MCP_VIEW_DIAGNOSTICS_ORIGIN` | Set only on a deployment being diagnosed: its own public origin, such as `https://ansari-mcp-development.up.railway.app`. The card may then connect to that one origin and reports its start-up milestones to `POST /diag/view`; this changes the card's bytes and so its address. Unset, the card, its address and its closed permissions are unchanged and the route does not exist. A value that is not a bare `https` origin (`http` only for localhost) stops startup. See [First-load diagnosis](#first-load-diagnosis). |
 
 `POST /mcp` serves stateless MCP requests through Hono and the official MCP request handler. Modern requests need no initialization; older hosts can use the handler’s stateless compatibility path. No MCP session IDs, session map, expiry timer or replay store are retained. `GET /mcp` and `DELETE /mcp` return 405. `/health` exposes the release. The HTML is supplied by the hosting target (read from `dist/` at Node start, bundled into the Worker), revision-stamped and fingerprinted once before the first request is served: the release is stamped first, so equal final bytes have equal identities and a release change legitimately changes the hash. Each request creates its own lightweight MCP server using that prepared view; resource bytes and identity stay fixed until restart. No demo, font server, alternative renderer or historical resource is served. Tool calls have a fresh 60-second budget; timeout yields a safe error and leaves subsequent calls usable. The same lifetime signal aborts the upstream fetch and response-body read when the request ends or the budget expires.
 
 Closing a request server releases its budget even if it was never connected to a transport. On SIGINT or SIGTERM the listener stops accepting requests, closes MCP handlers and HTTP connections, and exits; unfinished calls are interrupted, including older-host SSE calls. Fetch cancellation does not guarantee that the remote backend has stopped processing. Caller-disconnect propagation depends on the host transport; the local Workers runtime does not establish immediate upstream cancellation from a client disconnect. Actual fetch cancellation at the request deadline is covered on both hosting targets.
+
+## First-load diagnosis
+
+Issue #335: in Claude web and ChatGPT web the host's own error replaced the card on first load, and one Retry
+recovered it. The card's own failure texts never appeared, so the host gave up before the card showed anything. These
+records tell the possible causes apart.
+
+**Server, always on.** Each `/mcp` exchange writes an `mcp.request` line when it arrives and an `mcp.response` line
+when it ends, joined by `rid`. The request line names the JSON-RPC method; for a card read, the address read and
+whether it is the one served now (`uriCurrent`); for the opening handshake, the client's name, version and protocol;
+for a tool call, the tool name. The response line has the HTTP status, any JSON-RPC error code (a stale card read is
+error `-32602` inside an HTTP 200), bytes sent, time to headers and total time, and whether the response was
+`complete`, `cancelled` by the client or `failed`. Handler errors are logged by name and code. No question, answer or
+other parameter value is logged.
+
+**Card, always on.** A small script runs before the bundle and records when it started, any error, unhandled
+rejection or content-policy violation, and when the host's messages arrive (first message, tool input, tool result,
+cancellation, teardown request), by method name only. The stack's hooks add when fonts loaded, when the host context
+was delivered, how starting ended and when the first answer or problem was rendered. The card writes each report as an
+`[ansari-view]` console line in its frame. One violation is expected on every load: zod's `new Function('')`
+capability probe under the card's `script-src`, which it catches.
+
+**Card beacon, diagnosed deployment only.** With `MCP_VIEW_DIAGNOSTICS_ORIGIN` set, the card also sends each report
+to `POST /diag/view` when it starts or fails, renders its first answer or problem, is put away, or has not started
+after 15 seconds. The server accepts only the fixed report shape (milestones, enumerated failures, error names) and
+logs it as `view.report`, with the host sandbox's origin name.
+
+**Trials.** Run one trial per new conversation, with the deployment live for hours (`aged`) and right after a
+redeploy (`fresh`):
+
+```sh
+bash scripts/first-load-trial.sh claude aged
+bash scripts/first-load-trial.sh chatgpt fresh
+# Railway: deployment and edge HTTP logs for the trial window, then one timeline per trial.
+railway logs --deployment --json --since 1h > test-results/first-load/app.jsonl
+railway logs --http --json --since 1h > test-results/first-load/edge.jsonl
+node scripts/first-load-timeline.mjs test-results/first-load/trials.jsonl test-results/first-load/app.jsonl test-results/first-load/edge.jsonl
+```
+
+The timeline flags a card read that never reached the server, a card address that is not the current deploy's, a card
+read that was cancelled or slow, a card whose host asked to tear it down before it was ready, a card that never heard
+from the host, and a slow start.
 
 ## Workspace and container
 

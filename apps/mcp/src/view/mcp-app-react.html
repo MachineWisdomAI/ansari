@@ -2,6 +2,37 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      // First-load diagnosis (#335): runs before the card's bundle is parsed, so a failure before it starts is still
+      // recorded. Names and kinds only; src/view/diagnostics.ts reports what this collects.
+      (function () {
+        var bytes = crypto.getRandomValues(new Uint8Array(8));
+        var id = Array.prototype.map.call(bytes, function (b) { return (b + 256).toString(16).slice(1); }).join('');
+        var record = window.__ansariDiag = {id: id, marks: {script: performance.now()}, errors: []};
+        var token = function (value) { return typeof value === 'string' && value ? value.slice(0, 80) : undefined; };
+        var push = function (entry) { if (record.errors.length < 20) record.errors.push(entry); };
+        addEventListener('error', function (event) {
+          var target = event.target && event.target !== window ? event.target.tagName : undefined;
+          push({type: 'error', name: token(event.error && event.error.name) || (target ? 'resource-' + target : 'Error')});
+        }, true);
+        addEventListener('unhandledrejection', function (event) {
+          push({type: 'rejection', name: token(event.reason && event.reason.name) || typeof event.reason});
+        });
+        // When the host's messages arrive, by method name only: the handshake reply, the tool input and result, teardown.
+        var arrivals = {'ui/notifications/tool-input': 'toolInput', 'ui/notifications/tool-result': 'toolResult', 'ui/notifications/tool-cancelled': 'toolCancelled', 'ui/resource-teardown': 'teardownRequested'};
+        addEventListener('message', function (event) {
+          var data = event.data;
+          if (event.source !== window.parent || !data || data.jsonrpc !== '2.0') return;
+          var now = performance.now();
+          if (record.marks.hostMessage === undefined) record.marks.hostMessage = now;
+          var name = arrivals[data.method];
+          if (name && record.marks[name] === undefined) record.marks[name] = now;
+        });
+        addEventListener('securitypolicyviolation', function (event) {
+          push({type: 'csp', directive: token(event.effectiveDirective), blocked: token(String(event.blockedURI).split(':')[0])});
+        });
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <!--
       No Content-Security-Policy here: the build derives it from the application's content policy and

@@ -33,6 +33,7 @@
         "MCP_ALLOWED_HOSTS",
         "MCP_ALLOWED_ORIGINS",
         "MCP_RESPONSE_MODE",
+        "MCP_VIEW_DIAGNOSTICS_ORIGIN",
         "ANSARI_RELEASE",
         "RAILWAY_GIT_COMMIT_SHA"
       ],
@@ -48,6 +49,7 @@
         "MCP_ALLOWED_HOSTS",
         "MCP_ALLOWED_ORIGINS",
         "MCP_RESPONSE_MODE",
+        "MCP_VIEW_DIAGNOSTICS_ORIGIN",
         "ANSARI_RELEASE",
         "RAILWAY_GIT_COMMIT_SHA"
       ],

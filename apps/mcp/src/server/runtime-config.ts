@@ -26,8 +26,22 @@ export type EnvSettings = {
   allowedHosts: string[];
   allowedOrigins: string[];
   enableJsonResponse: boolean;
+  /** First-load diagnosis: the public origin the card's beacon reports to. Unset unless a deployment is being diagnosed. */
+  viewDiagnosticsOrigin?: string;
   ansari: {baseUrl?: string; clientName?: string; authorization?: string};
 };
+
+/** A bare https origin (http only for a local listener), or a startup error: a wrong value must not pass silently. */
+function diagnosticsOrigin(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const refuse = (): never => { throw new Error(`MCP_VIEW_DIAGNOSTICS_ORIGIN must be a bare origin such as https://mcp.example: ${JSON.stringify(value)}`); };
+  let url: URL;
+  try { url = new URL(value); } catch { return refuse(); }
+  const local = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+  if (!(url.protocol === 'https:' || (url.protocol === 'http:' && local))) refuse();
+  if (url.username || url.password || url.pathname !== '/' || url.search || url.hash || value.includes('?') || value.includes('#')) refuse();
+  return url.origin;
+}
 
 /** Explicit overrides, then configured lists (including empty), then local defaults. */
 function allowedList(value: unknown, override: string[] | undefined, fallback: string[]): string[] {
@@ -44,6 +58,7 @@ export function settingsFromEnv(env: RuntimeEnv, overrides: {allowedHosts?: stri
     allowedHosts,
     allowedOrigins,
     enableJsonResponse: overrides.enableJsonResponse ?? setting(env, 'MCP_RESPONSE_MODE') === 'json',
+    viewDiagnosticsOrigin: diagnosticsOrigin(setting(env, 'MCP_VIEW_DIAGNOSTICS_ORIGIN')),
     ansari: {baseUrl: setting(env, 'ANSARI_API_BASE_URL'), clientName: setting(env, 'ANSARI_CLIENT'), authorization: setting(env, 'ANSARI_API_AUTHORIZATION')},
   };
 }

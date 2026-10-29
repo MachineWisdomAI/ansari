@@ -10,7 +10,8 @@ import {chromium, type Frame, type Page} from '@playwright/test';
 import {build, preview} from 'vite';
 import {createHttpServer as createBaseHttpServer} from '../src/node/http-server.ts';
 import {stampHtmlRevision} from '../src/server/operation-log.ts';
-import {VIEW_FILENAME} from '../src/server/view-artifact.ts';
+import {VIEW_DIAGNOSTICS_PATH, VIEW_FILENAME, prepareAnswerView} from '../src/server/view-artifact.ts';
+import {parseViewReport} from '../src/server/view-report.ts';
 import {ANSWER_A, ANSWER_B, ANSWER_C, ANSWER_HOSTILE, ATTRIBUTION_CASES, QUESTION_A, QUESTION_B} from './react-answers.ts';
 
 const root = new URL('./', import.meta.url).pathname;
@@ -30,8 +31,9 @@ const ports: number[] = [];
 const evidence: Record<string, unknown> = {};
 const check = (name: string, f: () => void) => { f(); checks.push({name, pass: true}); if (process.env.REACT_BROWSER_TRACE) console.error('ok', name); };
 
-let browser: any, host: any, child: any, service: any, mcpClient: Client | undefined;
+let browser: any, host: any, child: any, beacon: any, service: any, mcpClient: Client | undefined;
 const served = new Map<string, string>();
+const beacons: string[] = [];
 const requests: {url: string; from: string}[] = [];
 
 async function main() {
@@ -46,6 +48,16 @@ async function main() {
   });
   await new Promise<void>(r => child.listen(0, '127.0.0.1', r));
   ports.push(child.address().port);
+  // The Dev diagnostics beacon (#335): records each report body exactly as the card sent it.
+  beacon = http.createServer((req, res) => {
+    let body = '';
+    req.setEncoding('utf8');
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => { if (req.method === 'POST' && req.url === VIEW_DIAGNOSTICS_PATH) beacons.push(body); res.writeHead(204, {'access-control-allow-origin': '*'}).end(); });
+  });
+  await new Promise<void>(r => beacon.listen(0, '127.0.0.1', r));
+  const diagnosticsOrigin = `http://127.0.0.1:${beacon.address().port}`;
+  ports.push(beacon.address().port);
 
   const logs: any[] = [];
   service = createBaseHttpServer({
@@ -94,7 +106,7 @@ async function main() {
   page.on('pageerror', e => errors.push(String(e)));
   page.on('console', m => { if (m.type() === 'error') errors.push(`console: ${m.text()}`); });
   // Runtime networking is unavailable to the view: only the host fixture and the view document are reachable.
-  const allowedOrigins = () => [`http://127.0.0.1:${ports[0]}`, `http://127.0.0.1:${ports[1]}`];
+  const allowedOrigins = () => [`http://127.0.0.1:${ports[0]}`, `http://127.0.0.1:${ports[1]}`, diagnosticsOrigin];
   await context.route('**/*', (route: any) => {
     const url = route.request().url();
     const frame = route.request().frame();
@@ -799,6 +811,32 @@ async function main() {
     assert.equal(opensAfter, opensBefore);
   });
 
+  // ---- First-load diagnosis: a Dev card reports how far it got, in a shape the server accepts --------
+  // Every card above made no request (network check). Only a card served with a diagnostics origin sends reports.
+  assert.deepEqual(beacons, [], 'a production card sends no diagnostics');
+  const diagnostic = await openView(760, 900, prepareAnswerView(html, undefined, diagnosticsOrigin).html);
+  await deliver(diagnostic.id, resultA);
+  await diagnostic.frame.locator('[data-testid="answer-card"]').waitFor();
+  for (let waited = 0; beacons.length < 2 && waited < 3000; waited += 50) await new Promise(r => setTimeout(r, 50));
+  const reports = beacons.map(parseViewReport);
+  const lastReport = reports.at(-1);
+  check('diagnostics:dev-card-reports-ready-and-result-accepted-by-the-server', () => {
+    assert.ok(reports.length >= 2 && reports.every(r => r !== undefined), 'every report is exactly the accepted shape');
+    assert.deepEqual(reports.map(r => r!.reason), ['ready', 'result']);
+    assert.equal(new Set(reports.map(r => r!.view)).size, 1, 'one card, one id');
+    // The one known violation: zod's capability probe (`try { new Function('') } catch`) under the card's script-src,
+    // which has no 'unsafe-eval'. It is caught and harmless; any other error, rejection or violation fails here.
+    assert.deepEqual(lastReport!.errors, [{type: 'csp', directive: 'script-src', blocked: 'eval'}]);
+  });
+  check('diagnostics:milestones-are-recorded-in-start-order', () => {
+    const m = lastReport!.marks;
+    for (const name of ['script', 'main', 'hostMessage', 'fonts', 'context', 'ready', 'toolResult', 'result']) assert.equal(typeof m[name], 'number', name);
+    assert.ok(m.script! <= m.main! && m.main! <= m.hostMessage! && m.hostMessage! <= m.context! && m.fonts! <= m.ready! && m.context! <= m.ready!);
+    assert.ok(m.ready! <= m.result! && m.toolResult! <= m.result!);
+  });
+  check('diagnostics:reports-carry-no-answer-text', () => assert.ok(!beacons.join('').includes(ANSWER_A.slice(0, 40))));
+  evidence.diagnostics = lastReport;
+
   const states = await page.evaluate(() => Array.from(document.querySelectorAll('iframe')).map(f => (window as any).hostProbe.state(f.id)));
   check('host:no-view-initiated-tool-calls-and-no-host-errors', () => {
     for (const s of states) { assert.equal(s.answerCalls, 0); assert.deepEqual(s.hostErrors, []); }
@@ -822,6 +860,7 @@ try {
   if (service) { service.server.closeAllConnections?.(); await bounded(service.close?.()); }
   if (host) await bounded(new Promise<void>(r => (host.httpServer.closeAllConnections(), host.httpServer.close(() => r()))));
   if (child) await bounded(new Promise<void>(r => (child.closeAllConnections(), child.close(() => r()))));
+  if (beacon) await bounded(new Promise<void>(r => (beacon.closeAllConnections(), beacon.close(() => r()))));
   fs.writeFileSync(`${out}/react-results.json`, JSON.stringify({checks, errors, ports, evidence, failed: failure === undefined ? undefined : String(failure), scope: 'built from packed SAGA packages; real MCP server and connection; sandboxed iframe in a local AppBridge fixture; local Chromium; not actual-host evidence'}, null, 2) + '\n');
 }
 if (failure !== undefined) process.exit(1);
