@@ -95,7 +95,7 @@ The Worker takes the variables in the table below as Wrangler `vars` or secrets,
 | `MCP_ALLOWED_ORIGINS` | Comma-separated allowed browser origin hostnames. A configured list replaces defaults; an explicitly empty list permits no Origin header value. Requests without Origin remain supported. |
 | `MCP_RESPONSE_MODE` | `json` for modern MCP final-answer-only responses; otherwise SSE, which supports client-requested progress notifications. Older-host compatibility responses may use SSE. |
 | `ANSARI_RELEASE` | Optional safe release identifier, embedded in served HTML and health/log records. |
-| `MCP_VIEW_DIAGNOSTICS_ORIGIN` | Set only on a deployment being diagnosed: its own public origin, such as `https://ansari-mcp-development.up.railway.app`. The card may then connect to that one origin and reports its start-up milestones to `POST /diag/view`; this changes the card's bytes and so its address. Unset, the card, its address and its closed permissions are unchanged and the route does not exist. A value that is not a bare `https` origin (`http` only for localhost) stops startup. See [First-load diagnosis](#first-load-diagnosis). |
+| `MCP_VIEW_DIAGNOSTICS_ORIGIN` | Set only on a deployment being diagnosed: its own public origin, such as `https://ansari-mcp-development.up.railway.app`. The card may then connect to that one origin and reports its start-up milestones to `POST /diag/view`; this changes the card's bytes, address and permissions. Unset, the card, its address and its closed permissions are unchanged and the route does not exist. A value that is not a bare `https` origin (`http` only for localhost) stops startup. See [First-load diagnosis](#first-load-diagnosis). |
 
 `POST /mcp` serves stateless MCP requests through Hono and the official MCP request handler. Modern requests need no initialization; older hosts can use the handler’s stateless compatibility path. No MCP session IDs, session map, expiry timer or replay store are retained. `GET /mcp` and `DELETE /mcp` return 405. `/health` exposes the release. The HTML is supplied by the hosting target (read from `dist/` at Node start, bundled into the Worker), revision-stamped and fingerprinted once before the first request is served: the release is stamped first, so equal final bytes have equal identities and a release change legitimately changes the hash. Each request creates its own lightweight MCP server using that prepared view; resource bytes and identity stay fixed until restart. No demo, font server, alternative renderer or historical resource is served. Tool calls have a fresh 60-second budget; timeout yields a safe error and leaves subsequent calls usable. The same lifetime signal aborts the upstream fetch and response-body read when the request ends or the budget expires.
 
@@ -103,45 +103,56 @@ Closing a request server releases its budget even if it was never connected to a
 
 ## First-load diagnosis
 
-Issue #335: in Claude web and ChatGPT web the host's own error replaced the card on first load, and one Retry
-recovered it. The card's own failure texts never appeared, so the host gave up before the card showed anything. These
-records tell the possible causes apart.
+A bounded experiment for issue #335, not a permanent observability design. In Claude web and ChatGPT web the host's
+own error replaced the card on first load and one Retry recovered it; the card's own failure texts never appeared, so
+the host gave up before the card showed anything. The aim is to locate the first missing step between the card read,
+the card's start, the host handshake, tool-result arrival and the first rendered answer, where that step can be
+observed at all. After the trials, this is removed or narrowed to what proved useful.
 
-**Server, always on.** Each `/mcp` exchange writes an `mcp.request` line when it arrives and an `mcp.response` line
-when it ends, joined by `rid`. The request line names the JSON-RPC method; for a card read, the address read and
-whether it is the one served now (`uriCurrent`); for the opening handshake, the client's name, version and protocol;
-for a tool call, the tool name. The response line has the HTTP status, any JSON-RPC error code (a stale card read is
-error `-32602` inside an HTTP 200), bytes sent, time to headers and total time, and whether the response was
-`complete`, `cancelled` by the client or `failed`. Handler errors are logged by name and code. No question, answer or
-other parameter value is logged.
+**Server records, always on.** Each `/mcp` exchange writes `mcp.request` and `mcp.response` lines joined by `rid`. The
+request is inspected from a copy, alongside the handler and up to 64 KiB actually read, so inspection never holds up
+or alters the exchange; a larger body is recorded as `oversize`. The request line names the JSON-RPC method; for a card
+read, the address read and whether it is the one this instance serves (`uriCurrent`); for the handshake, the client's
+name, version and protocol; for a tool call, the tool name. The response line has the HTTP status, bytes, time to
+headers and total time, and `stream`: whether this side's response stream was `drained`, `cancelled` or `failed`. That
+is not proof the host received or rendered it. Responses up to 64 KiB are decoded as JSON-RPC for an error code; a
+stale card read is `-32602` inside an HTTP 200. At start, `view.prepared` records the served card's address, size,
+whether it is a diagnostic card and its connect origins. Handler errors are logged by name and code. These records hold
+no question, answer or other parameter value.
 
-**Card, always on.** A small script runs before the bundle and records when it started, any error, unhandled
-rejection or content-policy violation, and when the host's messages arrive (first message, tool input, tool result,
-cancellation, teardown request), by method name only. The stack's hooks add when fonts loaded, when the host context
-was delivered, how starting ended and when the first answer or problem was rendered. The card writes each report as an
-`[ansari-view]` console line in its frame. One violation is expected on every load: zod's `new Function('')`
-capability probe under the card's `script-src`, which it catches.
+**Card reports, diagnostic card only.** With `MCP_VIEW_DIAGNOSTICS_ORIGIN` set, the served card carries an
+`ansari-diagnostics` address in its head, may connect to that one origin, and changes bytes, address and permissions.
+Compare its trials with the closed card's rather than assuming they behave the same. An early script, which runs
+before the bundle is parsed, records errors, unhandled rejections, content-policy violations and when the host's
+messages arrive (first message, tool input, tool result, cancellation, teardown request), by method name only. The
+stack's hooks add font loading, host-context delivery, how starting ended and the first rendered answer or problem. The
+early script reports by itself at `load`, at `pagehide` and after 15 s without a start, so a bundle that never runs is
+still reported; the bundle adds reports when the card is ready, fails, or renders its first answer or problem. Each
+report is an `[ansari-view]` console line and a beacon to `POST /diag/view`. The route accepts only the fixed report
+shape, at most 8 KiB and 120 reports a minute per instance, and logs `view.report` with `clientAuthored: true`: the
+shape limits what is logged, but anyone who can reach the route can send a report. Report fields are milestones,
+enumerated failures and error names; the stack still prints a callback's own error to the console, as before. One
+violation is expected on every load: zod's `new Function('')` capability probe under the card's `script-src`, which it
+catches. The closed card's early script does nothing.
 
-**Card beacon, diagnosed deployment only.** With `MCP_VIEW_DIAGNOSTICS_ORIGIN` set, the card also sends each report
-to `POST /diag/view` when it starts or fails, renders its first answer or problem, is put away, or has not started
-after 15 seconds. The server accepts only the fixed report shape (milestones, enumerated failures, error names) and
-logs it as `view.report`, with the host sandbox's origin name.
-
-**Trials.** Run one trial per new conversation, with the deployment live for hours (`aged`) and right after a
-redeploy (`fresh`):
+**Trials.** Use the deployment for nothing else while a trial runs. Run one trial per new conversation, with the
+deployment live for hours (`aged`) and right after a redeploy (`fresh`), and with the diagnostic and the closed card.
+The trial script records the deployment's release and the first attempt and Retry as separate windows:
 
 ```sh
-bash scripts/first-load-trial.sh claude aged
-bash scripts/first-load-trial.sh chatgpt fresh
-# Railway: deployment and edge HTTP logs for the trial window, then one timeline per trial.
+bash scripts/first-load-trial.sh https://ansari-mcp-development.up.railway.app claude aged diagnostic
+# Railway: deployment and edge HTTP logs covering the trials, then one timeline per trial.
 railway logs --deployment --json --since 1h > test-results/first-load/app.jsonl
 railway logs --http --json --since 1h > test-results/first-load/edge.jsonl
 node scripts/first-load-timeline.mjs test-results/first-load/trials.jsonl test-results/first-load/app.jsonl test-results/first-load/edge.jsonl
 ```
 
-The timeline flags a card read that never reached the server, a card address that is not the current deploy's, a card
-read that was cancelled or slow, a card whose host asked to tear it down before it was ready, a card that never heard
-from the host, and a slow start.
+Records are attributed to an attempt by time only; neither `rid` nor a card's id links to the host's attempt. The
+timeline lists what was observed in each window and flags windows with more than one MCP client, overlapping trials or
+another release as ambiguous. A finding such as "no host message observed by its last report" says only that. Two
+controlled cases have known answers: a stale card read (`resources/read` of an earlier address, answered `-32602`) and
+a bundle that fails before it runs (covered by the browser checks: a `load` report without `main` and with the
+`SyntaxError`).
 
 ## Workspace and container
 

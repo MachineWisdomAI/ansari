@@ -34,6 +34,7 @@ const check = (name: string, f: () => void) => { f(); checks.push({name, pass: t
 let browser: any, host: any, child: any, beacon: any, service: any, mcpClient: Client | undefined;
 const served = new Map<string, string>();
 const beacons: string[] = [];
+const viewReportLines: string[] = [];
 const requests: {url: string; from: string}[] = [];
 
 async function main() {
@@ -104,7 +105,7 @@ async function main() {
   await page.setViewportSize({width: 1700, height: 9000});
   page.setDefaultTimeout(7000);
   page.on('pageerror', e => errors.push(String(e)));
-  page.on('console', m => { if (m.type() === 'error') errors.push(`console: ${m.text()}`); });
+  page.on('console', m => { if (m.type() === 'error') errors.push(`console: ${m.text()}`); if (m.text().startsWith('[ansari-view]')) viewReportLines.push(m.text()); });
   // Runtime networking is unavailable to the view: only the host fixture and the view document are reachable.
   const allowedOrigins = () => [`http://127.0.0.1:${ports[0]}`, `http://127.0.0.1:${ports[1]}`, diagnosticsOrigin];
   await context.route('**/*', (route: any) => {
@@ -811,18 +812,24 @@ async function main() {
     assert.equal(opensAfter, opensBefore);
   });
 
-  // ---- First-load diagnosis: a Dev card reports how far it got, in a shape the server accepts --------
-  // Every card above made no request (network check). Only a card served with a diagnostics origin sends reports.
-  assert.deepEqual(beacons, [], 'a production card sends no diagnostics');
-  const diagnostic = await openView(760, 900, prepareAnswerView(html, undefined, diagnosticsOrigin).html);
+  // ---- First-load diagnosis: a diagnostic card reports how far it got, in a shape the server accepts --------
+  // Every card above is a closed card: it made no request (network check), sent no report and wrote no report line.
+  check('diagnostics:closed-cards-are-silent', () => {
+    assert.deepEqual(beacons, []);
+    assert.deepEqual(viewReportLines, []);
+  });
+  const diagnosticBytes = prepareAnswerView(html, undefined, diagnosticsOrigin).html;
+  const waitForReports = async (count: number) => { for (let waited = 0; beacons.length < count && waited < 4000; waited += 50) await new Promise(r => setTimeout(r, 50)); };
+  const diagnostic = await openView(760, 900, diagnosticBytes);
   await deliver(diagnostic.id, resultA);
   await diagnostic.frame.locator('[data-testid="answer-card"]').waitFor();
-  for (let waited = 0; beacons.length < 2 && waited < 3000; waited += 50) await new Promise(r => setTimeout(r, 50));
-  const reports = beacons.map(parseViewReport);
+  await waitForReports(3);
+  const reports = beacons.splice(0).map(parseViewReport);
   const lastReport = reports.at(-1);
-  check('diagnostics:dev-card-reports-ready-and-result-accepted-by-the-server', () => {
-    assert.ok(reports.length >= 2 && reports.every(r => r !== undefined), 'every report is exactly the accepted shape');
-    assert.deepEqual(reports.map(r => r!.reason), ['ready', 'result']);
+  check('diagnostics:card-reports-load-ready-and-result-accepted-by-the-server', () => {
+    assert.ok(reports.length === 3 && reports.every(r => r !== undefined), 'every report is exactly the accepted shape');
+    assert.deepEqual(reports.map(r => r!.reason).sort(), ['load', 'ready', 'result']);
+    assert.equal(lastReport!.reason, 'result');
     assert.equal(new Set(reports.map(r => r!.view)).size, 1, 'one card, one id');
     // The one known violation: zod's capability probe (`try { new Function('') } catch`) under the card's script-src,
     // which has no 'unsafe-eval'. It is caught and harmless; any other error, rejection or violation fails here.
@@ -834,8 +841,24 @@ async function main() {
     assert.ok(m.script! <= m.main! && m.main! <= m.hostMessage! && m.hostMessage! <= m.context! && m.fonts! <= m.ready! && m.context! <= m.ready!);
     assert.ok(m.ready! <= m.result! && m.toolResult! <= m.result!);
   });
-  check('diagnostics:reports-carry-no-answer-text', () => assert.ok(!beacons.join('').includes(ANSWER_A.slice(0, 40))));
+  check('diagnostics:reports-carry-no-answer-text', () => assert.ok(!JSON.stringify(reports).includes(ANSWER_A.slice(0, 40))));
   evidence.diagnostics = lastReport;
+
+  // A bundle that fails before it runs: the early script still reports, and the report shows the bundle never ran.
+  const bundle = /(<script type="module"[^>]*>)[\s\S]*?(<\/script>)/;
+  assert.ok(bundle.test(diagnosticBytes), 'the card has one inline module bundle');
+  const brokenBundle = diagnosticBytes.replace(bundle, '$1export const broken = ;$2');
+  const broken = await openStartFailure(brokenBundle, true);
+  await waitForReports(1);
+  const brokenReport = parseViewReport(beacons.splice(0)[0] ?? '');
+  check('diagnostics:a-bundle-that-never-runs-is-still-reported', () => {
+    assert.equal(brokenReport?.reason, 'load');
+    assert.equal(typeof brokenReport?.marks.script, 'number');
+    assert.equal(brokenReport?.marks.main, undefined, 'the bundle never evaluated');
+    assert.ok(brokenReport?.errors.some(e => e.type === 'error' && e.name === 'SyntaxError'), JSON.stringify(brokenReport?.errors));
+  });
+  await page.evaluate(id => document.getElementById(id)?.remove(), broken.id);
+  errors.splice(0, errors.length, ...errors.filter(e => !/SyntaxError|Unexpected token/.test(e)));
 
   const states = await page.evaluate(() => Array.from(document.querySelectorAll('iframe')).map(f => (window as any).hostProbe.state(f.id)));
   check('host:no-view-initiated-tool-calls-and-no-host-errors', () => {

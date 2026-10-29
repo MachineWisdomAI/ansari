@@ -3,9 +3,9 @@ import {createMcpHandler} from '@modelcontextprotocol/server';
 import {Hono} from 'hono';
 import type {AnswerCompleter} from './ansari-client.js';
 import {createAnsariMcpServer} from './create-server.js';
-import {errorIdentity, inspectableBody, observeResponse, summarizeRpc} from './exchange-log.js';
+import {errorIdentity, inspectRequest, observeResponse, readBounded} from './exchange-log.js';
 import {VIEW_DIAGNOSTICS_PATH, prepareAnswerView} from './view-artifact.js';
-import {MAX_VIEW_REPORT_BYTES, originHost, parseViewReport} from './view-report.js';
+import {MAX_VIEW_REPORT_BYTES, VIEW_REPORTS_PER_MINUTE, originHost, parseViewReport} from './view-report.js';
 import {type OperationLogger, writeOperationLog} from './operation-log.js';
 
 export const MCP_PATH = '/mcp';
@@ -49,39 +49,49 @@ export function createFetchApp(options: FetchAppOptions): FetchApp {
   app.get('/health', c => c.json({ok: true, mcp: MCP_PATH, release}));
   app.use(MCP_PATH, hostHeaderValidation(options.allowedHosts));
   app.use(MCP_PATH, originValidation(options.allowedOrigins));
-  // One line when a request arrives and one when its response ends, joined by `rid`: which method a host called,
-  // which card address it read, and whether the response was fully sent (#335).
+  // The exact card this instance serves: a diagnostic card differs from the closed one in bytes, address and permissions.
+  log({event: 'view.prepared', at: Date.now(), uri: view.uri, bytes: new TextEncoder().encode(view.html).byteLength, diagnostics: options.viewDiagnosticsOrigin !== undefined, connectDomains: view.csp.connectDomains.join(',')});
+  // One line when a request has been inspected and one when its response stream ends, joined by `rid`: which method a
+  // host called, which card address it read, and how the response stream ended (#335). Inspection reads a copy
+  // alongside the handler and never holds up or alters the exchange.
   app.all(MCP_PATH, async c => {
     const started = Date.now();
     const rid = crypto.randomUUID().slice(0, 8);
-    const body = await inspectableBody(c.req.raw);
-    const summary = body === undefined ? {rpc: c.req.method === 'POST' ? 'oversize' : 'none'} : summarizeRpc(body, view.uri);
-    log({event: 'mcp.request', at: started, method: c.req.method, rid, ...summary});
+    const inspected = inspectRequest(c.req.raw, view.uri);
+    void inspected.then(summary => log({event: 'mcp.request', at: started, method: c.req.method, rid, ...summary}));
     const response = await mcp.fetch(c.req.raw);
     const headersMs = Date.now() - started;
-    return observeResponse(response, end => log({event: 'mcp.response', at: Date.now(), rid, rpc: summary.rpc, status: response.status, headersMs, ms: Date.now() - started, ...end}));
+    return observeResponse(response, end => {
+      const ms = Date.now() - started;
+      void inspected.then(summary => log({event: 'mcp.response', at: Date.now(), rid, rpc: summary.rpc, status: response.status, headersMs, ms, ...end}));
+    });
   });
   if (options.viewDiagnosticsOrigin !== undefined) {
     app.use(VIEW_DIAGNOSTICS_PATH, hostHeaderValidation(options.allowedHosts));
-    // A beacon from a sandboxed card: no credentials, a simple text/plain request and nothing to read back.
+    let windowStart = 0;
+    let windowCount = 0;
+    // A beacon from a sandboxed card: unauthenticated, client-authored and only as trustworthy as the card that sent
+    // it. Bounded in size and rate; nothing is read back.
     app.post(VIEW_DIAGNOSTICS_PATH, async c => {
       c.header('access-control-allow-origin', '*');
+      const now = Date.now();
+      if (now - windowStart >= 60_000) { windowStart = now; windowCount = 0; }
+      if (++windowCount > VIEW_REPORTS_PER_MINUTE) {
+        if (windowCount === VIEW_REPORTS_PER_MINUTE + 1) log({event: 'view.report.limited', perMinute: VIEW_REPORTS_PER_MINUTE});
+        return c.body(null, 429);
+      }
       const origin = originHost(c.req.header('origin') ?? null);
-      if (Number(c.req.header('content-length') ?? 0) > MAX_VIEW_REPORT_BYTES) {
+      const read = c.req.raw.body === null ? {text: ''} : await readBounded(c.req.raw.body, MAX_VIEW_REPORT_BYTES).catch(() => ({exceeded: true as const}));
+      if ('exceeded' in read) {
         log({event: 'view.report.invalid', reason: 'size', origin});
         return c.body(null, 413);
       }
-      const text = await c.req.text();
-      if (text.length > MAX_VIEW_REPORT_BYTES) {
-        log({event: 'view.report.invalid', reason: 'size', origin});
-        return c.body(null, 413);
-      }
-      const report = parseViewReport(text);
+      const report = parseViewReport(read.text);
       if (report === undefined) {
         log({event: 'view.report.invalid', reason: 'shape', origin});
         return c.body(null, 400);
       }
-      log({event: 'view.report', at: Date.now(), origin, ...report});
+      log({event: 'view.report', at: now, clientAuthored: true, origin, ...report});
       return c.body(null, 204);
     });
   }

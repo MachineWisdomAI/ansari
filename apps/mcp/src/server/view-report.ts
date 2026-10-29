@@ -2,9 +2,12 @@ import {z} from 'zod';
 import {VIEW_MARKS, VIEW_REPORT_REASONS} from '../view/diagnostic-marks.js';
 
 // The one report shape a diagnostic card may send to the beacon (#335). Every field is an enumerated value, a
-// bounded token or a number; unknown keys and free text (error messages included) are dropped before logging.
+// bounded token or a number; unknown keys and free text (error messages included) are dropped before logging. The
+// shape limits what is logged; it does not make a report authentic. Anyone who can reach the route can send one.
 
 export const MAX_VIEW_REPORT_BYTES = 8_192;
+/** Reports accepted per instance per minute; more are refused with 429 and noted once. */
+export const VIEW_REPORTS_PER_MINUTE = 120;
 
 const TOKEN = /^[A-Za-z0-9._+-]{1,80}$/;
 const token = z.string().regex(TOKEN);

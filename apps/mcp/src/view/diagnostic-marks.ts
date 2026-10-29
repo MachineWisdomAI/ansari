@@ -13,5 +13,5 @@ export const VIEW_MARKS = ['script', 'main', 'hostMessage', 'toolInput', 'toolRe
 export type ViewMark = (typeof VIEW_MARKS)[number];
 
 /** Why a card sent a report. */
-export const VIEW_REPORT_REASONS = ['ready', 'failed', 'result', 'problem', 'pagehide', 'timeout'] as const;
+export const VIEW_REPORT_REASONS = ['load', 'ready', 'failed', 'result', 'problem', 'pagehide', 'timeout'] as const;
 export type ViewReportReason = (typeof VIEW_REPORT_REASONS)[number];
