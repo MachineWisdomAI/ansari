@@ -95,7 +95,8 @@ The Worker takes the variables in the table below as Wrangler `vars` or secrets,
 | `MCP_ALLOWED_ORIGINS` | Comma-separated allowed browser origin hostnames. A configured list replaces defaults; an explicitly empty list permits no Origin header value. Requests without Origin remain supported. |
 | `MCP_RESPONSE_MODE` | `json` for modern MCP final-answer-only responses; otherwise SSE, which supports client-requested progress notifications. Older-host compatibility responses may use SSE. |
 | `ANSARI_RELEASE` | Optional safe release identifier, embedded in served HTML and health/log records. |
-| `MCP_VIEW_DIAGNOSTICS_ORIGIN` | Set only on a deployment being diagnosed: its own public origin, such as `https://ansari-mcp-development.up.railway.app`. The card may then connect to that one origin and reports its start-up milestones to `POST /diag/view`; this changes the card's bytes, address and permissions. Unset, the card, its address and its closed permissions are unchanged and the route does not exist. A value that is not a bare `https` origin (`http` only for localhost) stops startup. See [First-load diagnosis](#first-load-diagnosis). |
+| `MCP_VIEW_DIAGNOSTICS_ORIGIN` | Set only on a deployment being diagnosed: its own public origin, such as `https://ansari-mcp-development.up.railway.app`. The card may then connect to that one origin and reports its start-up milestones to `POST /diag/view`; this changes the card's bytes, address and permissions. Unset, the card, its address and its closed permissions are unchanged and the route does not exist. A value that is not a bare `https` origin (`http` only for localhost) stops startup. Implies `MCP_LOG_LEVEL=debug`. See [First-load diagnosis](#first-load-diagnosis). |
+| `MCP_LOG_LEVEL` | `info` (default) or `debug`. `debug` also writes the first-load measurement records; set it only on a deployment being measured. Any other value, or `info` together with `MCP_VIEW_DIAGNOSTICS_ORIGIN`, stops startup. |
 
 `POST /mcp` serves stateless MCP requests through Hono and the official MCP request handler. Modern requests need no initialization; older hosts can use the handler’s stateless compatibility path. No MCP session IDs, session map, expiry timer or replay store are retained. `GET /mcp` and `DELETE /mcp` return 405. `/health` exposes the release. The HTML is supplied by the hosting target (read from `dist/` at Node start, bundled into the Worker), revision-stamped and fingerprinted once before the first request is served: the release is stamped first, so equal final bytes have equal identities and a release change legitimately changes the hash. Each request creates its own lightweight MCP server using that prepared view; resource bytes and identity stay fixed until restart. No demo, font server, alternative renderer or historical resource is served. Tool calls have a fresh 60-second budget; timeout yields a safe error and leaves subsequent calls usable. The same lifetime signal aborts the upstream fetch and response-body read when the request ends or the budget expires.
 
@@ -109,8 +110,15 @@ the host gave up before the card showed anything. The aim is to locate the first
 the card's start, the host handshake, tool-result arrival and the first rendered answer, where that step can be
 observed at all. After the trials, this is removed or narrowed to what proved useful.
 
-**Server records, always on.** Each `/mcp` exchange writes `mcp.request` and `mcp.response` lines joined by `rid`. The
-request is inspected from a copy, alongside the handler and up to 64 KiB actually read, so inspection never holds up
+**Log levels.** Every record carries a `level`. `error`: `mcp.error` and `source.error`, by error name and code only.
+`warn`: rejected or rate-limited card reports. `info`: the operational records (`startup`, `mcp.request` with the HTTP
+method, `source.start`, `source.complete`). `debug`: the measurement records below, written only with
+`MCP_LOG_LEVEL=debug`. At `info` the server neither inspects nor wraps an exchange, and it writes the records of a
+deployment without this experiment, plus a level on each and error
+names and codes; dropping the `debug` lines from a measured deployment leaves the same records.
+
+**Server records, while measuring.** Each `/mcp` exchange also writes `mcp.rpc` and `mcp.response` lines joined by
+`rid`. The request is inspected from a copy, alongside the handler and up to 64 KiB actually read, so inspection never holds up
 or alters the exchange; a larger body is recorded as `oversize`. The request line names the JSON-RPC method; for a card
 read, the address read and whether it is the one this instance serves (`uriCurrent`); for the handshake, the client's
 name, version and protocol; for a tool call, the tool name. The response line has the HTTP status, bytes, time to
@@ -118,7 +126,8 @@ headers and total time, and `stream`: whether this side's response stream was `d
 is not proof the host received or rendered it. Responses up to 64 KiB are decoded as JSON-RPC for an error code; a
 stale card read is `-32602` inside an HTTP 200. At start, `view.prepared` records the served card's address, size,
 whether it is a diagnostic card and its connect origins. Handler errors are logged by name and code. These records hold
-no question, answer or other parameter value.
+no question, answer or other parameter value. A closed-card trial still needs these records: set
+`MCP_LOG_LEVEL=debug` and leave `MCP_VIEW_DIAGNOSTICS_ORIGIN` unset.
 
 **Card reports, diagnostic card only.** With `MCP_VIEW_DIAGNOSTICS_ORIGIN` set, the served card carries an
 `ansari-diagnostics` address in its head, may connect to that one origin, and changes bytes, address and permissions.
@@ -129,7 +138,7 @@ stack's hooks add font loading, host-context delivery, how starting ended and th
 early script reports by itself at `load`, at `pagehide` and after 15 s without a start, so a bundle that never runs is
 still reported; the bundle adds reports when the card is ready, fails, or renders its first answer or problem. Each
 report is an `[ansari-view]` console line and a beacon to `POST /diag/view`. The route accepts only the fixed report
-shape, at most 8 KiB and 120 reports a minute per instance, and logs `view.report` with `clientAuthored: true`: the
+shape, at most 8 KiB and 120 reports a minute per instance, and logs `view.report` (level `debug`) with `clientAuthored: true`: the
 shape limits what is logged, but anyone who can reach the route can send a report. Report fields are milestones,
 enumerated failures and error names; the stack still prints a callback's own error to the console, as before. One
 violation is expected on every load: zod's `new Function('')` capability probe under the card's `script-src`, which it

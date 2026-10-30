@@ -44,8 +44,10 @@ function streamOf(size: number): ReadableStream<Uint8Array> {
 const settled = async (response: Response) => { await response.text(); await new Promise(resolve => setTimeout(resolve, 0)); };
 const byRid = (logs: OperationRecord[], event: string, rpc: string) => logs.filter(r => r.event === event && r.rpc === rpc);
 
+const MEASURING = {MCP_LOG_LEVEL: 'debug'};
+
 test('each MCP exchange records its method, card address, outcome, size and timing without content', async () => {
-  const {app, logs, rpc} = harness();
+  const {app, logs, rpc} = harness(MEASURING);
   try {
     const listed = await rpc('tools/list');
     const uri = (JSON.parse((await listed.text()).replace(/^[\s\S]*?data: /, '')) as {result: {tools: {_meta: {ui: {resourceUri: string}}}[]}}).result.tools[0]._meta.ui.resourceUri;
@@ -54,16 +56,16 @@ test('each MCP exchange records its method, card address, outcome, size and timi
     await settled(await rpc('resources/read', {uri: STALE}));
     await settled(await rpc('tools/call', {name: 'answer_islamic_question', arguments: {question: QUESTION}}));
 
-    const [current, stale] = byRid(logs, 'mcp.request', 'resources/read');
+    const [current, stale] = byRid(logs, 'mcp.rpc', 'resources/read');
     assert.equal(current.uri, uri);
     assert.equal(current.uriCurrent, true);
     assert.equal(stale.uri, STALE);
     assert.equal(stale.uriCurrent, false, 'a card address from an earlier deploy is visible as such');
-    const initialize = byRid(logs, 'mcp.request', 'initialize')[0];
+    const initialize = byRid(logs, 'mcp.rpc', 'initialize')[0];
     assert.equal(initialize.client, 'probe-host');
     assert.equal(initialize.clientVersion, '9.1');
     assert.equal(initialize.protocol, '2025-06-18');
-    assert.equal(byRid(logs, 'mcp.request', 'tools/call')[0].tool, 'answer_islamic_question');
+    assert.equal(byRid(logs, 'mcp.rpc', 'tools/call')[0].tool, 'answer_islamic_question');
 
     const [read, missing] = byRid(logs, 'mcp.response', 'resources/read');
     assert.equal(read.rid, current.rid, 'request and response lines share one id');
@@ -80,7 +82,8 @@ test('each MCP exchange records its method, card address, outcome, size and timi
     assert.equal(prepared.uri, uri, 'the served card identity is recorded once at start');
     assert.equal(prepared.diagnostics, false);
     assert.equal(prepared.connectDomains, '');
-    for (const record of logs.filter(r => r.event === 'mcp.request')) assert.equal(record.method, 'POST', 'the request line keeps the HTTP verb in `method`');
+    for (const record of logs.filter(r => r.event === 'mcp.request')) assert.equal(record.method, 'POST', 'the operational request line keeps the HTTP verb');
+    for (const event of ['mcp.rpc', 'mcp.response', 'view.prepared']) assert.ok(logs.filter(r => r.event === event).every(r => r.level === 'debug'), event);
     const serialized = JSON.stringify(logs);
     assert.ok(!serialized.includes(QUESTION) && !serialized.includes(ANSWER), 'no question or answer text is logged');
   } finally { await app.close(); }
@@ -88,7 +91,7 @@ test('each MCP exchange records its method, card address, outcome, size and timi
 
 test('a client that hangs up mid-response is recorded as cancelled', async () => {
   let release!: () => void;
-  const {app, logs, rpc} = harness({}, () => new Promise(resolve => { release = () => resolve(ANSWER); }));
+  const {app, logs, rpc} = harness(MEASURING, () => new Promise(resolve => { release = () => resolve(ANSWER); }));
   try {
     const response = await rpc('tools/call', {name: 'answer_islamic_question', arguments: {question: QUESTION}});
     assert.equal(response.headers.get('content-type')?.startsWith('text/event-stream'), true);
@@ -99,18 +102,65 @@ test('a client that hangs up mid-response is recorded as cancelled', async () =>
   } finally { await app.close(); }
 });
 
-test('handler errors are logged by name and code only', async () => {
-  const {app, logs} = harness();
+test('an unparsable request is recorded as such', async () => {
+  const {app, logs} = harness(MEASURING);
   try {
     const response = await app.fetch(new Request('http://localhost/mcp', {
       method: 'POST', headers: {host: 'localhost', 'content-type': 'application/json', accept: 'application/json, text/event-stream'}, body: '{not json',
     }));
     await response.text();
-    const request = logs.find(r => r.event === 'mcp.request')!;
+    const request = logs.find(r => r.event === 'mcp.rpc')!;
     assert.equal(request.rpc, 'unparsed');
     const response_ = logs.find(r => r.event === 'mcp.response')!;
     assert.equal((response_.status as number) >= 400 || typeof response_.errorCode === 'number', true);
   } finally { await app.close(); }
+});
+
+/** One complete exchange: handshake, listing, card read, tool call. */
+async function exchange(rpc: ReturnType<typeof harness>['rpc']) {
+  await settled(await rpc('initialize', {protocolVersion: '2025-06-18', capabilities: {}, clientInfo: {name: 'probe-host', version: '9.1'}}));
+  const listed = await rpc('tools/list');
+  const uri = (JSON.parse((await listed.text()).replace(/^[\s\S]*?data: /, '')) as {result: {tools: {_meta: {ui: {resourceUri: string}}}[]}}).result.tools[0]._meta.ui.resourceUri;
+  await settled(await rpc('resources/read', {uri}));
+  await settled(await rpc('tools/call', {name: 'answer_islamic_question', arguments: {question: QUESTION}}));
+  for (let waited = 0; waited < 50; waited += 10) await new Promise(r => setTimeout(r, 10));
+}
+
+test('a deployment that is not measuring writes only the operational records', async () => {
+  const operational = harness();
+  const measured = harness(MEASURING);
+  try {
+    await exchange(operational.rpc);
+    await exchange(measured.rpc);
+    // The records a deployment without the experiment writes, each now with a level.
+    assert.deepEqual(operational.logs.map(r => [r.level, r.event, Object.keys(r).sort().join(',')]), [
+      ...['initialize', 'tools/list', 'resources/read'].map(() => ['info', 'mcp.request', 'event,level,method,release']),
+      ['info', 'mcp.request', 'event,level,method,release'],
+      ['info', 'source.start', 'event,level,method,release'],
+      ['info', 'source.complete', 'answerBytes,answerSha256,event,level,method,release'],
+    ]);
+    assert.deepEqual(measured.logs.filter(r => r.level !== 'debug'), operational.logs, 'dropping the debug lines leaves the same records');
+    assert.ok(measured.logs.some(r => r.level === 'debug'));
+    const levels = new Set(['error', 'warn', 'info', 'debug']);
+    assert.ok([...operational.logs, ...measured.logs].every(r => levels.has(r.level)), 'every record carries a level');
+  } finally { await operational.app.close(); await measured.app.close(); }
+});
+
+test('an upstream failure is logged at error level without its message', async () => {
+  const {app, logs, rpc} = harness({}, async () => { throw new Error(QUESTION); });
+  try {
+    await settled(await rpc('tools/call', {name: 'answer_islamic_question', arguments: {question: QUESTION}}));
+    assert.deepEqual(logs.filter(r => r.level === 'error').map(r => r.event), ['source.error']);
+    assert.ok(!JSON.stringify(logs).includes(QUESTION), 'neither the question nor the error message is logged');
+  } finally { await app.close(); }
+});
+
+test('the log level is info unless measuring, and contradictions stop startup', () => {
+  assert.equal(settingsFromEnv({}).logLevel, 'info');
+  assert.equal(settingsFromEnv({MCP_LOG_LEVEL: 'debug'}).logLevel, 'debug');
+  assert.equal(settingsFromEnv({MCP_VIEW_DIAGNOSTICS_ORIGIN: ORIGIN}).logLevel, 'debug', 'a diagnostic card implies debug');
+  assert.throws(() => settingsFromEnv({MCP_LOG_LEVEL: 'verbose'}), /MCP_LOG_LEVEL/);
+  assert.throws(() => settingsFromEnv({MCP_LOG_LEVEL: 'info', MCP_VIEW_DIAGNOSTICS_ORIGIN: ORIGIN}), /MCP_LOG_LEVEL=info/);
 });
 
 test('without a diagnostics origin the card, its address and its permissions are unchanged', async () => {
@@ -159,6 +209,7 @@ test('the beacon accepts only the fixed report shape and logs it without free te
     assert.equal(logged.host, 'Claude');
     assert.equal(logged.origin, 'sandbox.host.example');
     assert.equal(logged.clientAuthored, true, 'a report is marked as untrusted client input');
+    assert.equal(logged.level, 'debug');
     assert.deepEqual(logged.marks, {script: 12, main: 411, fonts: 1300, context: 980});
     assert.deepEqual(logged.errors, [{type: 'csp', directive: 'connect-src', blocked: 'https'}, {type: 'error', name: 'TypeError'}]);
     assert.ok(!JSON.stringify(logs).includes(ANSWER), 'free text in a report is never logged');
@@ -169,11 +220,12 @@ test('the beacon accepts only the fixed report shape and logs it without free te
     assert.equal((await beacon('x'.repeat(9000))).status, 413);
     assert.equal((await beacon(streamOf(9000) as unknown as string, {})).status, 413, 'the size bound holds without a Content-Length');
     assert.equal(logs.filter(r => r.event === 'view.report.invalid').length, 6);
+    assert.ok(logs.filter(r => r.event === 'view.report.invalid').every(r => r.level === 'warn'));
   } finally { await app.close(); }
 });
 
 test('request inspection is bounded by bytes read, not by the declared length, and never blocks the exchange', async () => {
-  const {app, logs} = harness();
+  const {app, logs} = harness(MEASURING);
   try {
     const response = await app.fetch(new Request('http://localhost/mcp', {
       method: 'POST', headers: {host: 'localhost', 'content-type': 'application/json', accept: 'application/json, text/event-stream'},
@@ -181,7 +233,7 @@ test('request inspection is bounded by bytes read, not by the declared length, a
     } as RequestInit));
     await response.text();
     for (let waited = 0; !logs.some(r => r.event === 'mcp.response') && waited < 1000; waited += 10) await new Promise(r => setTimeout(r, 10));
-    assert.equal(logs.find(r => r.event === 'mcp.request')?.rpc, 'oversize');
+    assert.equal(logs.find(r => r.event === 'mcp.rpc')?.rpc, 'oversize');
     assert.equal(logs.find(r => r.event === 'mcp.response')?.rpc, 'oversize', 'the handler still answered the request');
   } finally { await app.close(); }
 });

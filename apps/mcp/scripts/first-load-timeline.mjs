@@ -6,6 +6,9 @@
 // Railway deployment logs (`railway logs --deployment --json`: `timestamp` and the record in `message`), or Railway
 // edge HTTP logs (`railway logs --http --json`: `timestamp`, path, status, duration and bytes).
 //
+// The server writes the records read here only while measuring (`MCP_LOG_LEVEL=debug`, which a diagnostic card
+// implies); their `level` is `debug`. Without them a window shows only edge and operational lines.
+//
 // Records are attributed to a trial by time only: neither a server `rid` nor a card id links to the host's attempt.
 // The timeline therefore says what was observed in each window, flags windows whose traffic may not be the trial's,
 // and never claims that something did not happen anywhere.
@@ -39,7 +42,7 @@ const trials = lines(trialsFile);
 function describe(entry, zero) {
   const t = `+${((entry.at - zero) / 1000).toFixed(2)}s`.padStart(9);
   switch (entry.event) {
-    case 'mcp.request': return `${t} → ${entry.rpc}${entry.uri ? ` ${entry.uri}${entry.uriCurrent === false ? ' (NOT CURRENT)' : ''}` : ''}${entry.client ? ` client=${entry.client}/${entry.clientVersion}` : ''} [${entry.rid}]`;
+    case 'mcp.rpc': return `${t} → ${entry.rpc}${entry.uri ? ` ${entry.uri}${entry.uriCurrent === false ? ' (NOT CURRENT)' : ''}` : ''}${entry.client ? ` client=${entry.client}/${entry.clientVersion}` : ''} [${entry.rid}]`;
     case 'mcp.response': return `${t} ← ${entry.rpc} ${entry.status} stream=${entry.stream} ${entry.bytes}B headers=${entry.headersMs}ms total=${entry.ms}ms${entry.errorCode === undefined ? '' : ` error=${entry.errorCode}`} [${entry.rid}]`;
     case 'view.report': return `${t} ◆ card ${entry.view} ${entry.reason}${entry.failure ? ` failure=${entry.failure}` : ''} host=${entry.host ?? '?'} origin=${entry.origin} marks=${JSON.stringify(entry.marks)}${entry.errors?.length ? ` errors=${JSON.stringify(entry.errors)}` : ''}`;
     case 'view.prepared': return `${t} ◇ serving ${entry.uri} ${entry.bytes}B diagnostics=${entry.diagnostics}`;
@@ -54,7 +57,7 @@ function describe(entry, zero) {
 /** What one attempt's window shows. Each finding is an observation in that window, not a claim about the host. */
 function findings(window, card) {
   const out = [];
-  const reads = window.filter(entry => entry.event === 'mcp.request' && entry.rpc === 'resources/read');
+  const reads = window.filter(entry => entry.event === 'mcp.rpc' && entry.rpc === 'resources/read');
   const readEnds = window.filter(entry => entry.event === 'mcp.response' && entry.rpc === 'resources/read');
   if (reads.length === 0) out.push('no card read was observed at the server in this window');
   if (reads.some(entry => entry.uriCurrent === false)) out.push('a card address that is not the one this instance serves was read');
@@ -79,7 +82,7 @@ function findings(window, card) {
 /** Signs that a window holds traffic other than this trial's, so its records cannot be attributed with confidence. */
 function ambiguity(window, trial) {
   const out = [];
-  const clients = new Set(window.filter(entry => entry.event === 'mcp.request' && entry.client).map(entry => `${entry.client}/${entry.clientVersion}`));
+  const clients = new Set(window.filter(entry => entry.event === 'mcp.rpc' && entry.client).map(entry => `${entry.client}/${entry.clientVersion}`));
   if (clients.size > 1) out.push(`${clients.size} different MCP clients: ${[...clients].join(', ')}`);
   const overlapping = trials.filter(other => other !== trial && Date.parse(other.start) < Date.parse(trial.end) && Date.parse(other.end) > Date.parse(trial.start));
   if (overlapping.length) out.push(`${overlapping.length} other trial(s) overlap this one`);

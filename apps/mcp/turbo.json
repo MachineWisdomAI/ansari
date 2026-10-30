@@ -34,6 +34,7 @@
         "MCP_ALLOWED_ORIGINS",
         "MCP_RESPONSE_MODE",
         "MCP_VIEW_DIAGNOSTICS_ORIGIN",
+        "MCP_LOG_LEVEL",
         "ANSARI_RELEASE",
         "RAILWAY_GIT_COMMIT_SHA"
       ],
@@ -50,6 +51,7 @@
         "MCP_ALLOWED_ORIGINS",
         "MCP_RESPONSE_MODE",
         "MCP_VIEW_DIAGNOSTICS_ORIGIN",
+        "MCP_LOG_LEVEL",
         "ANSARI_RELEASE",
         "RAILWAY_GIT_COMMIT_SHA"
       ],
