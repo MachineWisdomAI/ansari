@@ -37,19 +37,20 @@ export function noteCallbackError(error: unknown, phase: string): void {
   if (record && record.errors.length < MAX_ERRORS) record.errors.push({type: 'callback', name: error instanceof Error ? error.name : typeof error, phase});
 }
 
-/** Reports once when the card has started, or failed to start. */
+/**
+ * Reports once when the card has started, or failed to start. A closed card attaches nothing, so a start failure
+ * still surfaces as an unhandled rejection, as it does without diagnostics.
+ */
 export function watchStart(ready: Promise<void>, failureKind: (failure: unknown) => string): void {
+  const record = diagnostic();
+  if (!record) return;
   ready.then(
     () => {
-      const record = diagnostic();
-      if (!record) return;
       record.settled = true;
       mark('ready');
       record.report('ready');
     },
     (error: unknown) => {
-      const record = diagnostic();
-      if (!record) return;
       record.settled = true;
       record.failure = failureKind(error);
       mark('failed');
