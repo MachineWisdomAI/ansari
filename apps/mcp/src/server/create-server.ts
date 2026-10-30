@@ -44,7 +44,7 @@ export function createAnsariMcpServer(options:CreateMcpServerOptions):McpServer{
     view:options.view,
     failures:{absent:TOOL_UNAVAILABLE_TEXT,unavailable:TOOL_UNAVAILABLE_TEXT,invalidOutput:TOOL_UNAVAILABLE_TEXT},
     async handle({question},request){
-      writeOperationLog({event:'source.start',method:'tools/call'},options.logger,options.release);
+      writeOperationLog({level:'info',event:'source.start',method:'tools/call'},options.logger,options.release);
       await request.reportProgress({progress:0,total:1});
       // Source records do not claim terminal MCP delivery or upstream abortion.
       let answer:string;
@@ -52,10 +52,10 @@ export function createAnsariMcpServer(options:CreateMcpServerOptions):McpServer{
         answer=await options.completer.complete({question,signal:request.signal});
       } catch (error) {
         // Record source failure without inspecting or serializing the exception.
-        writeOperationLog({event:'source.error',method:'tools/call'},options.logger,options.release);
+        writeOperationLog({level:'error',event:'source.error',method:'tools/call'},options.logger,options.release);
         throw error;
       }
-      writeOperationLog({event:'source.complete',method:'tools/call',...answerFingerprint(answer)},options.logger,options.release);
+      writeOperationLog({level:'info',event:'source.complete',method:'tools/call',...answerFingerprint(answer)},options.logger,options.release);
       return {kind:'record' as const,record:{question,answer}};
     },
     project:record=>({text:record.answer,data:{version:ANSWER_ENVELOPE_VERSION,question:record.question,answer:record.answer}}),
