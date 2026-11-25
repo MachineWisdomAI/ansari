@@ -9,7 +9,7 @@ import {chromium, type Frame, type Page} from '@playwright/test';
 import {build, preview} from 'vite';
 import {createHttpServer as createBaseHttpServer} from '../src/node/http-server.ts';
 import {stampHtmlRevision} from '../src/server/operation-log.ts';
-import {VIEW_DIAGNOSTICS_PATH, VIEW_FILENAME, prepareAnswerView} from '../src/server/view-artifact.ts';
+import {VIEW_DIAGNOSTICS_PATH, VIEW_FILENAME, VIEW_MAJOR, prepareAnswerView} from '../src/server/view-artifact.ts';
 import {parseViewReport} from '../src/server/view-report.ts';
 import {ANSWER_A, ANSWER_B, ANSWER_C, ANSWER_HOSTILE, ATTRIBUTION_CASES, QUESTION_A, QUESTION_B} from './react-answers.ts';
 
@@ -73,11 +73,13 @@ async function main() {
   await client.connect(transport);
 
   // ---- The served resource: exact bytes, identity, resource rules ---------------------------------
-  const viewUri = 'ui://views/answer-card.v1.html';
+  // The one address the server lists, read back: it must name the card's compatibility line, never its bytes.
+  const listed = (await client.listResources()).resources.map(entry => entry.uri);
+  const viewUri = listed[0];
   const resource = await client.readResource({uri: viewUri});
   const bytes = String((resource.contents[0] as {text: string}).text);
   check('resource:exact-served-bytes', () => assert.equal(bytes, stampHtmlRevision(html)));
-  check('resource:uri-names-the-compatibility-line', () => assert.equal(viewUri, `ui://views/${VIEW_FILENAME.replace(/\.html$/, '')}.v1.html`));
+  check('resource:uri-names-the-compatibility-line', () => assert.deepEqual(listed, [`ui://views/${VIEW_FILENAME.replace(/\.html$/, '')}.v${VIEW_MAJOR}.html`]));
   const meta = (resource.contents[0] as any)._meta;
   check('resource:closed-csp-no-origins', () => assert.deepEqual(meta.ui.csp, {connectDomains: [], resourceDomains: [], frameDomains: [], baseUriDomains: []}));
   const callTool = (question: string) => client.callTool({name: 'answer_islamic_question', arguments: {question}});
@@ -250,7 +252,7 @@ async function main() {
   check('answer-A:question-and-text-in-order', () => {
     assert.equal(shownA.question, QUESTION_A);
     assert.equal(shownA.status, '');
-    const order = ['Synthetic heading A', 'Synthetic answer A. التقوى', 'Third', 'Fourth point', 'nested one', 'nested two', 'a bullet', 'a quoted line', 'This information came from ansari.chat'];
+    const order = ['Synthetic heading A', 'Synthetic answer A. التقوى', 'Third', 'Fourth point', 'nested one', 'nested two', 'a bullet', 'a quoted line', 'This information came from askansari.ai'];
     let at = -1;
     for (const part of order) { const next = shownA.cardText.indexOf(part, at + 1); assert.ok(next > at, `${part} follows the previous part`); at = next; }
   });
@@ -319,7 +321,7 @@ async function main() {
   const attributionNoticeVisible = await first.frame.locator('.saga-card-link-status').isVisible();
   check('links:successful-attribution-is-silent', () => assert.equal(attributionNoticeVisible, false));
   const opened = await page.evaluate(id => (window as any).hostProbe.state(id).openLinks, first.id);
-  check('links:attribution-link-reaches-host-only-through-openLink', () => assert.deepEqual(opened, ['https://ansari.chat/']));
+  check('links:attribution-link-reaches-host-only-through-openLink', () => assert.deepEqual(opened, ['https://askansari.ai/']));
 
   await first.frame.getByRole('button', {name: 'saga a2ui', exact: true}).click();
   await page.waitForFunction(id => (window as any).hostProbe.state(id).openLinks.length === 2, first.id);
@@ -328,7 +330,7 @@ async function main() {
   check('links:successful-credit-is-silent', () => assert.equal(creditNotice, ''));
   const creditOpened = await page.evaluate(id => (window as any).hostProbe.state(id).openLinks, first.id);
   check('links:saga-credit-follows-unchanged-answer-and-uses-host', () => {
-    assert.deepEqual(creditOpened, ['https://ansari.chat/', 'https://github.com/MachineWisdomAI/saga-a2ui']);
+    assert.deepEqual(creditOpened, ['https://askansari.ai/', 'https://github.com/MachineWisdomAI/saga-a2ui']);
     assert.ok(!shownA.cardText.includes('Built with'));
   });
 
@@ -336,7 +338,7 @@ async function main() {
   const unavailable = await openView(375, 900, bytes, false);
   await deliver(unavailable.id, resultA);
   for (const [button, status, destination] of [
-    ['.saga-card-link', '.saga-card-link-status', 'https://ansari.chat/'],
+    ['.saga-card-link', '.saga-card-link-status', 'https://askansari.ai/'],
     ['.saga-credit button', '.saga-credit [role="status"]', 'https://github.com/MachineWisdomAI/saga-a2ui'],
   ] as const) {
     await unavailable.frame.locator(button).click();
@@ -768,7 +770,7 @@ async function main() {
     .replace(/(<script[^>]*id="saga-content-policy"[^>]*>)[\s\S]*?(<\/script>)/, (_m, a, b) => `${a}${JSON.stringify(imagePolicy.policy.configuration).replaceAll('<', '\\u003c')}${b}`);
   assert.notEqual(imageBytes, bytes, 'the image-policy fixture replaces the embedded policy and its restrictions');
   const consent = await openView(760, 900, imageBytes);
-  const imageAnswer = {content: [{type: 'text', text: 'ignored'}], structuredContent: {version: '0.1.0', question: 'Q image', answer: 'Image answer.\n\n![synthetic](https://images.example/a.png)\n\nThis information came from ansari.chat.'}};
+  const imageAnswer = {content: [{type: 'text', text: 'ignored'}], structuredContent: {version: '0.1.0', question: 'Q image', answer: 'Image answer.\n\n![synthetic](https://images.example/a.png)\n\nThis information came from askansari.ai.'}};
   await deliver(consent.id, imageAnswer);
   const toggle = consent.frame.locator('.saga-card-controls button').filter({hasText: /images$/});
   await toggle.filter({hasText: 'Show images'}).waitFor();
@@ -847,6 +849,7 @@ async function main() {
   const bundle = /(<script type="module"[^>]*>)[\s\S]*?(<\/script>)/;
   assert.ok(bundle.test(diagnosticBytes), 'the card has one inline module bundle');
   const brokenBundle = diagnosticBytes.replace(bundle, '$1export const broken = ;$2');
+  const errorsBeforeBroken = errors.length;
   const broken = await openStartFailure(brokenBundle, true);
   await waitForReports(1);
   const brokenReport = parseViewReport(beacons.splice(0)[0] ?? '');
@@ -857,7 +860,8 @@ async function main() {
     assert.ok(brokenReport?.errors.some(e => e.type === 'error' && e.name === 'SyntaxError'), JSON.stringify(brokenReport?.errors));
   });
   await page.evaluate(id => document.getElementById(id)?.remove(), broken.id);
-  errors.splice(0, errors.length, ...errors.filter(e => !/SyntaxError|Unexpected token/.test(e)));
+  // Clear only the SyntaxError this case caused on purpose; anything an earlier case logged still fails the run.
+  errors.splice(errorsBeforeBroken, errors.length - errorsBeforeBroken, ...errors.slice(errorsBeforeBroken).filter(e => !/SyntaxError|Unexpected token/.test(e)));
 
   const states = await page.evaluate(() => Array.from(document.querySelectorAll('iframe')).map(f => (window as any).hostProbe.state(f.id)));
   check('host:no-view-initiated-tool-calls-and-no-host-errors', () => {

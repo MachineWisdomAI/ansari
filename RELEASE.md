@@ -39,26 +39,37 @@ migration runbook were both proven in real releases on 2026-08-02.
 > | frontend (web) | `apps/frontend/Dockerfile.web` |
 > | auth | `apps/auth/Dockerfile` |
 > | whatsapp | `legacy/whatsapp/Dockerfile` |
+> | mcp | `apps/mcp/Dockerfile` |
+> | whatsapp-ts | `apps/whatsapp/Dockerfile` |
 >
-> **Watch paths** — set these per service, or Railway rebuilds *both* on every push
+> **Watch paths** — set these per service, or Railway rebuilds *every* service on every push
 > (any commit touches the root lockfile):
 >
 > ```
 > backend:   apps/api/**       packages/**  package.json  pnpm-lock.yaml  pnpm-workspace.yaml
 > frontend:  apps/frontend/**  packages/**  package.json  pnpm-lock.yaml  pnpm-workspace.yaml
 > auth:      apps/auth/**      packages/**  package.json  pnpm-lock.yaml  pnpm-workspace.yaml
-> whatsapp:  legacy/whatsapp/**
+> whatsapp:  legacy/whatsapp/**  .dockerignore
+> whatsapp-ts: apps/whatsapp/** packages/** package.json pnpm-lock.yaml pnpm-workspace.yaml .dockerignore
+> mcp:       apps/mcp/**       packages/**  package.json  pnpm-lock.yaml  pnpm-workspace.yaml  .dockerignore
 > ```
 >
 > For backend, frontend and auth, `packages/**` is **not optional**. The shared config packages are copied into those
 > images, so a packages-only change alters the built artifact. Omit the pattern and
 > that change ships nothing — no rebuild, no deploy, and no error. The image simply
-> drifts from the repo. **whatsapp is the exception:** it is a Python service outside the pnpm workspace, so its image contains nothing from
+> drifts from the repo. **mcp watches it defensively:** its build stage copies `packages/` and installs from it, but
+> its only workspace dependency is a devDependency (`@ansari/eslint-config`) and its final image is `dist` plus
+> `package.json`, so today a packages-only change does not alter the shipped image. The pattern stays so that a future
+> runtime dependency cannot ship silently. **whatsapp is the exception:** it is a Python service outside the pnpm workspace, so its image contains nothing from
 > `packages/`, the root lockfile or `package.json`; watching them would only rebuild it for changes it does not ship.
+> **whatsapp-ts** (`apps/whatsapp`, the TypeScript port, #358) sits inside the pnpm workspace and copies `packages/`, so it watches
+> the same shared paths as backend. Its record is named `whatsapp-ts` only until cutover, when it takes the `whatsapp` dashboard service.
+> **This dashboard service has not been created yet.** The Dockerfile exposes port 3200; the service variable `PORT=3200` must be set when it is created.
+> whatsapp and mcp add `.dockerignore`: their images build from the repo root, so that file decides what the build can see.
 >
 > **Deploy settings** — backend healthcheck `/api/health` (timeout 300s), frontend
-> healthcheck `/`, whatsapp healthcheck `/`, auth healthcheck `/health` (200 only when the auth database
-> answers; timeout 300s); restart ON_FAILURE, max 3 retries.
+> healthcheck `/`, whatsapp healthcheck `/`, whatsapp-ts healthcheck `/` (timeout 300s), auth healthcheck `/health` (200 only when the auth database
+> answers; timeout 300s), mcp healthcheck `/health` (timeout 300s); restart ON_FAILURE, max 3 retries.
 >
 >
 > **whatsapp service (spec 321, interim Python import; lives in `legacy/` because `apps/*` is reserved for the
@@ -66,13 +77,34 @@ migration runbook were both proven in real releases on 2026-08-02.
 > Build: repo-root context, `legacy/whatsapp/Dockerfile`. Health check `/`. The Meta callback URL is
 > `https://<domain>/whatsapp/v2`, one Meta app per environment. Environment surface (full list in
 > `legacy/whatsapp/.env.example`):
-> `DEPLOYMENT_TYPE` (required, `staging` or `production`), `BACKEND_SERVER_URL` (apps/api),
+> `ENVIRONMENT` (required: `development`, `staging` or `production`; the same name apps/api and apps/auth use), `BACKEND_SERVER_URL` (apps/api),
 > `AUTH_SERVER_URL` and `AUTH_WHATSAPP_API_KEY` (apps/auth, issue #329),
 > `META_BUSINESS_PHONE_NUMBER_ID`, `META_ACCESS_TOKEN_FROM_SYS_USER`, `META_ANSARI_APP_SECRET` and
 > `META_WEBHOOK_VERIFY_TOKEN` (all four of the same Meta app, all required),
 > `SENTRY_DSN`, `WA_MAINTENANCE_MODE`, `WHATSAPP_CHAT_RETENTION_HOURS`, `LOGGING_LEVEL` (unset = `INFO`).
+> **Prefix routing (issue #363):** one WhatsApp number can feed production, staging and a developer's machine. A message with no prefix is production's, `!s ` is staging's and `!d ` is development's; each environment ignores the others' and drops its own prefix before asking apps/api. On staging, testers must start every message with `!s `.
+> **Order of the Meta steps:** subscribe the production WhatsApp account to the staging (or development) app only once the prefix code is running there. In the other order, staging answers every real user's plain message on the production number, and users get two answers.
+> **`ENVIRONMENT=production` on the production service:** Sentry events are tagged `production` with 0.2 sample rates, and `/sentry-debug` is not mounted.
+>
 > The service refuses to start if a secret above is missing, or if any `MOCK_*` switch is set outside
-> `DEPLOYMENT_TYPE=local`.
+> `ENVIRONMENT=development`.
+>
+> **mcp service (issue #364; staging only for now)** — one listener on `PORT` (3000): set `PORT=3000` as a
+> service variable so Railway does not assign its own, and make the public domain's target port match. Build: repo-root context, `apps/mcp/Dockerfile`, which copies `package.json`, the lockfile,
+> the workspace file and `packages/` and runs the root `mcp` script. Health check `/health`. Hosts connect at
+> `https://<domain>/mcp`. Its settings are recorded in `apps/mcp/railway.toml`. Environment, for staging
+> (`mcp-staging.askansari.ai`; full list in `apps/mcp/README.md`):
+>
+> | Variable | Value |
+> |---|---|
+> | `MCP_ALLOWED_HOSTS` | `mcp-staging.askansari.ai` (the server refuses any other Host on `/mcp`) |
+> | `ANSARI_API_BASE_URL` | `https://api-staging.askansari.ai` (the default is production) |
+> | `ANSARI_CLIENT` | `ansari-mcp-staging` |
+> | `ANSARI_API_AUTHORIZATION` | `Bearer ansari_mcp_staging_<64 letters>`: the staging key, made in the staging auth shell with `--client-id ansari-mcp-staging` and set **before** apps/api staging deploys #314 (`docs/cutover/service-keys-runbook.md`) |
+> | `ANSARI_RELEASE` | `${{RAILWAY_GIT_COMMIT_SHA}}`, a Railway reference variable: the commit is mapped here, in the dashboard, because the code reads no `RAILWAY_*` variable (#377). Unset, the release is the application version |
+>
+> `MCP_ALLOWED_ORIGINS` is left unset at first: it defaults to the allowed hosts, and requests without an Origin
+> pass. The Cloudflare Workers path (`apps/mcp/wrangler.jsonc`) is not this deployment.
 >
 > **auth service (spec 300)** — one listener: the public domain
 > (`auth.askansari.ai`, `auth-staging.askansari.ai`) targets `PORT` (3100); set it as
@@ -80,7 +112,8 @@ migration runbook were both proven in real releases on 2026-08-02.
 > client: no private-network hop, no shared secret (spec amendment H-1).
 > It has its OWN Railway Postgres, the auth database, with snapshots or PITR
 > enabled before its first real row, on Postgres 18 (C-4: the owner's service; in staging it
-> already exists, empty; in production it is created or found, and checked empty in window step 1).
+> already exists, empty; in production its schema is already applied, and window step 1 checks it
+> holds no users and no accounts).
 > Its image is the service only: no Postgres client
 > and no migration SQL. The cutover runs from the owner's machine over the Tailscale route
 > (spec amendment H-8; the runbook's "operator environment"). The two operator scripts run from
@@ -88,12 +121,47 @@ migration runbook were both proven in real releases on 2026-08-02.
 > `… scripts/ban-user.ts …`), or in the image from `/repo/apps/auth` with
 > `./node_modules/.bin/tsx scripts/…` (tsx directly: the image has no pnpm for its non-root user).
 >
+> **`ENVIRONMENT` on `backend` and auth (#314 Amendment 3)** — the deployment label, also each
+> service's Sentry environment and the environment in every service key's prefix. It has **no
+> default in any process** (owner, 2026-11-12): every deployed service, every operator shell that
+> runs an apps/auth script, and local dev (`development`) set it. Under `NODE_ENV=production` both
+> services refuse to boot without it, or with `development`:
+>
+> | Service | staging | production |
+> |---|---|---|
+> | `backend` (apps/api) | `ENVIRONMENT=staging` | `ENVIRONMENT=production` |
+> | auth (apps/auth) | `ENVIRONMENT=staging` | `ENVIRONMENT=production` |
+>
+> **Deploy order:** set `ENVIRONMENT` on `backend` and auth, in staging and in production,
+> **before** the deploy that carries #314. A deploy without it fails its healthcheck and Railway
+> keeps the previous deployment.
+>
 > **frontend (web) build variables** — `Dockerfile.web` bakes `EXPO_PUBLIC_API_URL`
-> and `EXPO_PUBLIC_AUTH_URL` into the bundle at build time, so both are set on the
-> Railway service and a change needs a redeploy. They name the SAME environment:
-> production `https://api.askansari.ai` + `https://auth.askansari.ai`, staging
-> `https://api-staging.askansari.ai` + `https://auth-staging.askansari.ai` (the
-> defaults when unset). The web app signs in at `EXPO_PUBLIC_AUTH_URL` (spec 300).
+> and `EXPO_PUBLIC_AUTH_URL` into the bundle at build time, so a change needs a
+> redeploy. **Both are mandatory on every web service built from
+> `apps/frontend/Dockerfile.web`**: today that is staging web only, and a production
+> `apps/frontend` service when one is created (#305). The image build fails at its guard
+> (`apps/frontend/scripts/check-web-env.mjs`, #317) when either is unset or empty,
+> naming the variable. They name the SAME environment: production
+> `https://api.askansari.ai` + `https://auth.askansari.ai`, staging
+> `https://api-staging.askansari.ai` + `https://auth-staging.askansari.ai`; a pair
+> with one production host and not the other fails the build, showing both values.
+> **Production web stays on `legacy/frontend-web` for now (#416):** it builds from its
+> own `legacy/frontend-web/Dockerfile`, takes `EXPO_PUBLIC_API_V2_URL`, and has no such
+> guard; neither variable above is needed on it. It also takes `MAINTENANCE_MODE` (PR #418): on
+> for `true`, `True` or `1`, anything else or unset is off. When on, every route shows the
+> maintenance screen and makes no api request. It is baked in at build time, so a change rebuilds
+> and redeploys the service and takes effect only when that deployment is live; a tab that
+> already loaded the app keeps its build until reloaded (`legacy/frontend-web/README.md`). Set it
+> as a **service variable** of the legacy web service, never a shared variable: `backend`'s
+> `MAINTENANCE_MODE` is a different switch, turned off at a different time. **The Railway
+> variable is `MAINTENANCE_MODE`, and the value is `true` with no quotes.** An
+> `EXPO_PUBLIC_MAINTENANCE_MODE` set on the service has no effect: only the `MAINTENANCE_MODE`
+> build argument reaches the build, and the Dockerfile's `ENV` line sets the `EXPO_PUBLIC_` name
+> from it (`legacy/frontend-web/Dockerfile:18,30`). A quoted `"true"` is not an on-value.
+> The app's staging defaults (`DEFAULT_API_URL`, `DEFAULT_AUTH_URL`) serve local
+> `expo start`/`expo export` only, never an image. The `apps/frontend` web app signs in at
+> `EXPO_PUBLIC_AUTH_URL` (spec 300).
 >
 > **`apps/*/railway.toml` are not read by Railway here.** This project configures
 > deployment through the dashboard with a Dockerfile path (confirmed by the operator,
@@ -108,6 +176,18 @@ migration runbook were both proven in real releases on 2026-08-02.
   root directory = repo root, dockerfile build from `apps/api/Dockerfile`,
   healthcheck `/api/health` with a 300s timeout, restart `ON_FAILURE` up to 3 times.
   `apps/api/railway.toml` records those same values in git.
+  > **Superseded 2026-11-21 (marker; the full reconciliation is pending):** `backend` did **not**
+  > auto-deploy on the 2026-11-21 push to `main`; the owner deployed it by hand. The cause is
+  > open. See [`docs/cutover/release-record.md`](docs/cutover/release-record.md), "the production
+  > window, as run".
+  The production `auth` service deploys from `develop` today (owner's statement, 2026-11-21),
+  and from `main` after the cutover window's step 16 switches it.
+  > **Superseded 2026-11-21 (marker; the full reconciliation is pending):** as of 2026-11-21,
+  > production `auth`, `mcp` and `whatsapp` deploy from `main`: the owner's statement for `auth`;
+  > for `mcp` and `whatsapp` inferred from their deployments of the promoted commit at 11:22:47Z,
+  > not confirmed. When the sources changed is not established. See
+  > [`docs/cutover/release-record.md`](docs/cutover/release-record.md), "the production window,
+  > as run".
 - **Promotion is a fast-forward, nothing else.** `main` is moved to `develop`'s
   tip with `--ff-only` — no merge commits, no cherry-picks, so `main` is always
   an exact prefix of `develop`'s history.
@@ -132,6 +212,14 @@ migration runbook were both proven in real releases on 2026-08-02.
    force-push `main`.
 
 5. **Watch the Railway auto-deploy** until the new deployment is live.
+   > **Superseded 2026-11-21 (marker; the full reconciliation is pending):** after the
+   > fast-forward push to `main` on 2026-11-21, Railway posted no status for any service for
+   > about five minutes, and `backend` got no deployment at all until it was deployed by hand from
+   > the dashboard; what started the other services' deployments at 11:22:47Z is not established.
+   > After a push to `main`, if Railway posts nothing for `backend` within a minute, deploy it
+   > manually at the pushed commit and check the deployed commit. See
+   > [`docs/cutover/release-record.md`](docs/cutover/release-record.md), "the production window,
+   > as run".
    `/api/health` is a real deploy gate: it returns 200 only when the database
    answers `SELECT 1` (within 2s) and 503 otherwise, so a deploy with a broken
    `DATABASE_URL` fails its healthcheck instead of going live broken.
@@ -385,7 +473,9 @@ channel also names the EAS environment and the GitHub Environment.
   matches the commit it was published from. After any native change (a
   dependency with native code, a config plugin, `app.json` native fields), ship
   a new build first; an update alone reaches no one. The fingerprint contract
-  is tracked in #267.
+  is tracked in #267. An Expo SDK upgrade is always such a change: SDK 57 → 58
+  changed both the iOS and the Android fingerprint (#428), so an update built
+  on the new SDK never reaches a binary built on the old one.
 - **Concurrent dispatches queue, they never cancel** (`queue: max`, so every
   pending run is kept). **Build** serializes the *dispatch* per
   profile/platform pair, not the EAS build. The dispatcher does not wait, so

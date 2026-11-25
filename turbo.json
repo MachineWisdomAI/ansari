@@ -78,7 +78,7 @@
   //      (apps/auth's env; apps/auth reads nothing else).
   //   2. STATIC reads:  grep -rn "process\.env\.[A-Z]" apps packages
   //      (DATABASE_URL in both drizzle configs, NEXT_RUNTIME, NODE_ENV,
-  //       RAILWAY_ENVIRONMENT, SENTRY_DSN, VITEST)
+  //       ENVIRONMENT in sentry.server.config.ts, SENTRY_DSN, VITEST)
   //   3. DYNAMIC reads: grep -rn "process\.env\[" apps  — then follow each
   //      call site to the string literals passed in. A static `process.env.X`
   //      pattern CANNOT see `process.env[name]`, and the failure is silent: the
@@ -138,6 +138,22 @@
     // since spec 300 (packages/auth env). Neither schema has an admin list any
     // more (owner amendment 2026-10-17).
     "LEADERBOARD_API_KEY",
+    // /v2/mcp-complete key rollout mode (#314), in apps/api's Zod schema:
+    // `log-only` (verify, record, serve anyway) or `enforce`; absent = enforce,
+    // the fail-closed default. Undeclared, a staging log-only override would be
+    // invisible to tasks and absent from the cache key. Follow-up: remove the
+    // variable and the log-only branch one week after enforcement; the issue
+    // is opened at enforce (rollout step 6).
+    "MCP_COMPLETE_KEY_MODE",
+    // Thread history limits (#400), in apps/api's Zod schema. Undeclared, an
+    // override would be invisible to tasks and the defaults would apply.
+    "THREAD_HISTORY_WARN_TOKENS",
+    "THREAD_HISTORY_BLOCK_TOKENS",
+    // #314 Amendment 3: the deployment label (development, staging,
+    // production) in apps/api and apps/auth's Zod schemas, the Sentry
+    // environment of both, and the service-key prefix's environment. Required
+    // under NODE_ENV=production; read at runtime only, never at build.
+    "ENVIRONMENT",
     "MAINTENANCE_MODE",
     "IOS_MINIMUM_BUILD_VERSION",
     "IOS_LATEST_BUILD_VERSION",
@@ -147,7 +163,6 @@
     "FRONTEND_URL",
     "MARKETMAKER_URL",
     "NEXT_RUNTIME",
-    "RAILWAY_ENVIRONMENT",
     "RESEND_API_KEY",
     "SENTRY_DSN",
     // Build-time only, consumed by withSentryConfig (not by our source) for
@@ -161,6 +176,32 @@
     "FACILITATOR_SYNTHESIS_RESERVE_MS",
     "EXPO_PUBLIC_*",
     "EXPO_NO_TELEMETRY",
+    // apps/whatsapp (issue #358): every variable its Zod schema (src/config.ts)
+    // reads. It reads nothing else except GITHUB_ACTIONS, which only src/index.ts
+    // (the running service, never a task) looks at. Undeclared, CI's
+    // `grep -v '^#' apps/whatsapp/.env.ci >> $GITHUB_ENV` would be invisible to
+    // its tasks AND absent from the cache key. SENTRY_DSN and PORT are above.
+    // tests/envTemplates.test.ts fails if a key is added to the schema and not
+    // to .env.example; add it here too (derivation step 1 above).
+    "BACKEND_SERVER_URL",
+    "AUTH_SERVER_URL",
+    "AUTH_WHATSAPP_API_KEY",
+    "META_API_VERSION",
+    "META_BUSINESS_PHONE_NUMBER_ID",
+    "META_ACCESS_TOKEN_FROM_SYS_USER",
+    "META_WEBHOOK_VERIFY_TOKEN",
+    "META_ANSARI_APP_SECRET",
+    "META_REPLY_BY_PHONE",
+    "ALWAYS_RETURN_OK_TO_META",
+    "ORIGINS",
+    "WA_MAINTENANCE_MODE",
+    "WHATSAPP_CHAT_RETENTION_HOURS",
+    "WHATSAPP_MESSAGE_AGE_THRESHOLD_SECONDS",
+    "LOGGING_LEVEL",
+    "MOCK_ANSARI_CLIENT",
+    "MOCK_AUTH_CLIENT",
+    "MOCK_AUTH_TOKEN",
+    "MOCK_META_API",
     "PORT"
   ],
 

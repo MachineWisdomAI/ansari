@@ -27,8 +27,8 @@ class WhatsAppSettings(BaseSettings):
     5. Variables from the secrets directory.
     6. Default field values in the WhatsAppSettings model.
 
-    E.g., if you set the variable `META_API_VERSION` in .env file to `v22.xyz`,
-    it will override the default value of `v22.0` defined in the WhatsAppSettings model.
+    E.g., if you set the variable `META_API_VERSION` in .env file to `v26.xyz`,
+    it will override the default value of `v26.0` defined in the WhatsAppSettings model.
 
     For more details, refer to the Pydantic documentation:
     [https://docs.pydantic.dev/latest/concepts/pydantic_settings/#field-value-priority].
@@ -52,7 +52,7 @@ class WhatsAppSettings(BaseSettings):
 
     ########### Meta Business API settings ###########
 
-    META_API_VERSION: str = "v22.0"
+    META_API_VERSION: str = "v26.0"
     META_BUSINESS_PHONE_NUMBER_ID: SecretStr
     META_ACCESS_TOKEN_FROM_SYS_USER: SecretStr
     META_WEBHOOK_VERIFY_TOKEN: SecretStr
@@ -61,6 +61,9 @@ class WhatsAppSettings(BaseSettings):
     # NOTE: We add a default value here, since we never set this in staging/production/etc. environments
     #   I.e., this token is only used for local development with zrok (check .env.example for more details)
     META_WEBHOOK_ZROK_SHARE_TOKEN: SecretStr = SecretStr("your_token")
+    # Reply to the sender's phone number instead of their BSUID. Only for Meta's free test number, whose allowed-recipient
+    # list holds phone numbers, so it cannot message a BSUID (error 131030). A real number accepts BSUID replies.
+    META_REPLY_BY_PHONE: bool = False
 
     @property
     def META_API_URL(self) -> str:
@@ -73,10 +76,10 @@ class WhatsAppSettings(BaseSettings):
 
     ########### ansari-whatsapp's settings ##########
 
-    DEPLOYMENT_TYPE: str = Field(
+    ENVIRONMENT: str = Field(
         ...,
-        description="Deployment environment type",
-        pattern="^(local|development|staging|production)$",
+        description="Where this instance runs, as in apps/api and apps/auth",
+        pattern="^(development|staging|production)$",
     )
 
     # Meta webhook response behavior
@@ -94,7 +97,7 @@ class WhatsAppSettings(BaseSettings):
     WHATSAPP_MESSAGE_AGE_THRESHOLD_SECONDS: int = 86400  # 1 day
 
     # Logging settings
-    LOGGING_LEVEL: str = ""  # Empty means DEBUG when DEPLOYMENT_TYPE=local, otherwise INFO
+    LOGGING_LEVEL: str = ""  # Empty means DEBUG when ENVIRONMENT=development, otherwise INFO
     LOG_TEST_FILES_ONLY: bool = False
 
     # Service Provider settings
@@ -108,21 +111,28 @@ class WhatsAppSettings(BaseSettings):
     ########### Validators ###########
 
     @model_validator(mode="after")
-    def refuse_mocks_outside_local(self):
-        """Mocks answer with canned data (and MOCK_AUTH_TOKEN puts every user in one account), so only local may use them."""
-        if self.DEPLOYMENT_TYPE == "local":
+    def refuse_mocks_outside_development(self):
+        """Mocks answer with canned data (and MOCK_AUTH_TOKEN puts every user in one account): development only."""
+        if self.ENVIRONMENT == "development":
             return self
         enabled = [name for name in MOCK_FLAGS if getattr(self, name)]
         if self.MOCK_AUTH_TOKEN and self.MOCK_AUTH_TOKEN.get_secret_value():
             enabled.append("MOCK_AUTH_TOKEN")
         if enabled:
-            raise ValueError(f"{', '.join(enabled)} only allowed when DEPLOYMENT_TYPE=local (got {self.DEPLOYMENT_TYPE})")
+            raise ValueError(f"{', '.join(enabled)} only allowed when ENVIRONMENT=development (got {self.ENVIRONMENT})")
+        return self
+
+    @model_validator(mode="after")
+    def refuse_phone_replies_in_production(self):
+        """Production answers on a real number, which takes BSUIDs, so no phone number should be read there."""
+        if self.META_REPLY_BY_PHONE and self.ENVIRONMENT == "production":
+            raise ValueError("META_REPLY_BY_PHONE is not allowed when ENVIRONMENT=production")
         return self
 
     @model_validator(mode="after")
     def default_logging_level(self):
         if not self.LOGGING_LEVEL:
-            self.LOGGING_LEVEL = "DEBUG" if self.DEPLOYMENT_TYPE == "local" else "INFO"
+            self.LOGGING_LEVEL = "DEBUG" if self.ENVIRONMENT == "development" else "INFO"
         return self
 
     @field_validator("ORIGINS", mode="before")
@@ -143,7 +153,7 @@ class WhatsAppSettings(BaseSettings):
         """Add extra origins based on environment settings.
 
         Adds:
-        1. In local mode: adds localhost and zrok origins
+        1. In development: adds localhost and zrok origins
         2. In all environments: adds GitHub Actions testserver origin and WhatsApp Web
         """
         origins = v.copy()
@@ -153,8 +163,8 @@ class WhatsAppSettings(BaseSettings):
         if backend_url and backend_url not in origins:
             origins.append(backend_url)
 
-        # Add local-specific origins when in local mode
-        if info.data.get("DEPLOYMENT_TYPE") == "local":
+        # Add development-specific origins
+        if info.data.get("ENVIRONMENT") == "development":
             # Add zrok origin (i.e., the webhook (callback url)) that Meta will send messages to)
             zrok_token = info.data.get("META_WEBHOOK_ZROK_SHARE_TOKEN")
             token_value = zrok_token.get_secret_value()

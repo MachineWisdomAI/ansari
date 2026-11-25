@@ -8,23 +8,33 @@ A standalone MCP application. `answer_islamic_question` calls the Ansari API and
 
 ## Screenshots
 
+### Web, on SAGA 1.0.1
+
+New conversations in Claude web and ChatGPT web on November 5, 2026. The card was served by the Dev deployment of this application on SAGA `1.0.1` (release `68dba3e8ce291be7c3c4c35d995fe9a7c8a1e84b`), at its stable address `ui://views/answer-card.v1.html`. Each host shows the card and then its own text reply with Ansari's attribution.
+
+![Answer card in Claude web on SAGA 1.0.1, with the complete answer, floral branding, attribution and SAGA credit](docs/screenshots/claude-web-saga-1.0.jpg)
+
+![Answer card in ChatGPT web on SAGA 1.0.1, with the complete answer, floral branding, attribution and SAGA credit](docs/screenshots/chatgpt-web-saga-1.0.jpg)
+
+### Earlier baseline
+
 English and Arabic answer cards rendered in ChatGPT desktop web through the Dev connection on October 23, 2026. Both rendered on first load with application revision `ee7ea4a78933544c4a96577d7ffd7276df8ae037` and public npm SAGA SDK `0.7.6-rc.1`. Arabic headings, paragraphs and lists use RTL layout and the embedded Kitab fonts. The application owner also supplied the ChatGPT and Claude mobile captures below. These captures retain their original revision identity. The application owner accepts the existing ChatGPT, Claude and earlier Alexa baseline; the [consolidated host and release evidence](https://github.com/MachineWisdomAI/saga-a2ui/pull/321) records each observation and its limits. Earlier Alexa evidence is not presented as a fresh stable-version run, and the 239 successful RC HTTP requests measure transport activity rather than rendered answers.
 
-### English
+#### English
 
 ![English answer card in ChatGPT Dev, showing the complete answer, floral branding, attribution and SAGA credit](docs/screenshots/chatgpt-dev-english.jpg)
 
-### Arabic
+#### Arabic
 
 ![Arabic answer card in ChatGPT Dev, showing RTL text, numbered floral markers and attribution](docs/screenshots/chatgpt-dev-arabic.jpg)
 
-### ChatGPT mobile
+#### ChatGPT mobile
 
 User-provided capture of the Dev answer card in ChatGPT, showing English text and floral branding.
 
 ![Ansari MCP Dev card in ChatGPT mobile](docs/screenshots/chatgpt-dev-mobile.jpg)
 
-### Claude mobile
+#### Claude mobile
 
 User-provided capture of the Dev answer card in Claude, showing Arabic text, RTL layout and numbered floral markers.
 
@@ -36,7 +46,7 @@ SAGA is installed from the public npm registry: the stack `@saga-a2ui/react-mcp-
 `@saga-a2ui/core@1.0.0`, `@saga-a2ui/components@1.0.0`, `@saga-a2ui/mcp@1.0.2` and `@saga-a2ui/react@1.0.0`. SAGA versions its packages
 independently, so the siblings need not share the stack's version; each resolves to exactly the version the stack pins. No private registry,
 credential, SDK tarball, SDK workspace link or SDK-package override is involved, and the manifest pins an exact version rather than a tag or range.
-The root `pnpm-workspace.yaml` keeps the SDK's documented `dompurify` and `@hono/node-server` overrides.
+The root `pnpm-workspace.yaml` pins `dompurify` to 3.4.17 for `@a2ui/markdown-it` only, which otherwise pins 3.4.11 (GHSA-cg2g-xh64-v4q7, GHSA-mrv2-3pqr-j5jr).
 The card's address names its compatibility line, `ui://views/answer-card.v1.html` (`VIEW_MAJOR` in `src/server/view-artifact.ts`), not its
 bytes: every compatible release is served at the same address, and only a change an already-loaded card cannot handle increases it.
 `pnpm check:release --target beta` checks the pinned release against the registry and the lockfile, including that every SAGA package resolves to
@@ -46,15 +56,16 @@ corresponding gate before any build or deployment.
 The application depends on one SAGA package, the stack `@saga-a2ui/react-mcp-stack`, plus React and React DOM, and imports
 only its subpaths: `/faithful-card` (`FaithfulCardApp`, `startFaithfulCardApp`, and the definition's one `.result(...)` reader that reads the whole delivered result,
 `useHostLink`, `readingProfile`) and its stylesheet in the view; `/content-policy` (`createContentPolicy`, `embedContentPolicy`)
-in the build; `/server` (`registerPublicOperation`, `operationViewFromHtml`, `createServerBudgets`, `attachRequestLifetime`) in the
-MCP server. The browser bundle holds no `/server` module. The stack's exact-version siblings come from the same release,
-and its installed tree includes `@saga-a2ui/components` and `markdown-it`. SAGA owns its A2UI and Zod 3 dependency
+in the build; `/server` (`registerPublicOperation`, `operationViewFromHtml`, the `RequestLifetime` type) and `/server/http`
+(`createMcpFetchApp`) in the MCP server. The browser bundle holds no `/server` module. The stack pins each sibling to one exact
+version, which need not be its own (SAGA versions its packages independently), and its installed tree includes
+`@saga-a2ui/components` and `markdown-it`. SAGA owns its A2UI and Zod 3 dependency
 context; the application uses Zod 4 for MCP. Do not add direct `@a2ui/react` or `@a2ui/web_core` dependencies or cast between their
 schema types. The artwork owner has authorized contribution and redistribution with the application; see `assets/NOTICE.md`.
 
 ## Development
 
-Requires Node 22.18 or later and pnpm 10.33. Install once from the repository root using its authoritative lockfile. Run the app explicitly; root build, test, typecheck and coverage retain their existing scope, while root lint includes this application.
+Requires Node 22.18 or later and pnpm 10.33. Install once from the repository root using its authoritative lockfile. Root build, test, typecheck and coverage retain their existing scope; root lint and root `pnpm dev` include this application.
 
 ```sh
 pnpm install --frozen-lockfile --strict-peer-dependencies --filter ansari-mcp...
@@ -67,7 +78,26 @@ pnpm mcp test:browser
 pnpm mcp start
 ```
 
-`build` writes `dist/view.html` and a bundled `dist/server/index.js`. No API/auth/frontend build or SDK source checkout is needed. `dev` runs the Node entry source (`src/node/index.ts`) after `build`. The synthetic browser harness is test-only and uses no credentials or live answers.
+`build` writes `dist/view.html` and a bundled `dist/server/index.js`. No API/auth/frontend build or SDK source checkout is needed. `dev` runs the Node entry source through `scripts/dev.ts` (see below) and needs `dist/view.html`: under turbo (`pnpm dev`, `pnpm dev:mcp`) the cached `build` task runs first (it shows as its own task, `ansari-mcp#build`); run directly, `pnpm mcp build` first. The synthetic browser harness is test-only and uses no credentials or live answers.
+
+### Local development
+
+The root `pnpm dev` starts this server beside apps/api, apps/auth and the frontend (`pnpm dev:mcp` starts it alone). `scripts/dev.ts` loads `apps/mcp/.env` when it exists (git-ignored), then fills only what is still unset: `PORT` 3001 (apps/api has 3000) and `ANSARI_API_BASE_URL` `http://localhost:3000`. `.env.example` sets `PORT=3000` for the Railway service, so if you copied it to `.env`, set `PORT=3001` there or drop the line; the dev server warns when `PORT` is 3000. Hosts connect at `http://localhost:3001/mcp`.
+
+A local apps/api enforces the `ansari-mcp` key like a deployed one (#314). Either issue a local key and put the whole header in `apps/mcp/.env`:
+
+```sh
+# from apps/auth/, against the local auth database (ENVIRONMENT=development): show, then confirm
+pnpm exec tsx scripts/service-keys.ts create-service ansari-mcp            # once, then again with --confirm ansari-mcp
+pnpm exec tsx scripts/service-keys.ts create-key ansari-mcp --rate-max 120 --rate-window 60 --daily 5000 \
+  --name "local dev" --client-id ansari-mcp-local                          # then again with --confirm <user id>
+# apps/mcp/.env
+ANSARI_API_AUTHORIZATION=Bearer ansari_mcp_development_<64 letters>
+```
+
+or run apps/api with `MCP_COMPLETE_KEY_MODE=log-only`, which serves requests without a key and logs the verdict `missing`. Without either, every tool call fails: apps/api answers 401, and the dev server warns at start. The dev entry is for local work only; deployments run `pnpm start` (`dist/`) or the Worker entry.
+
+To try the tools by hand, `pnpm mcp inspect` opens the MCP Inspector (latest, via npx) connected to `http://localhost:3001/mcp` over Streamable HTTP; call `answer_islamic_question` from its Tools tab.
 
 `test` runs `build` and `build:worker` itself before any test, because the tests run the built artifacts: without a fresh build they pass against a stale `dist/`. `test:browser` reads `dist/view.html` without building, so run it after `test` (as `verify` and the Turbo task order do).
 
@@ -96,12 +126,12 @@ The Worker takes the variables in the table below as Wrangler `vars` or secrets,
 | --- | --- |
 | `PORT` | HTTP port (default 3000). |
 | `ANSARI_API_BASE_URL` | Ansari API origin (default `https://api.askansari.ai`). |
-| `ANSARI_API_AUTHORIZATION` | Optional upstream Authorization header. Supply through the environment; never commit it. |
+| `ANSARI_API_AUTHORIZATION` | Upstream Authorization header, sent verbatim: `Bearer ansari_mcp_<environment>_<64 letters>`, the word `Bearer`, a space, then this deployment's `ansari-mcp` service key (its prefix names the environment it was issued in: `development`, `staging` or `production`, and only that environment's API accepts it). Required for any deployment that calls a deployed Ansari API: `/api/v2/mcp-complete` refuses a call without a valid key (401) once it enforces (#314). A local apps/api enforces too (its default); leave it unset only against a local API run with `MCP_COMPLETE_KEY_MODE=log-only`. Issued per deployment by the operator (`docs/cutover/service-keys-runbook.md`); set it with `wrangler secret put ANSARI_API_AUTHORIZATION --env <env>` on Workers or as a service variable on Railway, never commit it. |
 | `ANSARI_CLIENT` | Upstream client label (default `ansari-mcp`). |
 | `MCP_ALLOWED_HOSTS` | Comma-separated allowed HTTP Host names, without scheme. A configured list replaces local defaults; an explicitly empty list permits no Host. Only an absent variable defaults to localhost and 127.0.0.1. |
 | `MCP_ALLOWED_ORIGINS` | Comma-separated allowed browser origin hostnames. A configured list replaces defaults; an explicitly empty list permits no Origin header value. Requests without Origin remain supported. |
 | `MCP_RESPONSE_MODE` | `json` for modern MCP final-answer-only responses; otherwise SSE, which supports client-requested progress notifications. Older-host compatibility responses may use SSE. |
-| `ANSARI_RELEASE` | Optional safe release identifier, embedded in served HTML and health/log records. |
+| `ANSARI_RELEASE` | Optional safe release identifier, embedded in served HTML and health/log records. Absent or unsafe, the release is the application version. On Railway, set it in the dashboard to the reference `${{RAILWAY_GIT_COMMIT_SHA}}`; the code reads no `RAILWAY_*` variable. |
 | `MCP_VIEW_DIAGNOSTICS_ORIGIN` | Set only on a deployment being diagnosed: its own public origin, such as `https://ansari-mcp-development.up.railway.app`. The card may then connect to that one origin and reports its start-up milestones to `POST /diag/view`; this changes the card's bytes and permissions, not its address. Unset, the card, its address and its closed permissions are unchanged and the route does not exist. A value that is not a bare `https` origin (`http` only for localhost) stops startup. Implies `MCP_LOG_LEVEL=debug`. See [First-load diagnosis](#first-load-diagnosis). |
 | `MCP_LOG_LEVEL` | `info` (default) or `debug`. `debug` also writes the first-load measurement records; set it only on a deployment being measured. Any other value, or `info` together with `MCP_VIEW_DIAGNOSTICS_ORIGIN`, stops startup. |
 
@@ -201,6 +231,8 @@ Artwork is embedded as actual SVG/PNG data in application-local TypeScript modul
 
 The `MCP application` workflow runs for app, lockfile, workspace, root manifest/ignore, workflow and shared lint configuration changes on PRs and develop/main pushes. It installs the root lockfile frozen, then runs app lint, typechecking, both builds, tests and browser checks. `bash apps/mcp/scripts/verify-container.sh` performs one uncached root-context Docker build and verifies health, synthetic tool calls, full attribution, safe failure/recovery and resource identity in a container with no external network or mounted files. It removes its container and image on exit. Node 22, pnpm 10.33, Docker and Chromium system dependencies are required.
 
+The Docker image is deployed to Railway **staging** only (`mcp-staging.askansari.ai`; hosts connect at `https://<domain>/mcp`). Its settings are recorded in `apps/mcp/railway.toml` (not read by Railway: the dashboard is the live configuration) and its staging environment in `RELEASE.md`. The Workers path is not deployed.
+
 This job needs no host credentials. Deployment and actual
 ChatGPT, Claude and Alexa rendering remain separate integration checks.
 
@@ -213,3 +245,12 @@ Hono runs on Node through `@hono/node-server`; the official `@modelcontextprotoc
 ## MCP compatibility
 
 The tool retains the legacy server's `answer_islamic_question` name, detailed description and input help, and `readOnlyHint: true` / `openWorldHint: true` annotations. It accepts 1–4,000 characters, matching the Ansari API. The earlier experimental RC exposed `ask_ansari`; a deployment owner must refresh host discovery when adopting this tool name. The endpoint remains `/mcp`. Replacing the existing `mcp.ansari.chat` service and changing its DNS are separate rollout actions.
+
+### "Unable to reach" after a deploy
+
+The card is served at `ui://views/answer-card.v1.html` for every compatible release. Builds before SAGA 1.0 used a different address on every deploy, so a host connection created or last refreshed before this change still names an address the server no longer serves, and the card shows "Unable to reach" (the server answers that read with JSON-RPC `-32602`).
+
+- **ChatGPT:** in Settings → Apps (Plugins), open the app and choose **Refresh tools** once after the first deploy of this version. Later compatible deploys keep the address, so no further refresh is needed.
+- **Claude:** start a new conversation. A conversation that loaded the card before the deploy may keep the old address.
+
+A change an already-loaded card cannot handle increases `VIEW_MAJOR` and moves the address to `v2`; refresh host connections the same way after that deploy.

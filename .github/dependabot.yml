@@ -11,10 +11,16 @@ updates:
   # Note: there is no "pnpm" package-ecosystem value; pnpm is handled by "npm".
   - package-ecosystem: "npm"
     directory: "/"
-    # legacy/ holds archived snapshots of the pre-monorepo frontend (issue #150).
+    # legacy/frontend-* hold archived snapshots of the pre-monorepo frontend (issue #150).
     # They sit outside the pnpm workspace and are never built or deployed, but
     # each keeps its own npm/yarn lockfile as a reference for the track merge —
     # without this, Dependabot opens update PRs against code nothing runs.
+    #
+    # More broadly, ALL of legacy/ is the old system and is excluded from
+    # Dependabot version updates by the owner's decision of 2026-11-24; no other
+    # entry in this file covers any of it. That includes legacy/whatsapp, which
+    # is still built and deployed (spec 321) but gets no version-update PRs.
+    # Its security ALERTS are not affected by this file.
     exclude-paths:
       - "legacy/**"
     schedule:

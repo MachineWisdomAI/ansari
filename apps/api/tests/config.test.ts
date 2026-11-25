@@ -10,6 +10,7 @@ const REQUIRED_ENV: Record<string, string> = {
   DATABASE_URL: 'postgresql://user:pass@localhost:5432/db',
   KALEMAT_API_KEY: 'placeholder-key',
   USUL_API_TOKEN: 'placeholder-token',
+  ENVIRONMENT: 'development',
 };
 
 let savedEnv: NodeJS.ProcessEnv;
@@ -280,6 +281,7 @@ describe('apps/auth config', () => {
     }
     setAuthEnv();
     process.env.NODE_ENV = 'production';
+    process.env.ENVIRONMENT = 'staging'; // required in production too (#314 Amendment 3)
     resetEnvCache();
     expect(() => getEnv()).not.toThrow();
   });
@@ -299,5 +301,82 @@ describe('apps/auth config', () => {
     } catch (err) {
       expect(String(err)).not.toContain('not-a-url-but-a-value');
     }
+  });
+});
+
+// #314: how /v2/mcp-complete treats its service key during the rollout.
+// Absent means enforce (fail closed); only the two exact values parse, so a
+// typo can never quietly put the route in log-only.
+describe('MCP_COMPLETE_KEY_MODE (#314)', () => {
+  function withMode(value: string | undefined) {
+    if (value === undefined) delete process.env.MCP_COMPLETE_KEY_MODE;
+    else process.env.MCP_COMPLETE_KEY_MODE = value;
+    resetEnvCache();
+  }
+
+  it('absent → enforce', () => {
+    withMode(undefined);
+    expect(config.mcpCompleteKeyMode).toBe('enforce');
+  });
+
+  it.each(['enforce', 'log-only'] as const)('%s → %s', (mode) => {
+    withMode(mode);
+    expect(config.mcpCompleteKeyMode).toBe(mode);
+  });
+
+  it.each(['log_only', 'LOG-ONLY', 'Enforce', '', ' enforce', 'off'])('%j fails validation', (value) => {
+    withMode(value);
+    expect(() => getEnv()).toThrow(/MCP_COMPLETE_KEY_MODE/);
+    expect(() => config.mcpCompleteKeyMode).toThrow(/Environment validation failed/);
+  });
+});
+
+// Issue #400: the thread history thresholds are configuration with defaults.
+// Anything but a positive integer, or a warn threshold that is not below the
+// block threshold, fails at parse: a limit that silently never fires, or that
+// blocks before it warns, must not boot.
+describe('config.threadHistory (issue #400)', () => {
+  function withThresholds(warn: string | undefined, block: string | undefined) {
+    for (const [name, value] of [
+      ['THREAD_HISTORY_WARN_TOKENS', warn],
+      ['THREAD_HISTORY_BLOCK_TOKENS', block],
+    ] as const) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    resetEnvCache();
+  }
+
+  it('defaults to warn at 150,000 and block at 200,000', () => {
+    withThresholds(undefined, undefined);
+    expect(config.threadHistory).toEqual({ warnTokens: 150000, blockTokens: 200000 });
+  });
+
+  it('each threshold is overridable on its own', () => {
+    withThresholds('1000', undefined);
+    expect(config.threadHistory).toEqual({ warnTokens: 1000, blockTokens: 200000 });
+    withThresholds(undefined, '900000');
+    expect(config.threadHistory).toEqual({ warnTokens: 150000, blockTokens: 900000 });
+    withThresholds('300', '600');
+    expect(config.threadHistory).toEqual({ warnTokens: 300, blockTokens: 600 });
+  });
+
+  it.each([
+    ['200000', '200000'],
+    ['200001', '200000'],
+    ['150000', '100000'],
+    [undefined, '150000'],
+    ['250000', undefined],
+  ])('rejects warn %j with block %j: warn must be below block', (warn, block) => {
+    withThresholds(warn, block);
+    expect(() => getEnv()).toThrow(/THREAD_HISTORY_WARN_TOKENS must be below THREAD_HISTORY_BLOCK_TOKENS/);
+    expect(() => config.threadHistory).toThrow(/Environment validation failed/);
+  });
+
+  it.each(['0', '-5', '1500.5', 'many', '150k'])('rejects %j as a threshold', (value) => {
+    withThresholds(value, undefined);
+    expect(() => getEnv()).toThrow(/THREAD_HISTORY_WARN_TOKENS/);
+    withThresholds(undefined, value);
+    expect(() => getEnv()).toThrow(/THREAD_HISTORY_BLOCK_TOKENS/);
   });
 });
